@@ -85,7 +85,7 @@ Ověřeno živým během v září 2026:
 | **RegioJet** | JSON API (`brn-ybus-pubapi.sa.cz`) | ✅ | ✅ úseky | **ověřeno** – 28 spojů Praha→Brno za ~4 s |
 | **FlixBus** | JSON API (`global.api.flixbus.com`) | ✅ | částečně | **ověřeno** – 45 spojů Praha→Brno za ~2 s |
 | **ÖBB** | HAFAS (`fahrplan.oebb.at`) | ❌ jen jízdní řád | ✅ **všechny mezizastávky** | **ověřeno** – vrací i české vlaky |
-| **ČD** | prohlížeč (Playwright) | ✅ | částečně | **neověřeno** – selektory nesedí |
+| **ČD** | prohlížeč (Playwright) | ✅ | částečně | opraveno, plný běh neověřen |
 | **ZSSK** | prohlížeč (`predaj.zssk.sk`) | ✅ | ne | selektory ověřeny, běh neověřen |
 | **OneTicket** | prohlížeč (`oneticket.cz`) | ✅ | ne | vyžaduje viditelné okno |
 
@@ -95,19 +95,32 @@ prohlížeč. Ostatní zapnete přes `--providers`.
 ### Poznámka k ČD
 
 ČD nemají veřejné API – formulář posílá POST zpět na stejnou stránku.
-Zůstal tedy prohlížeč. Při ověřování se ukázalo, že **selektory z původního
-kódu už na webu ČD neexistují** (`.suggestion-options` se nenajde), takže
-původní scraper vracel prázdný seznam, aniž by to dal najevo. Nová verze má
-selektorů několik generací a když žádný nesedí, vyhodí srozumitelnou chybu
-místo tichého selhání.
+Zůstal tedy prohlížeč. Při ladění se našly **dvě konkrétní příčiny**, proč
+původní scraper vracel prázdný seznam:
 
-Celé vyhledávání ČD se mi z tohoto prostředí nepodařilo projet do konce, takže
-ho berte jako **neověřený** – pravděpodobně bude potřeba selektory doladit
-podle aktuálního webu. Soubor `vyhledavac/providers/cd.py` má seznamy
-selektorů pohromadě nahoře, úprava je tak otázka jednoho místa.
+1. **Formulář je na stránce třikrát** (desktop, mobil, sbalená varianta) a
+   viditelná je jen jedna kopie. Původní kód bral `.first`, což je skoro
+   vždy ta skrytá – kliknutí na ni vyprší. Nově se prochází všechny shody
+   a bere se první skutečně viditelná.
+2. **Překryvný dialog „Čekejte…“** (`#loaderModal`) odchytává kliknutí.
+   Tlačítko je viditelné i povolené, ale klik na něj nedojde. Nově se
+   čeká, až dialog zmizí, a když se stránka během kliknutí překreslí,
+   rozhoduje se podle toho, jestli dorazily výsledky – ne podle návratové
+   hodnoty kliknutí.
 
-Dobrá zpráva: české vlaky včetně kompletní trasy vrací i **ÖBB přes HAFAS**,
-takže aplikace není bez ČD slepá – chybí jen ceny ČD.
+S těmito opravami vyhledávání **doběhlo až na stránku s výsledky**
+(`/spojeni-a-jizdenka/spojeni-tam/<uuid>`). Kompletní průchod včetně
+načtení cen se ale z tohoto prostředí dotáhnout nepodařilo: ČD po několika
+dotazech z jedné IP adresy začaly vracet stránku **bez vyhledávacího
+formuláře** – hlavička a menu se vykreslí, prostřední část zůstane prázdná.
+
+Provider tenhle stav rozpozná a nahlásí ho jako dočasné omezení, ne jako
+změnu selektorů – aby se chyba nehledala v kódu, když je jinde. Z běžné
+domácí linky by ČD mělo fungovat; berte ho ale jako **neověřený**.
+
+Pro ceny českých vlaků je ostatně lepší **OneTicket** (jednotný tarif
+pokrývá ČD i další dopravce) a jízdní řád českých vlaků včetně všech
+mezizastávek vrací **ÖBB přes HAFAS** bez prohlížeče.
 
 ### ZSSK
 
@@ -185,6 +198,40 @@ vyhledavac/
    viditelnost karty a neblokuje se na uspávání záložek na pozadí.
 
 ---
+
+## Grafické rozhraní
+
+```bash
+python -m vyhledavac.gui
+```
+
+Rozhraní je postavené na jednom pravidle: **výpadek jednoho dopravce nesmí
+vypadat jako výpadek aplikace.**
+
+- **Výsledky přibývají průběžně**, jak dorazí jednotlivé zdroje – nečeká se
+  na nejpomalejšího. FlixBus dodá za 2 s, ÖBB za 3 s, prohlížečový dopravce
+  klidně za minutu, a tabulka se plní postupně.
+- **Každý zdroj má vlastní kontrolku**: čeká / hledám / hotovo (+ počet
+  spojů a čas) / nic nenašel / chyba / blokováno. Je tak vidět, čí data
+  v tabulce jsou a čí chybí.
+- **Chyby jdou do postranního panelu**, ne do modálního okna. Nic
+  nevyskakuje a nic nebrání práci s tím, co už se našlo. U každé chyby je
+  věta, se kterou se dá něco dělat („Dopravce vyhodnotil dotaz jako robota“,
+  „Chybí prohlížeč – nainstalujte…“), a tlačítko **vypnout** pro ten zdroj.
+- **Když selžou všichni**, okno zůstane ovladatelné a vysvětlí proč.
+- Zrušení hledání nechá na obrazovce to, co už dorazilo; výsledky
+  zrušeného hledání se do tabulky nikdy nedostanou.
+- Spoje bez ceny jsou zašedlé, lomené jízdenky žluté, dvojklik otevře trasu
+  se všemi zastávkami a rozpisem dílčích jízdenek.
+
+Odolnost je otestovaná – `tests/test_gui.py` ověřuje mimo jiné, že padlý
+dopravce nesebere výsledky ostatním a že okno po selhání všech zdrojů
+zůstane použitelné. Testy se přeskočí tam, kde není tkinter nebo displej;
+pod Xvfb se spustí takto:
+
+```bash
+xvfb-run -a python -m pytest tests/test_gui.py
+```
 
 ## Optimalizace podle ceny
 
@@ -296,7 +343,7 @@ pip install pytest pytest-asyncio
 python -m pytest -q
 ```
 
-77 testů. Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
+85 testů (77 bez GUI). Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
 půlnoc, `limit` aplikovaný před řazením, dva různé vlaky považované za
 jeden, nebo chybějící cena vydávaná za nekonečnou.
 

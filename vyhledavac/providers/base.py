@@ -173,7 +173,7 @@ class BrowserProvider(Provider):
             raise ProviderUnavailableError(
                 self.name,
                 "chybí Playwright – nainstalujte 'pip install playwright' "
-                "a 'playwright install firefox'",
+                "a 'playwright install chromium'",
             )
         if self._session is None:
             self._session = BrowserSession(

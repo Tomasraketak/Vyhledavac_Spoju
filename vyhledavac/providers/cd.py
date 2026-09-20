@@ -26,10 +26,11 @@ import asyncio
 import datetime as dt
 import logging
 import re
+import time
 from decimal import Decimal
 from typing import Any
 
-from ..errors import ProviderError, TransientProviderError
+from ..errors import BlockedError, ProviderError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
     DiscountCard,
@@ -48,38 +49,47 @@ log = logging.getLogger(__name__)
 
 SEARCH_URL = "https://www.cd.cz/spojeni-a-jizdenka/"
 
-# Vrstvené selektory: bereme první, který na stránce existuje.
+# Vrstvené selektory: bereme první, který na stránce existuje A JE VIDĚT.
+#
+# Pozor na past: ČD mají formulář na stránce **třikrát** (desktop, mobil,
+# sbalená varianta). Jen jedna kopie je viditelná, ostatní jsou skryté.
+# Původní kód bral ``.first``, což je skoro vždy ta skrytá – klik na ni
+# vyprší a vyhledávání tiše skončí bez výsledků. Proto všude ``:visible``.
 FROM_INPUT = [
-    ".connection-from input.select__input",
-    "input[name='From']",
-    "input[aria-label*='Odkud']",
-    "input[placeholder*='Odkud']",
-    "#connectionFrom",
+    ".connection-from input.select__input:visible",
+    "input[data-og-type='from']:visible",
+    "input[aria-label*='odkud' i]:visible",
+    "input[placeholder*='odkud' i]:visible",
 ]
 TO_INPUT = [
-    ".connection-to input.select__input",
-    "input[name='To']",
-    "input[aria-label*='Kam']",
-    "input[placeholder*='Kam']",
-    "#connectionTo",
+    ".connection-to input.select__input:visible",
+    "input[data-og-type='to']:visible",
+    "input[aria-label*='kam' i]:visible",
+    "input[placeholder*='kam' i]:visible",
 ]
+# Našeptávač je jQuery UI autocomplete (třída ui-autocomplete-input),
+# takže seznam se renderuje do ``ul.ui-autocomplete`` na konci <body>.
 SUGGESTIONS = [
+    "ul.ui-autocomplete:visible",
     ".suggestion-options:visible",
     ".select__options:visible",
     "ul[role='listbox']:visible",
-    ".autocomplete-results:visible",
 ]
 SEARCH_BUTTON = [
-    "button.search-btn",
-    "button[type='submit']:has-text('Vyhledat')",
-    "button:has-text('Vyhledat spojení')",
-    "button:has-text('Hledat')",
+    "button.search-btn:visible",
+    "button[type='submit']:has-text('Vyhledat'):visible",
+    "button:has-text('Vyhledat spojení'):visible",
+    "button:has-text('Hledat'):visible",
 ]
 CONNECTION_CARD = [
     "article.overview-connection",
     "div.connection-item",
     "[data-testid='connection']",
 ]
+# Překryvný "Čekejte..." dialog. Dokud je otevřený, odchytává kliknutí –
+# tohle je druhý důvod, proč se původní scraper nikdy nedostal k výsledkům.
+LOADER = "#loaderModal[data-open='true']"
+
 COOKIE_BUTTONS = [
     "button:has-text('Povolit všechny')",
     "button:has-text('Přijmout vše')",
@@ -102,7 +112,10 @@ class CdProvider(BrowserProvider):
         page = await session.new_page()
         try:
             await session.goto(page, SEARCH_URL)
+            # Formulář se doplňuje JavaScriptem až po načtení dokumentu.
+            await page.wait_for_timeout(int(self.options.get("settle_ms", 5000)))
             await session.accept_cookies(page, COOKIE_BUTTONS)
+            await self._assert_widget_rendered(page)
             await self._configure_passengers(page, query.lead)
             await self._fill_route(session, page, query)
             await self._submit(page)
@@ -114,23 +127,53 @@ class CdProvider(BrowserProvider):
                 pass
 
     # ---- kroky formuláře -----------------------------------------------------
-    async def _first_visible(self, page, selectors: list[str], what: str):
-        """Vrátí první existující prvek ze seznamu kandidátů."""
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).first
-                if await locator.count() and await locator.is_visible(timeout=2500):
-                    return locator
-            except Exception:
-                continue
+    async def _first_visible(self, page, selectors: list[str], what: str,
+                             timeout: float = 15.0):
+        """Vrátí první **viditelný** prvek ze seznamu kandidátů.
+
+        Dva důvody, proč to není jednořádkové:
+
+        1. Formulář je na stránce třikrát (desktop, mobil, sbalená verze) a
+           viditelná bývá až druhá nebo třetí kopie – proto se prochází
+           všechny shody, ne jen ``.first``.
+        2. Prvky se doplňují postupně, takže se čeká až do ``timeout``,
+           místo jediné kontroly hned po načtení.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            for selector in selectors:
+                try:
+                    locator = page.locator(selector)
+                    count = await locator.count()
+                except Exception:
+                    continue
+                for index in range(min(count, 6)):
+                    candidate = locator.nth(index)
+                    try:
+                        if await candidate.is_visible():
+                            return candidate
+                    except Exception:
+                        continue
+            if time.monotonic() >= deadline:
+                break
+            await page.wait_for_timeout(400)
+
         raise ProviderError(
             self.name,
-            f"na stránce ČD nebyl nalezen prvek '{what}'. "
-            "Web se pravděpodobně změnil – je potřeba aktualizovat selektory "
+            f"na stránce ČD nebyl nalezen viditelný prvek '{what}'. "
+            "Web se pravděpodobně změnil – aktualizujte selektory "
             f"v vyhledavac/providers/cd.py ({what}).",
         )
 
+    async def _maybe_visible(self, page, selectors: list[str], timeout: float = 3.0):
+        """Jako ``_first_visible``, ale místo výjimky vrací ``None``."""
+        try:
+            return await self._first_visible(page, selectors, "nepovinný prvek", timeout)
+        except ProviderError:
+            return None
+
     async def _fill_route(self, session, page, query: SearchQuery) -> None:
+        await self._wait_for_loader(page)
         from_input = await self._first_visible(page, FROM_INPUT, "pole Odkud")
         await session.human_type(from_input, query.origin, page)
         await self._pick_suggestion(page, from_input)
@@ -161,7 +204,9 @@ class CdProvider(BrowserProvider):
     async def _set_value(self, page, selector: str, value: str) -> None:
         """Nastaví hodnotu a vyvolá události, aby si jich všiml framework."""
         try:
-            locator = page.locator(selector).first
+            locator = page.locator(f"{selector}:visible").first
+            if not await locator.count():
+                locator = page.locator(selector).first
             if not await locator.count():
                 return
             await locator.evaluate(
@@ -176,52 +221,128 @@ class CdProvider(BrowserProvider):
             log.debug("%s: nepodařilo se nastavit %s (%s)", self.name, selector, exc)
 
     async def _configure_passengers(self, page, passenger: Passenger) -> None:
-        """Nastaví slevovou kategorii. Selhání není fatální – jen se ztratí sleva."""
+        """Nastaví slevovou kategorii.
+
+        Selhání není fatální – jen se ztratí sleva, spoje se najdou i tak.
+        Proto se tu používá ``_maybe_visible`` a vše je v ``try``.
+        """
         wanted = _passenger_button(passenger)
         if wanted is None:
             return
         try:
-            opener = page.locator(".connection-passenger").first
-            if not await opener.count():
+            await self._wait_for_loader(page)
+            opener = await self._maybe_visible(page, [".connection-passenger"], timeout=5.0)
+            if opener is None:
+                log.info("%s: výběr cestujících není na stránce, jedu bez slevy", self.name)
                 return
-            await opener.click(timeout=4000)
-            await page.wait_for_timeout(700)
+            await opener.click(timeout=5000)
+            await page.wait_for_timeout(900)
 
             minus = page.locator("li.user-card.selected").filter(
-                has_text="Dospělý"
-            ).locator(".icon-minus-circle").first
+                has_text="Dospělý").locator(".icon-minus-circle").first
             if await minus.count():
-                await minus.click(timeout=2500)
-                await page.wait_for_timeout(400)
+                await minus.click(timeout=3000)
+                await page.wait_for_timeout(500)
 
             for selector in wanted:
                 button = page.locator(selector).first
                 if await button.count():
-                    await button.click(timeout=2500)
-                    await page.wait_for_timeout(500)
+                    await button.click(timeout=3000)
+                    await page.wait_for_timeout(600)
                     break
 
             done = page.locator("#passengersModal button:has-text('Hotovo')").first
             if await done.count():
-                await done.click(timeout=2500)
-                await page.wait_for_timeout(400)
+                await done.click(timeout=3000)
+                await page.wait_for_timeout(600)
         except Exception as exc:
             log.info("%s: slevovou kategorii se nepodařilo nastavit (%s)", self.name, exc)
             try:
                 await page.keyboard.press("Escape")
+                await page.wait_for_timeout(400)
             except Exception:
                 pass
 
+    async def _assert_widget_rendered(self, page) -> None:
+        """Ověří, že se vyhledávací formulář vůbec vykreslil.
+
+        ČD načítají formulář jako samostatnou komponentu (ogres4) z vlastního
+        backendu. Když ji server neobslouží, stránka se zobrazí i s hlavičkou
+        a menu, ale prostřední část zůstane prázdná – prvky sice v DOMu jsou,
+        ale mají nulové rozměry. Typicky jde o dočasné omezení z jedné IP
+        adresy (přiliš mnoho dotazů).
+
+        Bez téhle kontroly by to vypadalo jako změněné selektory a člověk by
+        zbytečně hledal chybu v kódu.
+        """
+        try:
+            rendered = await page.evaluate(
+                """() => {
+                    const visible = (el) => {
+                        const box = el.getBoundingClientRect();
+                        return box.width > 0 && box.height > 0;
+                    };
+                    const fields = [...document.querySelectorAll('input.select__input')];
+                    return {
+                        total: fields.length,
+                        visible: fields.filter(visible).length,
+                        bodyLength: document.body.innerText.trim().length,
+                    };
+                }"""
+            )
+        except Exception:
+            return
+
+        if rendered.get("total") and not rendered.get("visible"):
+            raise BlockedError(
+                self.name,
+                "ČD vrátily stránku bez vyhledávacího formuláře (komponenta se "
+                "nenačetla). Obvykle jde o dočasné omezení kvůli počtu dotazů – "
+                "zkuste to za chvíli, nebo z jiné sítě.",
+            )
+
+    async def _wait_for_loader(self, page, timeout: float = 15000) -> None:
+        """Počká, až zmizí překryvný dialog 'Čekejte…'.
+
+        Bez toho Playwright hlásí, že kliknutí zachytil jiný prvek, a to
+        i když je tlačítko viditelné a povolené.
+        """
+        try:
+            await page.locator(LOADER).wait_for(state="hidden", timeout=timeout)
+        except Exception:
+            pass
+
     async def _submit(self, page) -> None:
+        await self._wait_for_loader(page)
         button = await self._first_visible(page, SEARCH_BUTTON, "tlačítko Vyhledat")
-        await button.click()
+
+        try:
+            await button.click(timeout=8000)
+        except Exception as exc:
+            # Kliknutí mohlo projít, i když ho Playwright označí za neúspěšné:
+            # stránka se během něj překreslí a prvek se odpojí z DOMu.
+            # Rozhodující je, jestli dorazily výsledky – ne návratová hodnota.
+            log.debug("%s: klik na Vyhledat hlásí %s, ověřuji výsledky", self.name, exc)
+
+        await self._wait_for_results(page)
+
+    async def _wait_for_results(self, page) -> None:
+        """Počká na karty spojů; bere i to, že se mezitím změnilo URL."""
+        try:
+            await page.wait_for_url("**/spojeni-tam/**", timeout=20000)
+        except Exception:
+            pass
+        await self._wait_for_loader(page, timeout=25000)
+
         for selector in CONNECTION_CARD:
             try:
                 await page.locator(selector).first.wait_for(state="visible", timeout=25000)
-                await page.wait_for_timeout(2500)  # doplní se ceny načítané zvlášť
+                # Ceny se dopočítávají zvlášť až po vykreslení spojů.
+                await page.wait_for_timeout(3000)
                 return
             except Exception:
                 continue
+
         raise TransientProviderError(
             self.name, "ČD nevrátilo žádné spojení (nebo se změnila struktura výsledků)"
         )
