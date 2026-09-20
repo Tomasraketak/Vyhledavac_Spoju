@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vyhledavac-spoju"
+version = "2.0.0"
+description = "Modulární metavyhledávač vlaků a autobusů v Evropě"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["httpx>=0.27"]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.40"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+vyhledavac = "vyhledavac.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["vyhledavac*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

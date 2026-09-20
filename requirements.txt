@@ -1,0 +1,6 @@
+# Jádro – nutné vždy.
+httpx>=0.27
+
+# Volitelné: jen pro dopravce, kteří potřebují prohlížeč (ČD).
+# pip install playwright && playwright install chromium
+playwright>=1.40 ; extra == "browser"
