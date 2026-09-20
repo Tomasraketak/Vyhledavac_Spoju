@@ -25,6 +25,25 @@ Původní kód padal na třech věcech:
 
 ## Instalace
 
+### Windows – jedním kliknutím
+
+Dvakrát klikněte na **`Vyhledavac.bat`**. Při prvním spuštění si vedle sebe
+založí virtuální prostředí ve složce `.venv`, stáhne knihovny a zeptá se,
+jestli chcete i prohlížeč pro České dráhy (~150 MB, volitelné). Napodruhé
+se rovnou otevře grafické rozhraní.
+
+Podmínkou je Python 3.10+ z [python.org](https://www.python.org/downloads/)
+se zaškrtnutým *Add python.exe to PATH* a ponechaným *tcl/tk and IDLE*.
+Verze z Microsoft Storu nestačí, bývá osekaná o tkinter.
+
+Stejný soubor funguje i jako příkazová řádka, když mu dáte parametry:
+
+```bat
+Vyhledavac.bat Praha Brno --sort price
+```
+
+### Ručně (Linux, macOS, Windows)
+
 ```bash
 pip install -r requirements.txt          # jen httpx – stačí pro 3 dopravce
 pip install playwright && playwright install chromium   # volitelně, pro ČD
@@ -204,6 +223,8 @@ vyhledavac/
 ```bash
 python -m vyhledavac.gui
 ```
+
+Na Windows stačí dvakrát kliknout na `Vyhledavac.bat` – viz [Instalace](#windows--jedním-kliknutím).
 
 Rozhraní je postavené na jednom pravidle: **výpadek jednoho dopravce nesmí
 vypadat jako výpadek aplikace.**
