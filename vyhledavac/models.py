@@ -359,6 +359,78 @@ class SearchResult:
     def failed_providers(self) -> list[ProviderResult]:
         return [r for r in self.provider_results if not r.ok]
 
+    # ---- cenový přehled ------------------------------------------------------
+    @property
+    def priced(self) -> list[Journey]:
+        """Spoje se známou cenou – jen s nimi jde optimalizovat podle ceny."""
+        return [j for j in self.journeys if j.price is not None]
+
+    @property
+    def unpriced(self) -> list[Journey]:
+        return [j for j in self.journeys if j.price is None]
+
+    @property
+    def price_coverage(self) -> float:
+        """Podíl spojů, u kterých známe cenu (0..1).
+
+        Nízké číslo znamená, že se podle ceny rozhodujete jen z části
+        nabídky – uživatel to musí vědět.
+        """
+        if not self.journeys:
+            return 0.0
+        return len(self.priced) / len(self.journeys)
+
+    @property
+    def cheapest(self) -> Journey | None:
+        pool = self.priced
+        return min(pool, key=lambda j: (j.price, j.duration)) if pool else None
+
+    @property
+    def fastest(self) -> Journey | None:
+        return min(self.journeys, key=lambda j: j.duration) if self.journeys else None
+
+    @property
+    def best_value(self) -> Journey | None:
+        """Nejlepší kompromis mezi cenou a časem.
+
+        Skóre normalizuje cenu i dobu jízdy na rozsah nabídky a sečte je –
+        vyhrává spoj, který není ani nejdražší, ani nejpomalejší.
+        """
+        pool = self.priced
+        if len(pool) < 2:
+            return pool[0] if pool else None
+
+        prices = [float(j.price) for j in pool]
+        durations = [j.duration.total_seconds() for j in pool]
+        p_min, p_max = min(prices), max(prices)
+        d_min, d_max = min(durations), max(durations)
+        p_span = (p_max - p_min) or 1.0
+        d_span = (d_max - d_min) or 1.0
+
+        def score(journey: Journey) -> float:
+            price_part = (float(journey.price) - p_min) / p_span
+            time_part = (journey.duration.total_seconds() - d_min) / d_span
+            return price_part + time_part
+
+        return min(pool, key=score)
+
+    def savings_vs_fastest(self) -> Decimal | None:
+        """Kolik ušetříte, když místo nejrychlejšího pojedete nejlevnějším."""
+        cheap, fast = self.cheapest, self.fastest
+        if cheap is None or fast is None or fast.price is None:
+            return None
+        diff = fast.price - cheap.price
+        return diff if diff > 0 else None
+
+    def provider_prices(self) -> dict[str, Decimal]:
+        """Nejnižší cena od každého dopravce – rychlé srovnání, kdo je levnější."""
+        best: dict[str, Decimal] = {}
+        for journey in self.priced:
+            current = best.get(journey.provider)
+            if current is None or journey.price < current:
+                best[journey.provider] = journey.price
+        return dict(sorted(best.items(), key=lambda kv: kv[1]))
+
     @property
     def blocked_providers(self) -> list[str]:
         return [r.provider for r in self.provider_results if r.blocked]

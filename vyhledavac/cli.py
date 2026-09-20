@@ -54,6 +54,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=25, help="počet výsledků")
     parser.add_argument("--pareto", action="store_true",
                         help="skrýt spoje, které jsou zároveň dražší i pomalejší")
+    parser.add_argument("--only-priced", action="store_true",
+                        help="zobrazit jen spoje se známou cenou")
+    parser.add_argument("--no-backfill", action="store_true",
+                        help="nedoplňovat ceny od dopravců, kteří tentýž vlak prodávají")
     parser.add_argument("--json", action="store_true", help="výstup ve formátu JSON")
     parser.add_argument("--list-providers", action="store_true",
                         help="vypsat dostupné dopravce, filtry a hacky")
@@ -100,6 +104,12 @@ def build_filters(args: argparse.Namespace) -> list[Any]:
         spec.append(("max_duration", {"hours": args.max_duration}))
     spec.append("drop_sold_out")
     spec.append("deduplicate")
+    if not args.no_backfill:
+        # Musí být až za deduplikací – ta spáruje stejné spoje od více
+        # dopravců a backfill pak doplní, co po ní zbylo bez ceny.
+        spec.append("price_backfill")
+    if args.only_priced:
+        spec.append("require_price")
     if args.pareto:
         spec.append("pareto")
     spec.append(("limit", {"count": args.limit}))
@@ -186,12 +196,49 @@ def render(result: SearchResult, as_json: bool) -> None:
             for note in journey.notes:
                 print(f"{'':>34}  {note}")
 
+    _print_price_summary(result)
+
     failed = result.failed_providers
     if failed:
         print("\nNepodařilo se získat data od:")
         for entry in failed:
             tag = " (blokováno ochranou)" if entry.blocked else ""
             print(f"  • {entry.provider}: {entry.error}{tag}")
+
+
+def _print_price_summary(result: SearchResult) -> None:
+    """Cenový přehled – kvůli tomu se celé hledání dělá."""
+    if not result.journeys:
+        return
+
+    def line(tag: str, journey) -> str:
+        hours, minutes = divmod(int(journey.duration.total_seconds() // 60), 60)
+        return (f"  {tag:<12} {journey.departure:%H:%M}–{journey.arrival:%H:%M}  "
+                f"{hours}h{minutes:02d}m  {journey.price_label:>10}  {journey.provider}")
+
+    print("\nCENOVÝ PŘEHLED")
+    cheapest, fastest, value = result.cheapest, result.fastest, result.best_value
+    if cheapest is not None:
+        print(line("nejlevnější", cheapest))
+    if fastest is not None and fastest is not cheapest:
+        print(line("nejrychlejší", fastest))
+    if value is not None and value not in (cheapest, fastest):
+        print(line("nejlepší poměr", value))
+
+    saving = result.savings_vs_fastest()
+    if saving is not None:
+        print(f"  → nejlevnějším spojem ušetříte {saving:.0f} Kč oproti nejrychlejšímu")
+
+    by_provider = result.provider_prices()
+    if len(by_provider) > 1:
+        parts = ", ".join(f"{name} od {price:.0f} Kč" for name, price in by_provider.items())
+        print(f"  Nejnižší cena podle dopravce: {parts}")
+
+    coverage = result.price_coverage
+    if coverage < 1.0:
+        missing = len(result.unpriced)
+        print(f"  ⚠️ U {missing} z {len(result.journeys)} spojů cenu neznáme "
+              f"(pokrytí {coverage:.0%}) – podle ceny je neporovnáváte.")
 
 
 async def run(args: argparse.Namespace) -> int:

@@ -6,6 +6,8 @@ Každý je samostatný a bezstavový, takže se dají libovolně kombinovat.
 from __future__ import annotations
 
 import datetime as dt
+import re
+from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
@@ -212,6 +214,48 @@ class ParetoOptimal(Filter):
 
 
 @FILTERS.register()
+class PriceBackfill(Filter):
+    """Doplní cenu spojům, u kterých ji dopravce nevrací.
+
+    Některé zdroje znají jízdní řád, ale ne ceny – typicky ÖBB přes HAFAS.
+    Jiný dopravce přitom může **ten samý vlak** prodávat. Tenhle filtr
+    takové dvojice spáruje podle čísla spoje a času odjezdu a cenu převezme.
+
+    Párujeme opatrně: musí sedět číslo spoje (např. "RJ 55") **a** odjezd
+    se nesmí lišit o víc než pár minut. Převzatá cena se vždy označí
+    poznámkou, aby bylo jasné, že ji prodává někdo jiný – uživatel pak ví,
+    kde jízdenku hledat.
+    """
+
+    name = "price_backfill"
+    label = "Doplnit ceny od jiných dopravců"
+
+    def apply(self, journeys: list[Journey], query: SearchQuery) -> list[Journey]:
+        tolerance = dt.timedelta(minutes=float(self.options.get("tolerance_minutes", 5)))
+        donors = [j for j in journeys if j.price is not None and not j.is_hack]
+        if not donors:
+            return journeys
+
+        for journey in journeys:
+            if journey.price is not None or journey.is_hack:
+                continue
+            donor = _matching_donor(journey, donors, tolerance)
+            if donor is None:
+                continue
+            fare = donor.cheapest_fare
+            if fare is None:
+                continue
+            journey.fares = [replace(fare, label=f"prodává {donor.provider}")]
+            journey.fare_status = FareStatus.PRICED
+            journey.notes.append(
+                f"💰 Cenu prodává {donor.provider} – jízdenku kupte tam."
+            )
+            if donor.deep_link and not journey.deep_link:
+                journey.deep_link = donor.deep_link
+        return journeys
+
+
+@FILTERS.register()
 class Limit(Filter):
     """Ořízne počet výsledků."""
 
@@ -241,6 +285,40 @@ def _cheaper(a: Journey, b: Journey) -> tuple[Journey, Journey]:
     if pb is None:
         return a, b
     return (a, b) if pa <= pb else (b, a)
+
+
+def _train_numbers(journey: Journey) -> set[str]:
+    """Čísla spojů na trase – to je nejspolehlivější identifikátor vlaku."""
+    numbers: set[str] = set()
+    for leg in journey.legs:
+        if leg.mode is Mode.WALK:
+            continue
+        numbers |= set(re.findall(r"\d{2,5}", leg.line or ""))
+    return numbers
+
+
+def _matching_donor(
+    journey: Journey, donors: list[Journey], tolerance: dt.timedelta
+) -> Journey | None:
+    """Najde nejlevnějšího dopravce prodávajícího tentýž vlak."""
+    wanted = _train_numbers(journey)
+    if not wanted:
+        return None
+
+    best: Journey | None = None
+    for donor in donors:
+        if not (wanted & _train_numbers(donor)):
+            continue
+        # Samotné číslo nestačí: "RJ" znamená u ÖBB Railjet a u RegioJetu
+        # RegioJet, takže by se daly spárovat dva různé vlaky se stejným
+        # číslem. Musí proto sedět odjezd i příjezd.
+        if abs(donor.departure - journey.departure) > tolerance:
+            continue
+        if abs(donor.arrival - journey.arrival) > tolerance:
+            continue
+        if best is None or (donor.price is not None and donor.price < best.price):
+            best = donor
+    return best
 
 
 def _dominates(better: Journey, worse: Journey) -> bool:

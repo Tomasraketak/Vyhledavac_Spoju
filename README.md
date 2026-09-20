@@ -40,6 +40,8 @@ python -m vyhledavac Praha Brno
 python -m vyhledavac Praha Vídeň --date 01.10.2026 --time 08:00 --isic --sort price
 python -m vyhledavac Praha Vídeň --hacks split_ticket --max-price 800 --pareto
 python -m vyhledavac --list-providers
+python -m vyhledavac Praha Brno --only-priced  # jen spoje se známou cenou
+python -m vyhledavac Bratislava Košice --providers ZSSK --card sk_free
 python -m vyhledavac Praha Brno --json        # strojově čitelný výstup
 
 # grafické rozhraní
@@ -83,7 +85,12 @@ Ověřeno živým během v září 2026:
 | **RegioJet** | JSON API (`brn-ybus-pubapi.sa.cz`) | ✅ | ✅ úseky | **ověřeno** – 28 spojů Praha→Brno za ~4 s |
 | **FlixBus** | JSON API (`global.api.flixbus.com`) | ✅ | částečně | **ověřeno** – 45 spojů Praha→Brno za ~2 s |
 | **ÖBB** | HAFAS (`fahrplan.oebb.at`) | ❌ jen jízdní řád | ✅ **všechny mezizastávky** | **ověřeno** – vrací i české vlaky |
-| **ČD** | prohlížeč (Playwright) | ✅ | částečně | **neověřeno** – viz níže |
+| **ČD** | prohlížeč (Playwright) | ✅ | částečně | **neověřeno** – selektory nesedí |
+| **ZSSK** | prohlížeč (`predaj.zssk.sk`) | ✅ | ne | selektory ověřeny, běh neověřen |
+| **OneTicket** | prohlížeč (`oneticket.cz`) | ✅ | ne | vyžaduje viditelné okno |
+
+Ve výchozím nastavení běží jen první tři – jsou rychlé a nepotřebují
+prohlížeč. Ostatní zapnete přes `--providers`.
 
 ### Poznámka k ČD
 
@@ -102,12 +109,47 @@ selektorů pohromadě nahoře, úprava je tak otázka jednoho místa.
 Dobrá zpráva: české vlaky včetně kompletní trasy vrací i **ÖBB přes HAFAS**,
 takže aplikace není bez ČD slepá – chybí jen ceny ČD.
 
-### ZSSK a OneTicket
+### ZSSK
 
-Jejich původní skripty (`ZSSK_Fetch.py`, `OpenTicketFetch.py`) nebyly mezi
-zaslanými soubory, takže nejsou přepsané. ZSSK API (`ikvc.slovakrail.sk`)
-nebylo z tohoto prostředí dostupné. Přidání je ale otázka jednoho souboru –
-viz `examples/novy_dopravce.py`.
+Slovenské vlaky. Selektory z původního kódu (`#fromInput`, `#toInput`,
+`#departDate`) jsou **ověřeně stále platné**. Hlavní změna je v cenách:
+původní kód u každého spoje proklikal celý nákupní trychtýř (5–6 načtení
+stránky na jeden spoj). Nově se ceny nejdřív zkusí přečíst rovnou ze
+seznamu a hloubkový režim se pouští jen na vyžádání a jen pro prvních N
+spojů:
+
+```bash
+python -m vyhledavac Bratislava Košice --providers ZSSK
+```
+
+Slovenská 100% sleva se zapíná kartou `sk_free`:
+`--card sk_free`. Cena `0 Kč` je platná cena, ne chybějící údaj.
+
+### OneTicket
+
+Prodává jízdenky napříč českými dopravci pod jednotným tarifem, takže je
+to **nejlepší zdroj cen českých vlaků** – lepší než scrapovat ČD.
+
+Má zdokumentované REST API (`clientapi.oneticket.cz`, OpenAPI na
+`/swagger/source/sjt.yml`). Postup by byl `POST /search` → `pathId` →
+`POST /price?method=priceBySearchId`. **Vyhledávání i ceny ale vyžadují
+partnerský klíč** – bez něj vrací `401 Auth Invalid header`. Pokud klíč
+seženete, cesta přes API se dá doplnit jako `HttpProvider`; všechny
+potřebné endpointy jsou popsané v hlavičce `providers/oneticket.py`.
+
+Do té doby jede přes prohlížeč a **potřebuje viditelné okno** – v headless
+režimu OneTicket nevykreslí obsah (ověřeno: prázdné `body`). Provider to
+pozná a řekne to, místo aby hledal neexistující selektory.
+
+### ÖBB a ceny
+
+ÖBB přes HAFAS vrací jízdní řád, ne ceny. Jejich prodejní API
+(`tickets.oebb.at`) při testu z datacentra odpovědělo
+*„Zugriff vorübergehend eingeschränkt“* – blokuje IP adresy serveroven.
+Z domácí linky může fungovat.
+
+Prázdné místo po cenách ÖBB ale z velké části zaplní **doplňování cen**
+(níže) – ÖBB zná vlak, jiný dopravce ho prodává.
 
 ---
 
@@ -143,6 +185,38 @@ vyhledavac/
    viditelnost karty a neblokuje se na uspávání záložek na pozadí.
 
 ---
+
+## Optimalizace podle ceny
+
+Hledání spojů je jen půlka věci – smysl je vybrat, **čím se vyplatí jet**.
+
+Po každém hledání se vypíše cenový přehled:
+
+```
+CENOVÝ PŘEHLED
+  nejlevnější  16:01–20:18  4h17m      240 Kč  RegioJet
+  nejrychlejší 14:05–18:00  3h55m      459 Kč  FlixBus
+  → nejlevnějším spojem ušetříte 219 Kč oproti nejrychlejšímu
+  Nejnižší cena podle dopravce: RegioJet od 240 Kč, FlixBus od 339 Kč
+  ⚠️ U 5 z 40 spojů cenu neznáme (pokrytí 88%) – podle ceny je neporovnáváte.
+```
+
+Co k tomu patří:
+
+- **Nejlepší poměr** (`best_value`) – spoj, který není ani nejdražší, ani
+  nejpomalejší. Cena i doba jízdy se normalizují na rozsah nabídky a sečtou.
+- **Doplňování cen napříč dopravci** (filtr `price_backfill`). Když jeden
+  zdroj zná vlak, ale ne cenu (ÖBB), a jiný ten samý vlak prodává
+  (RegioJet), cena se převezme a spoj se označí poznámkou, kde jízdenku
+  koupit. Páruje se podle čísla spoje **a** shody odjezdu i příjezdu –
+  samotné číslo nestačí, protože „RJ“ znamená u ÖBB Railjet a u RegioJetu
+  RegioJet.
+- **Pokrytí cenami** – pokud u části spojů cenu neznáme, je to vidět.
+  Tiché vydávání neúplné nabídky za úplnou je horší než varování.
+- `--only-priced` skryje spoje bez ceny, `--max-price` nasadí strop,
+  `--pareto` schová spoje, které jsou zároveň dražší i pomalejší.
+
+Cena `0 Kč` (slovenská 100% sleva) je plnohodnotná cena, ne chybějící údaj.
 
 ## Rozšiřování
 
@@ -222,7 +296,7 @@ pip install pytest pytest-asyncio
 python -m pytest -q
 ```
 
-69 testů. Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
+77 testů. Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
 půlnoc, `limit` aplikovaný před řazením, dva různé vlaky považované za
 jeden, nebo chybějící cena vydávaná za nekonečnou.
 

@@ -110,3 +110,35 @@ def test_broken_filter_does_not_lose_results():
 def test_unknown_filter_is_skipped_not_fatal():
     pipeline = FilterPipeline.from_spec(["neexistujici_filtr", "deduplicate"])
     assert len(pipeline) == 1
+
+
+# ---- doplňování cen napříč dopravci -----------------------------------------
+def test_price_backfill_prices_a_schedule_only_journey():
+    """ÖBB zná vlak, RegioJet ho prodává – cena se doplní."""
+    schedule = make_journey(provider="ÖBB", price=None, line="RJ 1035",
+                            dep=at(13), arr=at(17))
+    seller = make_journey(provider="RegioJet", price=319, line="RJ 1035",
+                          dep=at(13), arr=at(17))
+    out = FilterPipeline.from_spec(["price_backfill"]).apply([schedule, seller], q())
+    backfilled = next(j for j in out if j.provider == "ÖBB")
+    assert backfilled.price == Decimal("319")
+    assert any("prodává RegioJet" in n for n in backfilled.notes)
+
+
+def test_price_backfill_requires_matching_arrival():
+    """Stejné číslo, ale jiný vlak (jiný příjezd) – cenu nepřebírat."""
+    schedule = make_journey(provider="ÖBB", price=None, line="RJ 55",
+                            dep=at(8), arr=at(12))
+    other = make_journey(provider="RegioJet", price=200, line="RJ 55",
+                         dep=at(8), arr=at(15))
+    out = FilterPipeline.from_spec(["price_backfill"]).apply([schedule, other], q())
+    assert next(j for j in out if j.provider == "ÖBB").price is None
+
+
+def test_price_backfill_needs_a_train_number():
+    schedule = make_journey(provider="ÖBB", price=None, line="vlak",
+                            dep=at(8), arr=at(12))
+    seller = make_journey(provider="RegioJet", price=200, line="autobus",
+                          dep=at(8), arr=at(12))
+    out = FilterPipeline.from_spec(["price_backfill"]).apply([schedule, seller], q())
+    assert next(j for j in out if j.provider == "ÖBB").price is None

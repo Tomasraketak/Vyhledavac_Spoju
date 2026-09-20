@@ -61,3 +61,51 @@ def test_query_normalizes_naive_datetime():
 
     q = SearchQuery(origin="A", destination="B", departure=dt.datetime(2026, 10, 1, 8, 0))
     assert q.departure.tzinfo is not None
+
+
+# ---- cenový přehled ---------------------------------------------------------
+def _result(journeys):
+    from vyhledavac.models import SearchQuery, SearchResult
+
+    query = SearchQuery(origin="Praha", destination="Brno", departure=at(8))
+    return SearchResult(query=query, journeys=list(journeys))
+
+
+def test_price_coverage_reports_unknown_prices():
+    res = _result([make_journey(price=100), make_journey(price=None)])
+    assert res.price_coverage == 0.5
+    assert len(res.unpriced) == 1
+
+
+def test_cheapest_and_fastest():
+    slow_cheap = make_journey(dep=at(8), arr=at(14), price=100)
+    fast_dear = make_journey(dep=at(8), arr=at(10), price=900)
+    res = _result([slow_cheap, fast_dear])
+    assert res.cheapest is slow_cheap
+    assert res.fastest is fast_dear
+    assert res.savings_vs_fastest() == Decimal("800")
+
+
+def test_best_value_avoids_both_extremes():
+    cheap_slow = make_journey(dep=at(8), arr=at(16), price=100)
+    middle = make_journey(dep=at(8), arr=at(11), price=300)
+    fast_dear = make_journey(dep=at(8), arr=at(10), price=2000)
+    res = _result([cheap_slow, middle, fast_dear])
+    assert res.best_value is middle
+
+
+def test_provider_prices_sorted_cheapest_first():
+    res = _result([
+        make_journey(provider="FlixBus", price=300),
+        make_journey(provider="RegioJet", price=150),
+        make_journey(provider="RegioJet", price=400),
+    ])
+    assert list(res.provider_prices()) == ["RegioJet", "FlixBus"]
+    assert res.provider_prices()["RegioJet"] == Decimal("150")
+
+
+def test_zero_price_is_a_real_price_not_missing():
+    """Slovenská 100% sleva dává cenu 0 – to není chybějící cena."""
+    free = make_journey(price=0)
+    assert free.price == Decimal("0")
+    assert _result([free]).price_coverage == 1.0

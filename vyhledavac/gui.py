@@ -120,7 +120,11 @@ class App(tk.Tk):
         tk.Checkbutton(checks, text="Skrýt nevýhodné spoje", variable=self.var_pareto,
                        bg=CARD).pack(side=tk.LEFT, padx=(0, 18))
         self.var_direct = tk.BooleanVar(value=False)
-        tk.Checkbutton(checks, text="Jen přímé", variable=self.var_direct, bg=CARD).pack(side=tk.LEFT)
+        tk.Checkbutton(checks, text="Jen přímé", variable=self.var_direct,
+                       bg=CARD).pack(side=tk.LEFT, padx=(0, 18))
+        self.var_only_priced = tk.BooleanVar(value=False)
+        tk.Checkbutton(checks, text="Jen se známou cenou", variable=self.var_only_priced,
+                       bg=CARD).pack(side=tk.LEFT)
 
         # Dopravci a hacky se berou z registru – nový modul se objeví sám.
         options = card(pad, "Dopravci a travel hacky")
@@ -161,7 +165,12 @@ class App(tk.Tk):
 
         self.status = tk.Label(pad, text="Připraven.", bg=BG, fg="#7f8c8d",
                                font=("Segoe UI", 10, "italic"), anchor=tk.W)
-        self.status.pack(fill=tk.X, pady=(0, 8))
+        self.status.pack(fill=tk.X, pady=(0, 4))
+
+        # Cenový přehled – kvůli němu se hledá.
+        self.summary = tk.Label(pad, text="", bg=BG, fg="#2c3e50", justify=tk.LEFT,
+                                font=("Segoe UI", 10), anchor=tk.W)
+        self.summary.pack(fill=tk.X, pady=(0, 8))
 
     def _build_table(self) -> None:
         table = card(self.pad)
@@ -232,7 +241,9 @@ class App(tk.Tk):
         spec: list[Any] = [("departure_window", {"hours": query.window.total_seconds() / 3600})]
         if self.var_direct.get():
             spec.append(("max_transfers", {"limit": 0}))
-        spec += ["drop_sold_out", "deduplicate"]
+        spec += ["drop_sold_out", "deduplicate", "price_backfill"]
+        if self.var_only_priced.get():
+            spec.append("require_price")
         if self.var_pareto.get():
             spec.append("pareto")
         spec.append(("limit", {"count": 60}))
@@ -299,6 +310,8 @@ class App(tk.Tk):
             ))
             self.row_data[item] = journey
 
+        self._render_summary(result)
+
         failed = result.failed_providers
         if failed:
             names = ", ".join(f"{r.provider} ({r.error})" for r in failed)
@@ -307,6 +320,37 @@ class App(tk.Tk):
         else:
             self.status.config(text=f"✅ Hotovo – {len(result.journeys)} spojů.", fg="#27ae60")
         self._finish()
+
+    def _render_summary(self, result: SearchResult) -> None:
+        """Vypíše nejlevnější / nejrychlejší / nejlepší poměr a pokrytí cenami."""
+        if not result.journeys:
+            self.summary.config(text="")
+            return
+
+        def describe(tag: str, journey) -> str:
+            hours, minutes = divmod(int(journey.duration.total_seconds() // 60), 60)
+            return (f"{tag}: {journey.departure:%H:%M}–{journey.arrival:%H:%M} "
+                    f"({hours}h{minutes:02d}m, {journey.price_label}, {journey.provider})")
+
+        parts = []
+        cheapest, fastest, value = result.cheapest, result.fastest, result.best_value
+        if cheapest is not None:
+            parts.append(describe("💰 Nejlevnější", cheapest))
+        if fastest is not None and fastest is not cheapest:
+            parts.append(describe("⚡ Nejrychlejší", fastest))
+        if value is not None and value not in (cheapest, fastest):
+            parts.append(describe("⭐ Nejlepší poměr", value))
+
+        saving = result.savings_vs_fastest()
+        if saving is not None:
+            parts.append(f"Úspora oproti nejrychlejšímu: {saving:.0f} Kč")
+
+        coverage = result.price_coverage
+        if coverage < 1.0:
+            parts.append(f"⚠️ U {len(result.unpriced)} spojů cenu neznáme "
+                         f"(pokrytí {coverage:.0%})")
+
+        self.summary.config(text="   |   ".join(parts))
 
     def _finish(self) -> None:
         self._searching = False
