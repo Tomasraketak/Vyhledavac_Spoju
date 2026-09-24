@@ -22,6 +22,18 @@ set "HOTOVO=%VENV%\.instalace-hotova"
 
 if not exist "%PYC%" goto instalace
 if not exist "%HOTOVO%" goto instalace
+rem Po aktualizaci (git pull) se mohl změnit seznam knihoven - doinstalovat.
+fc /b "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul 2>&1
+if errorlevel 1 goto aktualizace
+goto spustit
+
+
+:aktualizace
+echo.
+echo   Program byl aktualizován - doinstalovávám nové knihovny ...
+"%PYC%" -m pip install --quiet --disable-pip-version-check --upgrade -r "%~dp0requirements.txt"
+if errorlevel 1 goto chybaPip
+copy /y "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul
 goto spustit
 
 
@@ -79,6 +91,7 @@ if errorlevel 1 goto chybaPlaywright
 
 :hotovo
 echo hotovo> "%HOTOVO%"
+copy /y "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul
 echo.
 echo   Hotovo, spouštím.
 

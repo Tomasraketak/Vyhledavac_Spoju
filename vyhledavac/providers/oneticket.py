@@ -18,11 +18,12 @@ Zjištěný postup by byl:
 
 **Endpointy pro vyhledávání i ceny ale vyžadují partnerský klíč** –
 bez něj vrací ``401 Auth Invalid header`` (veřejně odpovídá jen
-``/carrier``, ``/system/data/fare`` a ``/system/codelist/*``). Pokud klíč
-máte, dá se cesta přes API doplnit jako ``HttpProvider`` – všechny
-potřebné údaje jsou výše.
+``/carrier``, ``/system/data/fare`` a ``/system/codelist/*``). Klíč se
+vydává smluvním prodejcům, ne jednotlivcům, a projekt je postavený tak,
+aby žádný klíč nepotřeboval. Popis API zůstává jen pro případ, že by ho
+OneTicket jednou otevřel.
 
-Do té doby zůstává prohlížeč. OneTicket navíc **detekuje headless režim**
+Proto se čte veřejný web v prohlížeči. OneTicket navíc **detekuje headless režim**
 a v něm nevykreslí obsah (ověřeno: prázdné ``body``), takže se spouští
 s viditelným oknem. To je také důvod, proč je tenhle dopravce ve výchozím
 nastavení vypnutý – zapněte ho jen když ho vyloženě chcete.

@@ -257,8 +257,14 @@ class RegioJetProvider(HttpProvider):
         price_from = route.get("priceFrom")
         bookable = bool(route.get("bookable", True))
         free_seats = route.get("freeSeatsCount")
+        # Vyprodaný spoj přijde s ``priceFrom: 0`` a ``pricesCount: 0`` –
+        # ta nula není cena, ale "nic k prodeji". Brát ji jako cenu by
+        # vyprodaný autobus postavilo na první místo jako nejlevnější.
+        no_offer = route.get("pricesCount") == 0 or (not bookable and not price_from)
 
-        if price_from is not None:
+        if no_offer:
+            status = FareStatus.SOLD_OUT if free_seats == 0 else FareStatus.NOT_BOOKABLE
+        elif price_from is not None:
             fares.append(
                 self.make_fare(
                     Decimal(str(price_from)),
@@ -292,7 +298,8 @@ class RegioJetProvider(HttpProvider):
             provider=self.name,
             legs=legs,
             fares=fares,
-            fare_status=status if fares or status is FareStatus.SOLD_OUT else FareStatus.UNKNOWN,
+            fare_status=(status if fares or status in (FareStatus.SOLD_OUT, FareStatus.NOT_BOOKABLE)
+                         else FareStatus.UNKNOWN),
             journey_id=str(route.get("id", "")),
             deep_link=_deep_link(route, query),
             raw={"route": route},

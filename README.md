@@ -23,33 +23,111 @@ Původní kód padal na třech věcech:
 
 ---
 
-## Instalace
+## Instalace, aktualizace a spuštění
 
-### Windows – jedním kliknutím
+**Nepotřebujete žádný API klíč ani registraci.** Viz [Bez API klíčů](#bez-api-klíčů).
 
-Dvakrát klikněte na **`Vyhledavac.bat`**. Při prvním spuštění si vedle sebe
-založí virtuální prostředí ve složce `.venv`, stáhne knihovny a zeptá se,
-jestli chcete i prohlížeč pro České dráhy (~150 MB, volitelné). Napodruhé
-se rovnou otevře grafické rozhraní.
+Potřebujete jen Python 3.10 nebo novější z
+[python.org](https://www.python.org/downloads/). Při instalaci na Windows
+zaškrtněte *Add python.exe to PATH* a nechte zapnuté *tcl/tk and IDLE*
+(bez něj nepůjde grafické rozhraní). Verze z Microsoft Storu nestačí.
 
-Podmínkou je Python 3.10+ z [python.org](https://www.python.org/downloads/)
-se zaškrtnutým *Add python.exe to PATH* a ponechaným *tcl/tk and IDLE*.
-Verze z Microsoft Storu nestačí, bývá osekaná o tkinter.
+### Nejjednodušší: dvojklik na `Vyhledavac.bat` (Windows)
 
-Stejný soubor funguje i jako příkazová řádka, když mu dáte parametry:
+Stáhněte projekt (přes `git clone` níže, nebo na GitHubu *Code → Download
+ZIP* a rozbalte) a dvakrát klikněte na **`Vyhledavac.bat`**. Při prvním
+spuštění si sám připraví prostředí, pak už jen otevírá program. Po
+aktualizaci si sám doinstaluje, co přibylo.
+
+### Příkazy pro Windows (cmd)
+
+**Instalace** – jednou:
 
 ```bat
-Vyhledavac.bat Praha Brno --sort price
+git clone https://github.com/Tomasraketak/Vyhledavac_Spoju.git
+cd Vyhledavac_Spoju
+py -3 -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+.venv\Scripts\python -m pip install -r requirements.txt
 ```
 
-### Ručně (Linux, macOS, Windows)
+Volitelně prohlížeč pro České dráhy, ZSSK a OneTicket (~150 MB). Bez něj
+fungují RegioJet, FlixBus a ÖBB:
+
+```bat
+.venv\Scripts\python -m pip install playwright
+.venv\Scripts\python -m playwright install chromium
+```
+
+**Spuštění** grafického rozhraní:
+
+```bat
+cd Vyhledavac_Spoju
+.venv\Scripts\pythonw -m vyhledavac.gui
+```
+
+(`pythonw` neotevře za oknem černou konzoli. Pokud program nenaběhne,
+spusťte místo něj `.venv\Scripts\python -m vyhledavac.gui` – uvidíte chybu.)
+
+**Aktualizace** na nejnovější verzi:
+
+```bat
+cd Vyhledavac_Spoju
+git pull
+.venv\Scripts\python -m pip install --upgrade -r requirements.txt
+```
+
+Máte-li prohlížeč pro ČD, občas aktualizujte i ten:
+
+```bat
+.venv\Scripts\python -m pip install --upgrade playwright
+.venv\Scripts\python -m playwright install chromium
+```
+
+Stáhli jste ZIP místo `git clone`? Aktualizace = stáhnout nový ZIP
+a rozbalit přes starou složku (`.venv` se tím nepřepíše), pak dvojklik
+na `Vyhledavac.bat`.
+
+### Příkazy pro Linux a macOS
 
 ```bash
-pip install -r requirements.txt          # jen httpx – stačí pro 3 dopravce
-pip install playwright && playwright install chromium   # volitelně, pro ČD
+# instalace
+git clone https://github.com/Tomasraketak/Vyhledavac_Spoju.git
+cd Vyhledavac_Spoju
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install playwright && .venv/bin/python -m playwright install chromium  # volitelně
+
+# spuštění GUI
+.venv/bin/python -m vyhledavac.gui
+
+# aktualizace
+git pull && .venv/bin/python -m pip install --upgrade -r requirements.txt
 ```
 
-Python 3.10+.
+Na Linuxu bývá tkinter samostatný balíček: `sudo apt install python3-tk`.
+
+### Bez API klíčů
+
+Oficiální API s klíčem dopravci dávají firmám a prodejcům jízdenek, ne
+jednotlivcům. Program je proto postavený tak, aby žádný klíč nepotřeboval
+– dívá se na data stejně jako váš prohlížeč, když jste na webu dopravce:
+
+| Dopravce | Jak získává data | Ceny | Potřebuje |
+|---|---|---|---|
+| RegioJet | veřejné rozhraní, které volá jejich vlastní web | ano | nic |
+| FlixBus | veřejné rozhraní, které volá jejich vlastní web | ano | nic |
+| ÖBB | veřejný jízdní řád (stejný, jaký používá web ÖBB) | ne¹ | nic |
+| České dráhy | web cd.cz v prohlížeči na pozadí | ano | Playwright |
+| ZSSK | web predaj.zssk.sk v prohlížeči na pozadí | ano | Playwright |
+| OneTicket | web oneticket.cz ve viditelném okně prohlížeče | ano | Playwright |
+
+¹ Ceny k vlakům ÖBB se doplňují od ostatních dopravců, kteří stejný vlak
+prodávají – viz [doplňování cen](#optimalizace-podle-ceny).
+
+Výchozí výběr (RegioJet, FlixBus, ÖBB) funguje hned po instalaci
+a nepotřebuje ani prohlížeč. Ostatní si zaškrtnete v GUI v panelu
+*Zdroje dat*, až budete mít Playwright.
 
 ## Použití
 
@@ -162,14 +240,12 @@ Slovenská 100% sleva se zapíná kartou `sk_free`:
 Prodává jízdenky napříč českými dopravci pod jednotným tarifem, takže je
 to **nejlepší zdroj cen českých vlaků** – lepší než scrapovat ČD.
 
-Má zdokumentované REST API (`clientapi.oneticket.cz`, OpenAPI na
-`/swagger/source/sjt.yml`). Postup by byl `POST /search` → `pathId` →
-`POST /price?method=priceBySearchId`. **Vyhledávání i ceny ale vyžadují
-partnerský klíč** – bez něj vrací `401 Auth Invalid header`. Pokud klíč
-seženete, cesta přes API se dá doplnit jako `HttpProvider`; všechny
-potřebné endpointy jsou popsané v hlavičce `providers/oneticket.py`.
+Jejich REST API (`clientapi.oneticket.cz`) je jen pro smluvní partnery
+s klíčem, proto ho program **záměrně nepoužívá** a čte ceny z veřejného
+webu jako běžný návštěvník. (Popis API zůstává v hlavičce
+`providers/oneticket.py` pro případ, že by se situace změnila.)
 
-Do té doby jede přes prohlížeč a **potřebuje viditelné okno** – v headless
+Web se čte v prohlížeči a **potřebuje viditelné okno** – v headless
 režimu OneTicket nevykreslí obsah (ověřeno: prázdné `body`). Provider to
 pozná a řekne to, místo aby hledal neexistující selektory.
 
@@ -224,7 +300,7 @@ vyhledavac/
 python -m vyhledavac.gui
 ```
 
-Na Windows stačí dvakrát kliknout na `Vyhledavac.bat` – viz [Instalace](#windows--jedním-kliknutím).
+Na Windows stačí dvakrát kliknout na `Vyhledavac.bat` – viz [Instalace](#nejjednodušší-dvojklik-na-vyhledavacbat-windows).
 
 Rozhraní je postavené na jednom pravidle: **výpadek jednoho dopravce nesmí
 vypadat jako výpadek aplikace.**
