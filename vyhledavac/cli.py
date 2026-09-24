@@ -198,6 +198,13 @@ def render(result: SearchResult, as_json: bool) -> None:
 
     _print_price_summary(result)
 
+    noted = [r for r in result.provider_results if r.notes and not r.error]
+    if noted:
+        print("\nUpozornění:")
+        for entry in noted:
+            for note in entry.notes:
+                print(f"  • {entry.provider}: {note}")
+
     failed = result.failed_providers
     if failed:
         print("\nNepodařilo se získat data od:")

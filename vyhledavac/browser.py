@@ -143,10 +143,13 @@ class BrowserSession:
         try:
             self._browser = await launcher.launch(**launch_kwargs)
         except Exception as exc:
+            # Playwright k chybě přidává víceřádkový rámeček s návodem;
+            # do UI stačí první řádek, návod dodáme vlastní.
+            reason = (str(exc).strip().splitlines() or ["neznámá chyba"])[0]
             raise ProviderUnavailableError(
                 self.provider,
-                f"prohlížeč {self.engine} nelze spustit: {exc}. "
-                "Spusťte 'playwright install chromium'.",
+                f"prohlížeč {self.engine} nelze spustit ({reason[:160]}). "
+                f"Spusťte 'playwright install {self.engine}'.",
             ) from exc
 
         self._context = await self._browser.new_context(

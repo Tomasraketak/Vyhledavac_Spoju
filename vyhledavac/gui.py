@@ -496,13 +496,17 @@ class App(tk.Tk):
                 row.set("blocked" if result.blocked else "error",
                         "blokováno" if result.blocked else "chyba")
             elif result.journeys:
-                row.set("ok", f"{len(result.journeys)} spojů · {result.elapsed:.0f}s")
+                extra = " · s výhradou" if result.notes else ""
+                row.set("ok", f"{len(result.journeys)} spojů · {result.elapsed:.0f}s{extra}")
             else:
                 row.set("empty")
 
         if result.error:
             self.problems.append(result)
             self._add_problem(result.provider, result.error, result.blocked)
+        elif result.notes:
+            for note in result.notes:
+                self._add_problem(result.provider, note, blocked=False, soft=True)
 
         if result.journeys:
             self.live.extend(result.journeys)
@@ -613,8 +617,13 @@ class App(tk.Tk):
             child.destroy()
         self.problem_card.pack_forget()
 
-    def _add_problem(self, provider: str, message: str, blocked: bool) -> None:
-        """Chyba se jen zapíše do panelu – nic nevyskakuje a nic neblokuje."""
+    def _add_problem(self, provider: str, message: str, blocked: bool,
+                     soft: bool = False) -> None:
+        """Chyba se jen zapíše do panelu – nic nevyskakuje a nic neblokuje.
+
+        ``soft`` je dílčí potíž (dopravce spoje dodal, jen něco chybí) –
+        bez tlačítka "vypnout", protože vypnutím by se přišlo i o spoje.
+        """
         self.problem_card.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
         box = tk.Frame(self.problem_body, bg=CARD)
@@ -622,17 +631,17 @@ class App(tk.Tk):
 
         title = tk.Frame(box, bg=CARD)
         title.pack(fill=tk.X)
-        tk.Label(title, text=("■ " if blocked else "▲ ") + provider, bg=CARD,
-                 fg=WARN if blocked else BAD,
+        tk.Label(title, text=("● " if soft else "■ " if blocked else "▲ ") + provider,
+                 bg=CARD, fg=WARN if (blocked or soft) else BAD,
                  font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT)
 
         row = self.provider_rows.get(provider)
-        if row is not None:
+        if row is not None and not soft:
             tk.Button(title, text="vypnout", cursor="hand2", bg=CARD, fg=ACCENT,
                       relief="flat", font=("Segoe UI", 8),
                       command=row.disable).pack(side=tk.RIGHT)
 
-        hint = _explain(message, blocked)
+        hint = message if soft else _explain(message, blocked)
         tk.Label(box, text=hint, bg=CARD, fg=MUTED, font=("Segoe UI", 8),
                  wraplength=250, justify=tk.LEFT).pack(anchor=tk.W)
 

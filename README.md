@@ -117,13 +117,14 @@ jednotlivcům. Program je proto postavený tak, aby žádný klíč nepotřebova
 |---|---|---|---|
 | RegioJet | veřejné rozhraní, které volá jejich vlastní web | ano | nic |
 | FlixBus | veřejné rozhraní, které volá jejich vlastní web | ano | nic |
-| ÖBB | veřejný jízdní řád (stejný, jaký používá web ÖBB) | ne¹ | nic |
+| ÖBB | veřejný jízdní řád + e-shop s anonymním tokenem (jako návštěvník webu) | ano¹ | nic |
 | České dráhy | web cd.cz v prohlížeči na pozadí | ano | Playwright |
 | ZSSK | web predaj.zssk.sk v prohlížeči na pozadí | ano | Playwright |
 | OneTicket | web oneticket.cz ve viditelném okně prohlížeče | ano | Playwright |
 
-¹ Ceny k vlakům ÖBB se doplňují od ostatních dopravců, kteří stejný vlak
-prodávají – viz [doplňování cen](#optimalizace-podle-ceny).
+¹ E-shop ÖBB občas dotazy odmítne (hlavně z VPN a serveroven). Pak zůstane
+jízdní řád a ceny se doplní od ostatních dopravců, kteří stejný vlak
+prodávají – viz [ÖBB a ceny](#öbb-a-ceny).
 
 Výchozí výběr (RegioJet, FlixBus, ÖBB) funguje hned po instalaci
 a nepotřebuje ani prohlížeč. Ostatní si zaškrtnete v GUI v panelu
@@ -181,10 +182,14 @@ Ověřeno živým během v září 2026:
 |---|---|---|---|---|
 | **RegioJet** | JSON API (`brn-ybus-pubapi.sa.cz`) | ✅ | ✅ úseky | **ověřeno** – 28 spojů Praha→Brno za ~4 s |
 | **FlixBus** | JSON API (`global.api.flixbus.com`) | ✅ | částečně | **ověřeno** – 45 spojů Praha→Brno za ~2 s |
-| **ÖBB** | HAFAS (`fahrplan.oebb.at`) | ❌ jen jízdní řád | ✅ **všechny mezizastávky** | **ověřeno** – vrací i české vlaky |
+| **ÖBB** | HAFAS (`fahrplan.oebb.at`) + e-shop | ✅ z e-shopu² | ✅ **všechny mezizastávky** | jízdní řád **ověřen**; ceny neověřeny živě² |
 | **ČD** | prohlížeč (Playwright) | ✅ | částečně | opraveno, plný běh neověřen |
 | **ZSSK** | prohlížeč (`predaj.zssk.sk`) | ✅ | ne | selektory ověřeny, běh neověřen |
 | **OneTicket** | prohlížeč (`oneticket.cz`) | ✅ | ne | vyžaduje viditelné okno |
+
+² E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
+otestovat jen proti nahraným odpovědím, ne naživo. Z domácího připojení by
+měly fungovat – viz [ÖBB a ceny](#öbb-a-ceny).
 
 Ve výchozím nastavení běží jen první tři – jsou rychlé a nepotřebují
 prohlížeč. Ostatní zapnete přes `--providers`.
@@ -251,13 +256,30 @@ pozná a řekne to, místo aby hledal neexistující selektory.
 
 ### ÖBB a ceny
 
-ÖBB přes HAFAS vrací jízdní řád, ne ceny. Jejich prodejní API
-(`tickets.oebb.at`) při testu z datacentra odpovědělo
-*„Zugriff vorübergehend eingeschränkt“* – blokuje IP adresy serveroven.
-Z domácí linky může fungovat.
+Původní skript bral ceny z e-shopu `shop.oebbtickets.at` přes Firefox
+a klikání do formuláře, a to občas prošlo. Teď se ceny berou z téhož
+e-shopu, jen přímo z jeho JSON API, ze kterého si je bere i sama stránka:
 
-Prázdné místo po cenách ÖBB ale z velké části zaplní **doplňování cen**
-(níže) – ÖBB zná vlak, jiný dopravce ho prodává.
+1. shop vydá **anonymní token**, stejně jako každému návštěvníkovi webu
+   (žádný klíč, žádná registrace),
+2. s ním se zeptá na spoje a na jejich ceny v EUR.
+
+Jízdní řád (HAFAS) a ceny (e-shop) běží souběžně a nezávisle:
+
+| Situace | Co uvidíte |
+|---|---|
+| Všechno funguje | spoje ÖBB s cenami, mezizastávkami a 1. třídou |
+| E-shop odmítne přímý dotaz | zkusí se totéž **zevnitř prohlížeče** (je-li nainstalovaný Playwright) |
+| E-shop odmítne i prohlížeč, nebo je pomalý (> 45 s) | spoje bez ceny + žluté upozornění; ceny se doplní od jiných dopravců, kteří vlak prodávají |
+| Spadne jízdní řád, e-shop odpoví | spoje z e-shopu s cenou, jen bez mezizastávek |
+| Spadne obojí | chyba u ÖBB, ostatní dopravci běží dál |
+
+Blokace (*„Zugriff vorübergehend eingeschränkt“*) se týká hlavně IP adres
+serveroven a VPN. Z domácí sítě obvykle projde. Když ne, bývá to dočasné
+– zkuste to za pár minut.
+
+Ceny jsou za **dospělého bez slevové karty**. Vorteilscard a dětské slevy
+e-shop počítá až v košíku, sem se zatím nepřenášejí.
 
 ---
 

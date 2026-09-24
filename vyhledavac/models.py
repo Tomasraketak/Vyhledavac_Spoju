@@ -341,6 +341,9 @@ class ProviderResult:
     blocked: bool = False
     elapsed: float = 0.0
     attempts: int = 1
+    #: Dílčí potíže, které hledání nezastavily (např. "jízdní řád ano,
+    #: ceny se nepodařilo zjistit"). Na rozdíl od ``error`` spoje jsou.
+    notes: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:

@@ -64,6 +64,8 @@ BLOCK_MARKERS = (
     "access denied",
     "request unsuccessful",
     "incapsula",
+    "zugriff vorübergehend eingeschränkt",   # ÖBB
+    "access temporarily restricted",
 )
 
 

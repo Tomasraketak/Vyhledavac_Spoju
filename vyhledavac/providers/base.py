@@ -9,6 +9,7 @@ retry, cache, měny, izolace chyb – řeší jádro.
 from __future__ import annotations
 
 import abc
+import contextvars
 import datetime as dt
 import logging
 import time
@@ -22,6 +23,12 @@ from ..money import CurrencyConverter, get_converter
 from ..registry import PROVIDERS
 
 log = logging.getLogger(__name__)
+
+# Poznámky se sbírají per volání ``run``, ne per instance: travel hacky volají
+# stejného dopravce souběžně pro víc úseků a poznámky by se jinak míchaly.
+_NOTES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
+    "provider_notes", default=None
+)
 
 
 class Provider(abc.ABC):
@@ -66,6 +73,16 @@ class Provider(abc.ABC):
         """Úklid zdrojů (HTTP session, prohlížeč)."""
 
     # ---- servis pro potomky -------------------------------------------------
+    def note(self, message: str) -> None:
+        """Zaznamená dílčí potíž, která hledání nezastavila.
+
+        Skončí v ``ProviderResult.notes`` a UI ji ukáže jako varování,
+        ne jako chybu – spoje od dopravce přesto jsou.
+        """
+        log.info("%s: %s", self.name, message)
+        notes = _NOTES.get()
+        if notes is not None and message not in notes:
+            notes.append(message)
     def make_fare(
         self,
         amount: Decimal | float | int | str,
@@ -86,6 +103,8 @@ class Provider(abc.ABC):
         dopravce nikdy neshodí ostatní.
         """
         started = time.monotonic()
+        notes: list[str] = []
+        token = _NOTES.set(notes)
         try:
             journeys = await self.search(query)
         except ProviderError as exc:
@@ -99,6 +118,7 @@ class Provider(abc.ABC):
                 error=exc.message,
                 blocked=exc.__class__.__name__ == "BlockedError",
                 elapsed=time.monotonic() - started,
+                notes=notes,
             )
         except Exception as exc:  # noqa: BLE001 - poslední záchrana
             log.exception("%s: neočekávaná chyba", self.name)
@@ -106,13 +126,17 @@ class Provider(abc.ABC):
                 provider=self.name,
                 error=f"neočekávaná chyba: {exc!r}",
                 elapsed=time.monotonic() - started,
+                notes=notes,
             )
+        finally:
+            _NOTES.reset(token)
 
         journeys = [j for j in journeys if _is_sane(j)]
         return ProviderResult(
             provider=self.name,
             journeys=journeys,
             elapsed=time.monotonic() - started,
+            notes=notes,
         )
 
 
