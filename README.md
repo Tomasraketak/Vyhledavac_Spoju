@@ -120,11 +120,11 @@ jednotlivcům. Program je proto postavený tak, aby žádný klíč nepotřebova
 | ÖBB | veřejný jízdní řád + e-shop s anonymním tokenem (jako návštěvník webu) | ano¹ | nic |
 | České dráhy | web cd.cz v prohlížeči na pozadí | ano | Playwright |
 | ZSSK | web predaj.zssk.sk v prohlížeči na pozadí | ano | Playwright |
-| OneTicket | web oneticket.cz ve viditelném okně prohlížeče | ano | Playwright |
+| OneTicket | web oneticket.cz v prohlížeči na pozadí | ano | Playwright |
 
 ¹ E-shop ÖBB občas dotazy odmítne (hlavně z VPN a serveroven). Pak zůstane
 jízdní řád a ceny se doplní od ostatních dopravců, kteří stejný vlak
-prodávají – viz [ÖBB a ceny](#öbb-a-ceny).
+prodávají – viz [ÖBB a ceny](#öbb).
 
 Výchozí výběr (RegioJet, FlixBus, ÖBB) funguje hned po instalaci
 a nepotřebuje ani prohlížeč. Ostatní si zaškrtnete v GUI v panelu
@@ -174,97 +174,131 @@ asyncio.run(main())
 
 ---
 
-## Stav dopravců
+## Dopravci
 
-Ověřeno živým během v září 2026:
+### Přehled
 
-| Dopravce | Způsob | Ceny | Zastávky | Stav |
-|---|---|---|---|---|
-| **RegioJet** | JSON API (`brn-ybus-pubapi.sa.cz`) | ✅ | ✅ úseky | **ověřeno** – 28 spojů Praha→Brno za ~4 s |
-| **FlixBus** | JSON API (`global.api.flixbus.com`) | ✅ | částečně | **ověřeno** – 45 spojů Praha→Brno za ~2 s |
-| **ÖBB** | HAFAS (`fahrplan.oebb.at`) + e-shop | ✅ z e-shopu² | ✅ **všechny mezizastávky** | jízdní řád **ověřen**; ceny neověřeny živě² |
-| **ČD** | prohlížeč (Playwright) | ✅ | částečně | opraveno, plný běh neověřen |
-| **ZSSK** | prohlížeč (`predaj.zssk.sk`) | ✅ | ne | selektory ověřeny, běh neověřen |
-| **OneTicket** | prohlížeč (`oneticket.cz`) | ✅ | ne | vyžaduje viditelné okno |
+| Dopravce | Soubor | Jak získává data | Ceny | Mezizastávky | Rychlost | Stav (září 2026) |
+|---|---|---|---|---|---|---|
+| **RegioJet** | `providers/regiojet.py` | JSON API jejich webu | ✅ | ✅ | ~4 s | ověřeno živě, vč. slev |
+| **FlixBus** | `providers/flixbus.py` | JSON API jejich webu | ✅ | částečně | ~2 s | ověřeno živě, vč. slev |
+| **ÖBB** | `providers/obb.py` + `_hafas.py` + `_oebb_shop.py` | jízdní řád HAFAS + JSON API e-shopu | ✅¹ | ✅ všechny | ~3 s | jízdní řád ověřen; ceny¹ |
+| **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ | částečně | ~30 s | funguje (ověřeno uživatelem) |
+| **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ~30 s + ~8 s/cena | ověřeno živě, vč. slev |
+| **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ | ne | ~20 s | ověřeno živě, vč. slev |
 
-² E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
-otestovat jen proti nahraným odpovědím, ne naživo. Z domácího připojení by
-měly fungovat – viz [ÖBB a ceny](#öbb-a-ceny).
+¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
+otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
+fungovat – viz [ÖBB](#öbb).
 
-Ve výchozím nastavení běží jen první tři – jsou rychlé a nepotřebují
-prohlížeč. Ostatní zapnete přes `--providers`.
+Ve výchozím nastavení běží RegioJet, FlixBus a ÖBB – jsou rychlé
+a nepotřebují prohlížeč. Ostatní zapnete v GUI v panelu *Zdroje dat*
+nebo přes `--providers`.
 
-### Poznámka k ČD
+### Společné pro všechny
 
-ČD nemají veřejné API – formulář posílá POST zpět na stejnou stránku.
-Zůstal tedy prohlížeč. Při ladění se našly **dvě konkrétní příčiny**, proč
-původní scraper vracel prázdný seznam:
+Každý dopravce je jeden soubor v `vyhledavac/providers/` s třídou
+označenou `@PROVIDERS.register()`. Program ho najde sám. Každý dělá
+totéž: dostane `SearchQuery` (odkud, kam, kdy, cestující) a vrátí seznam
+`Journey` (úseky, časy, ceny). Liší se jen tím, **odkud** data bere:
 
-1. **Formulář je na stránce třikrát** (desktop, mobil, sbalená varianta) a
-   viditelná je jen jedna kopie. Původní kód bral `.first`, což je skoro
-   vždy ta skrytá – kliknutí na ni vyprší. Nově se prochází všechny shody
-   a bere se první skutečně viditelná.
-2. **Překryvný dialog „Čekejte…“** (`#loaderModal`) odchytává kliknutí.
-   Tlačítko je viditelné i povolené, ale klik na něj nedojde. Nově se
-   čeká, až dialog zmizí, a když se stránka během kliknutí překreslí,
-   rozhoduje se podle toho, jestli dorazily výsledky – ne podle návratové
-   hodnoty kliknutí.
+- **API dopravci** (`HttpProvider`) volají stejná JSON rozhraní, která
+  volá web dopravce. Jsou rychlé a antibot ochrana na ně skoro neplatí –
+  posíláme stejné dotazy jako prohlížeč. Obranu (hlavičky jako skutečný
+  prohlížeč, cookies, rozestupy mezi dotazy, opakování s čekáním) řeší
+  společný `http.py`.
+- **Prohlížečoví dopravci** (`BrowserProvider`) ovládají skutečný
+  prohlížeč přes Playwright, protože dopravce žádné použitelné API nemá.
+  Jsou pomalejší a náchylnější na změny webu. Společný `browser.py`
+  maskuje automatizaci, blokuje reklamy a obrázky a pozná ochrannou
+  stránku.
 
-S těmito opravami vyhledávání **doběhlo až na stránku s výsledky**
-(`/spojeni-a-jizdenka/spojeni-tam/<uuid>`). Kompletní průchod včetně
-načtení cen se ale z tohoto prostředí dotáhnout nepodařilo: ČD po několika
-dotazech z jedné IP adresy začaly vracet stránku **bez vyhledávacího
-formuláře** – hlavička a menu se vykreslí, prostřední část zůstane prázdná.
+Chyba jednoho dopravce nikdy neshodí ostatní: engine každého spouští
+zvlášť s časovým limitem a chybu ukáže u jeho řádku v GUI. Když dopravce
+data dodá jen zčásti (např. jízdní řád bez cen), ukáže se žluté
+upozornění místo chyby.
 
-Provider tenhle stav rozpozná a nahlásí ho jako dočasné omezení, ne jako
-změnu selektorů – aby se chyba nehledala v kódu, když je jinde. Z běžné
-domácí linky by ČD mělo fungovat; berte ho ale jako **neověřený**.
+### Cestující a slevy
 
-Pro ceny českých vlaků je ostatně lepší **OneTicket** (jednotný tarif
-pokrývá ČD i další dopravce) a jízdní řád českých vlaků včetně všech
-mezizastávek vrací **ÖBB přes HAFAS** bez prohlížeče.
+Z věku a zaškrtnutého ISIC se nejdřív určí **jedna společná kategorie**
+(`Passenger.category` v `models.py`) a každý dopravce ji jen přeloží na
+svůj kód. Dřív si to každý modul počítal po svém a výsledky se rozcházely.
 
-### ZSSK
+| Kategorie | Kdo | RegioJet | FlixBus | OneTicket | ZSSK | ÖBB |
+|---|---|---|---|---|---|---|
+| dítě do 6 | 0–5 let | `ATTENDED_CHILD` | `children_0_5` | plné | do 15 | dospělý² |
+| dítě | 6–14 let | `CHILD_UNDER_12` / `CZECH_STUDENT_PASS_15` | `children_6_17` | plné | do 15 | dospělý² |
+| mládež | 15–17 let | `CZECH_STUDENT_PASS_15` | `children_6_17` | Junior 15–18 | mladý 16–25 | dospělý |
+| student | zaškrtnutý ISIC | `CZECH_STUDENT_PASS_26` | `student` | Student 18–26 | mladý / + karta ISIC | dospělý |
+| dospělý | ostatní | `REGULAR` | `adult` | Plné jízdné | dospelý | dospělý |
+| senior | 65+ | `ISIC` (sic!) | `senior` | Senior 65+ | senior 62+ | dospělý |
 
-Slovenské vlaky. Selektory z původního kódu (`#fromInput`, `#toInput`,
-`#departDate`) jsou **ověřeně stále platné**. Hlavní změna je v cenách:
-původní kód u každého spoje proklikal celý nákupní trychtýř (5–6 načtení
-stránky na jeden spoj). Nově se ceny nejdřív zkusí přečíst rovnou ze
-seznamu a hloubkový režim se pouští jen na vyžádání a jen pro prvních N
-spojů:
+Zaškrtnutý **ISIC** znamená „mám studentskou slevu“ a platí bez ohledu na
+zadaný věk – stejně to dělá web ČD. Bez ISIC se dospělý do 26 let bere jako
+dospělý, protože česká sleva pro 18–26 let platí jen studentům.
 
-```bash
-python -m vyhledavac Bratislava Košice --providers ZSSK
-```
+² ÖBB počítá slevy (Vorteilscard, děti) až v košíku; program ukáže cenu
+za dospělého a upozorní na to.
 
-Slovenská 100% sleva se zapíná kartou `sk_free`:
-`--card sk_free`. Cena `0 Kč` je platná cena, ne chybějící údaj.
+---
 
-### OneTicket
+### RegioJet
 
-Prodává jízdenky napříč českými dopravci pod jednotným tarifem, takže je
-to **nejlepší zdroj cen českých vlaků** – lepší než scrapovat ČD.
+**Soubor:** `providers/regiojet.py` · **Typ:** JSON API · **Klíč:** ne
 
-Jejich REST API (`clientapi.oneticket.cz`) je jen pro smluvní partnery
-s klíčem, proto ho program **záměrně nepoužívá** a čte ceny z veřejného
-webu jako běžný návštěvník. (Popis API zůstává v hlavičce
-`providers/oneticket.py` pro případ, že by se situace změnila.)
+1. Při prvním hledání stáhne číselník měst a stanic (`/consts/locations`,
+   ~145 kB) a uloží ho na 7 dní do cache. Souběžná hledání ho stahují jen
+   jednou.
+2. Název z formuláře najde v číselníku (tolerantně k diakritice a
+   překlepům, „Vídeň“ = „Wien“).
+3. Zavolá `/routes/search/simple` s kódem tarifu podle kategorie
+   cestujícího.
+4. U prvních spojů v časovém okně si souběžně stáhne detail
+   (`/routes/{id}/simple`) – z něj zná jednotlivé úseky, přestupy
+   a cenové třídy (Low cost, Standard, Business…).
 
-Web se čte v prohlížeči a **potřebuje viditelné okno** – v headless
-režimu OneTicket nevykreslí obsah (ověřeno: prázdné `body`). Provider to
-pozná a řekne to, místo aby hledal neexistující selektory.
+**Na co si dát pozor:** kódy tarifů klamou – `ISIC` je u RegioJetu senior
+65+, student je `CZECH_STUDENT_PASS_26`. Vyprodaný spoj chodí s cenou 0
+a `pricesCount: 0`; program ho ukáže jako *Vyprodáno*, ne jako spoj
+zadarmo.
 
-### ÖBB a ceny
+### FlixBus
 
-Původní skript bral ceny z e-shopu `shop.oebbtickets.at` přes Firefox
-a klikání do formuláře, a to občas prošlo. Teď se ceny berou z téhož
-e-shopu, jen přímo z jeho JSON API, ze kterého si je bere i sama stránka:
+**Soubor:** `providers/flixbus.py` · **Typ:** JSON API · **Klíč:** ne
 
-1. shop vydá **anonymní token**, stejně jako každému návštěvníkovi webu
-   (žádný klíč, žádná registrace),
-2. s ním se zeptá na spoje a na jejich ceny v EUR.
+1. Přes našeptávač (`/search/autocomplete/cities`) najde ID měst.
+2. Zavolá `/search/service/v4/search` se seznamem cestujících
+   (`{"student": 1}` apod.). Datum chce ve tvaru `DD.MM.YYYY`.
+3. Cena je **včetně poplatku platformy** (`total_with_platform_fee`) –
+   tedy to, co skutečně zaplatíte.
 
-Jízdní řád (HAFAS) a ceny (e-shop) běží souběžně a nezávisle:
+**Slevy:** student, senior a mládež 6–17 let mají 50 %, ale jen na
+**vnitrostátních** linkách (Praha → Brno). Na mezinárodních (Praha →
+Vídeň) stojí stejně jako dospělý – to FlixBus spočítá sám. Když slevovou
+kategorii na trase nezná (HTTP 400), program zopakuje dotaz pro
+dospělého a upozorní na to. Samotným dětem FlixBus jízdenku neprodá
+a API pak vrací nesmyslnou nulu – program cenu v tom případě neukáže.
+
+### ÖBB
+
+**Soubory:** `providers/obb.py`, `_hafas.py`, `_oebb_shop.py` · **Typ:**
+dvě API · **Klíč:** ne
+
+ÖBB jsou dva nezávislé zdroje, které běží souběžně:
+
+- **Jízdní řád** z veřejného HAFASu (`fahrplan.oebb.at/bin/mgate.exe`) –
+  protokol, na kterém jede většina evropských železnic. Vrací spoje
+  **včetně všech mezizastávek**, i pro české vlaky. Na tom stojí travel
+  hack „lomená jízdenka“. `_hafas.py` je obecný – další dopravce na HAFASu
+  (DB, SBB…) je jen nová konfigurace.
+- **Ceny** z JSON API e-shopu `shop.oebbtickets.at`. HAFAS má u ÖBB tarify
+  vypnuté, takže ceny zná jen e-shop. Ten dá každému návštěvníkovi
+  **anonymní token** (žádná registrace) a s ním se program zeptá:
+  `init` → `stations` → `travelActions` → `timetable` → `prices`.
+  Ceny se pak přiřadí ke spojům z HAFASu podle času odjezdu a příjezdu.
+
+Původní skript bral ceny ze stejného e-shopu přes Firefox a klikání do
+formuláře, a to občas prošlo. Teď se ptá přímo jeho API:
 
 | Situace | Co uvidíte |
 |---|---|
@@ -275,11 +309,78 @@ Jízdní řád (HAFAS) a ceny (e-shop) běží souběžně a nezávisle:
 | Spadne obojí | chyba u ÖBB, ostatní dopravci běží dál |
 
 Blokace (*„Zugriff vorübergehend eingeschränkt“*) se týká hlavně IP adres
-serveroven a VPN. Z domácí sítě obvykle projde. Když ne, bývá to dočasné
-– zkuste to za pár minut.
+serveroven a VPN. Z domácí sítě obvykle projde.
 
-Ceny jsou za **dospělého bez slevové karty**. Vorteilscard a dětské slevy
-e-shop počítá až v košíku, sem se zatím nepřenášejí.
+### České dráhy
+
+**Soubor:** `providers/cd.py` · **Typ:** prohlížeč · **Klíč:** ne
+
+ČD nemají veřejné API – formulář posílá POST zpět na stránku a výsledek
+vykreslí server. Postup:
+
+1. Otevře `cd.cz/spojeni-a-jizdenka/`, počká na doplnění formuláře
+   JavaScriptem a zavře cookie lištu.
+2. V okně cestujících vybere tlačítko podle kategorie (ISIC, Dítě,
+   Junior, Senior).
+3. Vyplní odkud/kam přes našeptávač a odešle.
+4. Počká na stránku `/spojeni-tam/…` a z ní přečte spoje a ceny.
+
+Dvě chyby, kvůli kterým původní scraper vracel prázdný seznam:
+**formulář je na stránce třikrát** (desktop, mobil, sbalený) a viditelný
+je jen jeden – program proto hledá první skutečně viditelnou kopii; a
+**dialog „Čekejte…“** zachytává kliknutí – program čeká, až zmizí.
+
+Po mnoha dotazech z jedné IP adresy ČD vrací stránku bez formuláře.
+Program to pozná a nahlásí jako dočasnou blokaci, ne jako rozbitý kód.
+
+### ZSSK
+
+**Soubor:** `providers/zssk.py` · **Typ:** prohlížeč · **Klíč:** ne
+
+`predaj.zssk.sk` je JSF aplikace bez API a v seznamu spojů ceny
+**neukazuje** – cenu zná až nákupní formulář. Postup je stejný jako
+v původním skriptu:
+
+1. Vyplní odkud/kam. U každé stanice počká na našeptávač (plní se
+   z `/autocompleteStations/…`), vybere první návrh a počká, až seznam
+   zmizí – jinak překrývá další pole.
+2. Nastaví datum ve slovenském tvaru `30. 9. 2026` a odešle.
+3. Přečte seznam spojů.
+4. **Ceny:** pro prvních 6 spojů projde *Kúpiť lístok → Voľba cestujúcich*
+   (věková kategorie, karta ISIC, případně 100% sleva) *→ Voľba
+   cestovného lístka* a přečte konečnou cenu. Pak se vrátí na seznam.
+
+Jedna cena je ~8 s, proto má trychtýř časový rozpočet (90 s) a ZSSK delší
+limit než ostatní. Selhání u jednoho spoje ostatní neovlivní; po dvou
+chybách po sobě trychtýř skončí a ukáže, u kolika spojů cenu zjistil.
+
+```bash
+python -m vyhledavac Bratislava Košice --providers ZSSK
+```
+
+Slovenská 100% sleva (studenti a senioři se slovenským nárokem) se zapíná
+kartou `sk_free`: `--card sk_free`. Cena `0 Kč` je pak platná cena.
+
+### OneTicket
+
+**Soubor:** `providers/oneticket.py` · **Typ:** prohlížeč · **Klíč:** ne
+
+Prodává jízdenky napříč českými dopravci pod jednotným tarifem (SJT), takže
+je to **nejlepší zdroj cen českých vlaků**. Jejich REST API je jen pro
+smluvní partnery s klíčem, proto program čte veřejný web:
+
+1. Otevře `oneticket.cz/search` a **počká, až React vykreslí formulář**
+   (první 1–3 s je stránka prázdná).
+2. Vyplní odkud, kam a datum.
+3. V okně cestujících vynuluje výchozího dospělého a nastaví tarif podle
+   kategorie (Plné, Junior, Student, Senior).
+4. Odešle a přečte spoje s cenami.
+
+Dřívější verze kontrolovala stránku hned po načtení, viděla ji prázdnou
+a hlásila chybu – v GUI se to navíc zobrazilo jako „chybí prohlížeč“,
+přestože se okno otevřelo. Teď program počká a skrytý prohlížeč stačí,
+žádné okno nevyskakuje. Když se stránka nevykreslí ani za 20 s, bývá to
+výpadek jejich API a program to tak i napíše.
 
 ---
 

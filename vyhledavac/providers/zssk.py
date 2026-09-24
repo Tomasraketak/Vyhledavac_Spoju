@@ -5,18 +5,21 @@ tady prohlížeč zůstává. Selektory z původního kódu (`#fromInput`,
 `#toInput`, `#departDate`, `#actionSearchConnectionButton`) jsou ověřeně
 **stále platné** – na rozdíl od ČD se web nezměnil.
 
-Hlavní změna oproti původnímu ``ZSSK_Fetch.py`` je v získávání cen.
-Původní kód u **každého** spoje proklikal celý nákupní trychtýř (otevřít
-spoj → Kúpiť lístok → volba cestujúcich → volba lístka → přečíst cenu →
-dvakrát zpět). To je 5–6 načtení stránky na jeden spoj; u deseti spojů
-i několik minut a jediná chyba uprostřed shodila zbytek.
+ZSSK v seznamu spojů ceny neukazuje a JSON API nemá. Cenu zná až nákupní
+formulář, takže se – stejně jako v původním ``ZSSK_Fetch.py`` – pro každý
+spoj prokliká *Kúpiť lístok → Voľba cestujúcich → Voľba cestovného lístka*
+a přečte se konečná cena. Oproti původnímu skriptu:
 
-Tady je to dvoustupňově:
+* trychtýř běží jen pro prvních ``price_limit`` spojů (výchozí 6) a má
+  časový rozpočet ``price_budget`` (výchozí 90 s),
+* selhání u jednoho spoje ostatní neshodí; po dvou chybách po sobě se
+  skončí a uživatel se dozví, u kolika spojů cena chybí,
+* návrat na seznam nečeká na událost "load" (kterou ZSSK nikdy nevyšle)
+  a když selže, hledání se zopakuje,
+* stanice se vybírají až po načtení našeptávače – rozbalený seznam jinak
+  překrývá další pole a klik do něj vyprší.
 
-1. **Rychlý průchod** – ceny, které jsou vidět rovnou v seznamu spojů.
-2. **Hloubkový režim** (volba ``deep_prices``) – trychtýř, ale jen pro
-   prvních N spojů, každý ve vlastní záložce, a selhání jednoho spoje
-   ostatní neovlivní.
+Vypnout trychtýř (jen jízdní řád, rychle): ``options={"deep_prices": False}``.
 
 Slovenská 100% sleva (bezplatná přeprava studentů a seniorů) se zapíná
 kartou ``DiscountCard.SK_FREE``.
@@ -79,6 +82,8 @@ class ZsskProvider(BrowserProvider):
     provides_prices = True
     provides_stops = False
     countries = ("SK",)
+    #: Hledání ~25 s + ceny přes trychtýř (rozpočet ``price_budget``).
+    min_timeout = 150.0
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         session = await self.browser()
@@ -90,7 +95,9 @@ class ZsskProvider(BrowserProvider):
             await self._submit(page)
             journeys = await self._parse_list(page, query)
 
-            if self.options.get("deep_prices", False):
+            # Ceny jsou hlavní smysl celého vyhledávače, takže trychtýř je
+            # zapnutý ve výchozím stavu. Vypnout: options={"deep_prices": False}.
+            if self.options.get("deep_prices", True):
                 await self._fill_missing_prices(session, page, journeys, query)
             return journeys
         finally:
@@ -108,18 +115,38 @@ class ZsskProvider(BrowserProvider):
                 "na predaj.zssk.sk nebylo nalezeno pole '#fromInput' – "
                 "web se změnil, aktualizujte selektory v providers/zssk.py",
             )
-        await session.human_type(origin, query.origin, page)
-        await page.keyboard.press("Enter")
-        await page.wait_for_timeout(600)
-
+        await self._pick_station(session, page, origin, query.origin)
         destination = page.locator("#toInput").first
-        await session.human_type(destination, query.destination, page)
-        await page.keyboard.press("Enter")
-        await page.wait_for_timeout(600)
+        await self._pick_station(session, page, destination, query.destination)
 
         # ZSSK čeká slovenský formát data s mezerami: "1. 10. 2026".
         await self._set_value(page, "#departDate", _sk_date(query.departure))
         await self._set_value(page, "#departTime", query.departure.strftime("%H:%M"))
+
+    async def _pick_station(self, session, page, field, name: str) -> None:
+        """Napíše stanici a vybere první návrh z našeptávače.
+
+        Našeptávač se plní až z XHR ``/autocompleteStations/…``. Enter
+        stisknutý dřív nic nevybere, a dokud je seznam rozbalený, překrývá
+        pole "Kam" – klik do něj pak Playwright opakuje do vypršení limitu.
+        Proto: počkat na návrhy → Enter → počkat, až seznam zmizí.
+        """
+        suggestions = page.locator("a.dropdown-item[role='option']")
+        await field.click(force=True)
+        await field.fill("")
+        for char in name:
+            await field.press_sequentially(char, delay=60)
+        try:
+            await suggestions.first.wait_for(state="visible", timeout=6000)
+        except Exception:
+            log.debug("%s: našeptávač pro %r se neukázal", self.name, name)
+        await page.wait_for_timeout(300)
+        await field.press("Enter")
+        try:
+            await suggestions.first.wait_for(state="hidden", timeout=3000)
+        except Exception:
+            await field.press("Tab")
+        await page.wait_for_timeout(400)
 
     async def _set_value(self, page, selector: str, value: str) -> None:
         locator = page.locator(selector).first
@@ -200,77 +227,121 @@ class ZsskProvider(BrowserProvider):
             )
         return journeys
 
-    # ---- hloubkové ceny ------------------------------------------------------
+    # ---- ceny přes nákupní trychtýř -------------------------------------------
     async def _fill_missing_prices(self, session, page, journeys, query) -> None:
-        """Doplní ceny přes nákupní trychtýř – pomalé, proto jen pro pár spojů.
+        """Doplní ceny přes nákupní trychtýř – stejně jako původní skript.
 
-        Každý spoj se řeší samostatně a jeho selhání se jen zaloguje.
+        ZSSK v seznamu spojů ceny neukazuje a JSON API nemá; cenu zná až
+        stránka "Voľba cestovného lístka". Proto se pro každý spoj projde
+        Kúpiť lístok → volba cestujících → cena → zpět. Je to ~6–10 s na
+        spoj, takže se to dělá jen pro prvních ``price_limit`` spojů.
+
+        Selhání jednoho spoje ostatní neshodí. Když web selže dvakrát po
+        sobě, další pokusy by jen pálily čas – skončí se a nahlásí se to.
         """
-        budget = int(self.options.get("price_limit", 5))
+        budget = int(self.options.get("price_limit", 6))
         pending = [j for j in journeys if j.price is None][:budget]
         if not pending:
             return
 
-        log.info("%s: dopočítávám ceny pro %d spojů (hloubkový režim)",
+        log.info("%s: zjišťuji ceny pro %d spojů přes nákupní trychtýř",
                  self.name, len(pending))
+        failures_in_row = 0
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + float(self.options.get("price_budget", 90))
         for journey in pending:
+            if loop.time() > deadline:
+                break
             try:
+                await self._ensure_list(session, page, query)
                 amount = await self._price_via_funnel(page, int(journey.journey_id), query)
             except Exception as exc:
-                log.debug("%s: cenu spoje %s nezjišťuji (%s)",
-                          self.name, journey.journey_id, exc)
+                failures_in_row += 1
+                log.info("%s: cenu spoje %s nezjišťuji (%s)", self.name,
+                         journey.journey_id, str(exc).splitlines()[0][:160])
+                if failures_in_row >= 2:
+                    break
                 continue
+            failures_in_row = 0
             if amount is not None:
                 journey.fares = [self.make_fare(amount, "EUR", label="ZSSK",
                                                 tariff=_tariff_label(query.lead))]
                 journey.fare_status = FareStatus.PRICED
 
+        priced = sum(1 for j in pending if j.price is not None)
+        if priced < len(pending):
+            self.note(f"ceny ZSSK se podařilo zjistit u {priced} z {len(pending)} spojů")
+        if len(journeys) > budget:
+            self.note(f"ceny ZSSK zjišťuji jen u prvních {budget} spojů – každá "
+                      "cena znamená projít nákupní formulář (~8 s)")
+
+    async def _ensure_list(self, session, page, query: SearchQuery) -> None:
+        """Vrátí stránku na seznam spojů – v nejhorším novým hledáním.
+
+        ``page.go_back()`` čeká na událost "load", kterou ZSSK kvůli
+        reklamním skriptům nikdy nevyšle. Proto ``wait_until="commit"``
+        a pak čekání na samotný seznam.
+        """
+        groups = page.locator(CONNECTION_GROUP).first
+        for _ in range(2):
+            if await _visible(groups, 1500):
+                return
+            try:
+                await page.go_back(wait_until="commit", timeout=15000)
+            except Exception:
+                pass
+            if await _visible(groups, 8000):
+                await page.wait_for_timeout(500)
+                return
+        log.info("%s: návrat na seznam selhal, hledám znovu", self.name)
+        await session.goto(page, SEARCH_URL)
+        await self._fill_form(session, page, query)
+        await self._submit(page)
+
     async def _price_via_funnel(self, page, index: int, query: SearchQuery) -> Decimal | None:
-        """Projde nákupní trychtýř a přečte koncovou cenu."""
+        """Projde nákupní trychtýř jednoho spoje a přečte koncovou cenu."""
         group = page.locator(CONNECTION_GROUP).nth(index)
         header = group.locator(".connection").first
         if await header.count():
-            await header.click()
+            await header.click(force=True)
             await page.wait_for_timeout(800)
 
         buy = group.locator(
             "a.btn-primary:has(.fa-shopping-cart), a:has-text('Kúpiť lístok')"
         ).first
         if not await buy.count():
-            return None
+            raise ProviderError(self.name, "u spoje chybí tlačítko Kúpiť lístok")
         await buy.evaluate("node => node.click()")
 
-        # Někdy vyskočí modál s upozorněním na zpoždění.
-        modal = page.locator("#modalBuy").first
-        try:
-            if await modal.is_visible(timeout=2000):
-                await page.locator("#modalBuy .btn-primary").first.click()
-                await page.wait_for_timeout(800)
-        except Exception:
-            pass
+        # U zpožděných vlaků vyskočí "Kupujete lístok do meškajúceho vlaku".
+        modal_button = page.locator("#modalBuy .btn-primary").first
+        if await _visible(modal_button, 2500):
+            await modal_button.click(force=True)
+            await page.wait_for_timeout(800)
 
         await page.locator("h1:has-text('Voľba cestujúcich')").wait_for(
-            state="visible", timeout=15000)
-        await page.wait_for_timeout(1000)
+            state="visible", timeout=20000)
+        await page.wait_for_timeout(1200)
 
         await self._choose_passenger(page, query.lead)
 
-        await page.locator("[data-cy='continue']").first.click()
+        await page.locator("[data-cy='continue']").first.click(force=True)
         await page.locator("h1:has-text('Voľba cestovného lístka')").wait_for(
-            state="visible", timeout=15000)
-        await page.wait_for_timeout(2000)
+            state="visible", timeout=20000)
+        return await self._read_final_price(page)
 
-        text = await _first_text(page, ["#finalPrice", "#final_price",
-                                        "h2:has-text('Celková suma')"])
-        amount = _parse_eur(text or "")
-
-        # Zpět na seznam, aby šel zpracovat další spoj.
-        await page.go_back()
-        await page.wait_for_timeout(900)
-        if not await page.locator(CONNECTION_GROUP).first.is_visible():
-            await page.go_back()
-            await page.wait_for_timeout(900)
-        return amount
+    async def _read_final_price(self, page, timeout: float = 12.0) -> Decimal | None:
+        """Cena se dopočítává AJAXem – čteme ji, až v ní je částka."""
+        selectors = ["#finalPrice", "#final_price", "h2:has-text('Celková suma')",
+                     "[data-cy='finalPrice']"]
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            amount = _parse_eur(await _first_text(page, selectors) or "")
+            if amount is not None:
+                return amount
+            await page.wait_for_timeout(500)
+        return None
 
     async def _choose_passenger(self, page, passenger: Passenger) -> None:
         """Nastaví věkovou kategorii, slevovou kartu a případně 100% slevu."""
@@ -316,6 +387,14 @@ class ZsskProvider(BrowserProvider):
 
 
 # ---- pomocné ----------------------------------------------------------------
+async def _visible(locator, timeout_ms: int) -> bool:
+    try:
+        await locator.wait_for(state="visible", timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
 async def _first_text(scope, selectors: list[str]) -> str:
     for selector in selectors:
         try:
@@ -355,6 +434,11 @@ def _parse_eur(text: str) -> Decimal | None:
 
 
 def _age_pattern(passenger: Passenger) -> str:
+    """Věková kategorie ZSSK: dieťa do 15, mladý 16–25, dospelý 26–61, senior 62+.
+
+    Student s ISIC nad 25 let spadá u ZSSK do dospělých – slevu mu dá
+    až karta ISIC vybraná zvlášť v "zľava".
+    """
     if passenger.age < 16:
         return r"15"
     if passenger.age <= 25:

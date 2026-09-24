@@ -18,10 +18,10 @@ import logging
 from decimal import Decimal
 from typing import Any
 
-from ..errors import StationNotFoundError
+from ..errors import StationNotFoundError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
-    DiscountCard,
+    FareCategory,
     FareStatus,
     Journey,
     Leg,
@@ -41,6 +41,16 @@ AUTOCOMPLETE_URL = "https://global.api.flixbus.com/search/autocomplete/cities"
 CITY_TTL = 30 * 24 * 3600
 
 
+_FLIX_PRODUCTS = {
+    FareCategory.INFANT: "children_0_5",
+    FareCategory.CHILD: "children_6_17",
+    FareCategory.YOUTH: "children_6_17",
+    FareCategory.STUDENT: "student",
+    FareCategory.ADULT: "adult",
+    FareCategory.SENIOR: "senior",
+}
+
+
 @PROVIDERS.register()
 class FlixBusProvider(HttpProvider):
     name = "FlixBus"
@@ -55,16 +65,21 @@ class FlixBusProvider(HttpProvider):
     def _passenger_products(self, passengers: tuple[Passenger, ...]) -> dict[str, int]:
         """Rozdělí cestující do kategorií FlixBusu.
 
-        Slevové kategorie platí jen na vnitrostátních linkách některých trhů;
-        když je API odmítne, ``search`` to pozná a zopakuje dotaz jako dospělé.
+        Kategorie ověřené proti API (září 2026): ``adult``, ``student``,
+        ``senior``, ``children_6_17``, ``children_0_5``. Student, senior
+        a mládež mají v Česku 50 % na **vnitrostátních** linkách; na
+        mezinárodních stojí stejně jako dospělý – to API spočítá samo.
         """
-        products = {"adult": 0, "children": 0, "bike_slot": 0}
+        products: dict[str, int] = {}
         for passenger in passengers:
-            if passenger.age < 15:
-                products["children"] += 1
-            else:
-                products["adult"] += 1
-        return {k: v for k, v in products.items() if v}
+            key = _FLIX_PRODUCTS[passenger.category]
+            products[key] = products.get(key, 0) + 1
+        return products
+
+    @staticmethod
+    def _needs_escort(products: dict[str, int]) -> bool:
+        """Samotné děti FlixBus neprodá – API pak vrací nesmyslnou nulu."""
+        return not any(products.get(k) for k in ("adult", "student", "senior"))
 
     async def resolve_city(self, place: str, country_hint: str | None = None) -> tuple[str, str]:
         """Najde ID města ve FlixBusu. Vrací ``(uuid, oficiální název)``."""
@@ -102,7 +117,17 @@ class FlixBusProvider(HttpProvider):
         )
 
         products = self._passenger_products(query.passengers)
-        payload = await self._call(query, from_id, to_id, products)
+        try:
+            payload = await self._call(query, from_id, to_id, products)
+        except TransientProviderError as exc:
+            # Slevovou kategorii FlixBus na některých trzích nezná a vrátí
+            # 400 "No requested passengers". Radši cena pro dospělého než nic.
+            adults = {"adult": sum(products.values())}
+            if "HTTP 400" not in exc.message or products == adults:
+                raise
+            self.note("FlixBus na této trase slevový tarif nezná – ceny jsou pro dospělého")
+            products = adults
+            payload = await self._call(query, from_id, to_id, products)
 
         trips = (payload or {}).get("trips") or []
         journeys: list[Journey] = []
@@ -112,6 +137,13 @@ class FlixBusProvider(HttpProvider):
                 journey = self._to_journey(raw, payload, query, from_name, to_name)
                 if journey is not None:
                     journeys.append(journey)
+
+        if self._needs_escort(products) and journeys:
+            for journey in journeys:
+                journey.fares = []
+                if journey.fare_status is FareStatus.PRICED:
+                    journey.fare_status = FareStatus.UNKNOWN
+            self.note("FlixBus neprodá jízdenku samotným dětem – cenu nelze zjistit")
         return journeys
 
     async def _call(
@@ -152,7 +184,9 @@ class FlixBusProvider(HttpProvider):
         status = FareStatus.PRICED
         fares = []
         price_block = raw.get("price") or {}
-        total = price_block.get("total")
+        # "total" je bez poplatku platformy, který se u FlixBusu platí vždy.
+        # Porovnávat chceme to, co člověk skutečně zaplatí.
+        total = price_block.get("total_with_platform_fee", price_block.get("total"))
         if raw.get("status") in {"sold_out", "unavailable"} or raw.get("available", {}).get("seats") == 0:
             status = FareStatus.SOLD_OUT
         if total is not None:
@@ -162,6 +196,7 @@ class FlixBusProvider(HttpProvider):
                     Decimal(str(total)),
                     str(price_block.get("currency") or query.currency),
                     label="FlixBus",
+                    tariff=_tariff_label(query),
                     bookable=status is FareStatus.PRICED,
                     seats_left=seats if isinstance(seats, int) else None,
                 )
@@ -258,3 +293,9 @@ def _parse_flix_time(node: Any) -> dt.datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=DEFAULT_TZ)
     return parsed
+
+
+def _tariff_label(query: SearchQuery) -> str:
+    names = {"infant": "dítě do 6", "child": "dítě", "youth": "mládež",
+             "student": "student", "adult": "dospělý", "senior": "senior"}
+    return ", ".join(names[p.category.value] for p in query.passengers)

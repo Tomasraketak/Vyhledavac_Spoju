@@ -25,7 +25,7 @@ from typing import Any, ClassVar
 
 from ..browser import playwright_available
 from ..errors import BlockedError, ProviderError, ProviderUnavailableError
-from ..models import FareStatus, Journey, Leg, Mode, SearchQuery
+from ..models import FareCategory, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..registry import PROVIDERS
 from ._hafas import HafasClient, HafasProfile, parse_connections
 from ._oebb_shop import SHOP_PAGE, BrowserTransport, HttpTransport, OebbShop, ShopOffer
@@ -114,6 +114,8 @@ class ObbProvider(HttpProvider):
             except ProviderError as exc:
                 self.note(f"ceny ÖBB se nepodařilo zjistit ({exc.message})")
 
+        if offers and query.lead.category in (FareCategory.INFANT, FareCategory.CHILD):
+            self.note("ceny ÖBB jsou za dospělého – dětskou slevu e-shop počítá až v košíku")
         return merge_offers(journeys, offers, self, query)
 
     async def _timetable(self, query: SearchQuery) -> list[Journey]:

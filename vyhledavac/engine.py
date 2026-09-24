@@ -145,17 +145,17 @@ class SearchEngine:
             return []
 
         async def one(provider: Provider) -> ProviderResult:
+            # Dopravce, který ceny prokliká přes nákupní formulář (ZSSK),
+            # potřebuje víc času než API – limit si může zvýšit sám.
+            limit = max(self.provider_timeout, getattr(provider, "min_timeout", 0.0))
             async with self._semaphore:
                 try:
-                    return await asyncio.wait_for(
-                        provider.run(query), timeout=self.provider_timeout
-                    )
+                    return await asyncio.wait_for(provider.run(query), timeout=limit)
                 except asyncio.TimeoutError:
-                    log.warning("%s: překročen časový limit %.0fs",
-                                provider.name, self.provider_timeout)
+                    log.warning("%s: překročen časový limit %.0fs", provider.name, limit)
                     return ProviderResult(
                         provider=provider.name,
-                        error=f"časový limit {self.provider_timeout:.0f}s vypršel",
+                        error=f"časový limit {limit:.0f}s vypršel",
                     )
 
         results: list[ProviderResult] = []

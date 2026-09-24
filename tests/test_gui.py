@@ -107,6 +107,17 @@ def test_problem_messages_are_translated_to_advice():
     assert "nejezdí" in _explain("stanice 'Kúty' nenalezena", False)
 
 
+def test_browser_errors_are_not_all_reported_as_missing_browser():
+    # Regrese: stačilo slovo "prohlížeč" v chybě a GUI tvrdilo, že chybí
+    # prohlížeč – i když se okno normálně otevřelo (případ OneTicketu).
+    from vyhledavac.gui import _explain
+
+    real = "stránka OneTicketu se do 20 s nevykreslila – prohlížeč dostal prázdnou stránku"
+    assert "Chybí" not in _explain(real, False)
+    assert "nevykreslila" in _explain(real, False)
+    assert "stažené Chromium" in _explain("prohlížeč chromium nelze spustit (Executable doesn't exist)", False)
+
+
 def test_long_option_labels_are_shortened():
     from vyhledavac.gui import _short_label
 

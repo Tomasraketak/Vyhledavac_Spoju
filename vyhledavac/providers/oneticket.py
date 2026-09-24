@@ -23,14 +23,24 @@ vydává smluvním prodejcům, ne jednotlivcům, a projekt je postavený tak,
 aby žádný klíč nepotřeboval. Popis API zůstává jen pro případ, že by ho
 OneTicket jednou otevřel.
 
-Proto se čte veřejný web v prohlížeči. OneTicket navíc **detekuje headless režim**
-a v něm nevykreslí obsah (ověřeno: prázdné ``body``), takže se spouští
-s viditelným oknem. To je také důvod, proč je tenhle dopravce ve výchozím
-nastavení vypnutý – zapněte ho jen když ho vyloženě chcete.
+Proto se čte veřejný web v prohlížeči.
+
+## Skrytý prohlížeč stačí
+
+Starší verze tvrdila, že OneTicket pozná skrytý (headless) prohlížeč a nic
+nevykreslí, a proto otevírala viditelné okno. Mýlila se: React aplikace
+je po načtení HTML 1–3 s prázdná a kontrola proběhla dřív, než se stihla
+vykreslit. Ověřeno živě (září 2026) – headless vrací stejné spoje i ceny.
+Zbylá příčina prázdné stránky je výpadek jejich API ``clientapi.oneticket.cz``;
+aplikace pak neukáže nic, ani chybovou hlášku.
+
+Dopravce je ve výchozím nastavení vypnutý jen proto, že je pomalý
+(~20 s) – zapněte ho, když chcete ceny SJT.
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import re
@@ -41,6 +51,7 @@ from ..errors import ProviderError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
     DiscountCard,
+    FareCategory,
     FareStatus,
     Journey,
     Leg,
@@ -82,23 +93,20 @@ _TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\b")
 @PROVIDERS.register()
 class OneTicketProvider(BrowserProvider):
     name = "OneTicket"
-    label = "OneTicket / SJT – ceny českých vlaků (vyžaduje viditelný prohlížeč)"
+    label = "OneTicket / SJT – ceny českých vlaků (prohlížeč, ~20 s)"
     currency = "CZK"
     provides_prices = True
     provides_stops = False
     countries = ("CZ",)
-    # OneTicket pozná headless prohlížeč a nic nevykreslí.
-    headless = False
+    headless = True
 
     def _fare_key(self, passenger: Passenger) -> str:
-        """Vybere tarif SJT. ISIC má přednost před prostým věkem."""
-        if passenger.is_senior:
-            return "SENIOR"
-        if passenger.has(DiscountCard.ISIC) and 18 <= passenger.age < 26:
-            return "STUDENT_26_ISIC"
-        if 15 <= passenger.age < 18:
-            return "UNDER_18"
-        return "ADULT"
+        """Vybere tarif SJT podle společné kategorie cestujícího."""
+        return {
+            FareCategory.SENIOR: "SENIOR",
+            FareCategory.STUDENT: "STUDENT_26_ISIC",
+            FareCategory.YOUTH: "UNDER_18",
+        }.get(passenger.category, "ADULT")
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         session = await self.browser()
@@ -119,22 +127,32 @@ class OneTicketProvider(BrowserProvider):
             except Exception:
                 pass
 
-    async def _guard_empty_render(self, page) -> None:
-        """Prázdná stránka = OneTicket poznal automatizaci.
+    async def _guard_empty_render(self, page, timeout: float = 20.0) -> None:
+        """Počká, až React aplikace vykreslí formulář.
 
-        Lepší je říct to rovnou, než se pak trápit s nenalezenými selektory.
+        Po načtení HTML je ``body`` 1–3 s prázdné – obsah dokreslí až
+        JavaScript. Dřívější verze kontrolovala hned a hlásila, že
+        OneTicket "poznal robota", přitože stačilo chvíli počkat.
+
+        Když se nevykreslí ani po ``timeout``, je to skoro vždy tím, že
+        aplikaci selhalo její vlastní API (``clientapi.oneticket.cz``) –
+        OneTicket pak neukáže vůbec nic, ani chybovou hlášku.
         """
-        try:
-            body = await page.inner_text("body")
-        except Exception:
-            body = ""
-        if len(body.strip()) < 50:
-            raise ProviderError(
-                self.name,
-                "OneTicket nevykreslil obsah – typicky to znamená, že poznal "
-                "automatizovaný prohlížeč. Zkuste headless=False "
-                "(options={'headless': False}).",
-            )
+        deadline = asyncio.get_running_loop().time() + timeout
+        while True:
+            try:
+                if await page.locator(", ".join(FROM_INPUT)).first.count():
+                    return
+            except Exception:
+                pass
+            if asyncio.get_running_loop().time() > deadline:
+                break
+            await page.wait_for_timeout(400)
+        raise TransientProviderError(
+            self.name,
+            f"stránka OneTicketu se do {timeout:.0f} s nevykreslila – nejspíš "
+            "nedostupné jejich API nebo pomalé připojení",
+        )
 
     async def _first(self, page, selectors: list[str], what: str):
         for selector in selectors:
@@ -300,7 +318,7 @@ class OneTicketProvider(BrowserProvider):
                 self.make_fare(
                     amount, "CZK",
                     label="OneTicket + místenka" if needs_reservation else "OneTicket",
-                    tariff=self._fare_key(query.lead),
+                    tariff=FARE_LABELS.get(self._fare_key(query.lead), ""),
                 )
             )
             status = FareStatus.PRICED

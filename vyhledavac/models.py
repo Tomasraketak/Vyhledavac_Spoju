@@ -49,6 +49,23 @@ class DiscountCard(str, Enum):
     DE_BAHNCARD_50 = "de_bahncard_50"
 
 
+class FareCategory(str, Enum):
+    """Společná kategorie cestujícího pro výběr tarifu.
+
+    Každý dopravce má vlastní kódy (RegioJet ``CZECH_STUDENT_PASS_26``,
+    FlixBus ``student``, ČD tlačítko "ISIC"…). Dřív si je každý modul
+    odvozoval z věku po svém a výsledky se rozcházely. Teď se kategorie
+    určí jednou tady a dopravce ji jen přeloží na svůj kód.
+    """
+
+    INFANT = "infant"     # 0–5: obvykle zdarma s doprovodem
+    CHILD = "child"       # 6–14
+    YOUTH = "youth"       # 15–17
+    STUDENT = "student"   # student s průkazem (ISIC / žákovský)
+    ADULT = "adult"
+    SENIOR = "senior"     # 65+
+
+
 @dataclass(frozen=True, slots=True)
 class Passenger:
     """Jeden cestující. Dopravce si z toho odvodí svůj tarif."""
@@ -70,6 +87,31 @@ class Passenger:
     @property
     def is_senior(self) -> bool:
         return self.age >= 65
+
+    @property
+    def is_student(self) -> bool:
+        """Má nárok na studentskou slevu.
+
+        Zaškrtnutý ISIC (nebo žákovský průkaz) se bere jako prohlášení
+        "mám studentskou slevu" bez ohledu na věk – stejně to dělá web ČD.
+        Bez průkazu se student u dospělých nepředpokládá: česká sleva pro
+        18–26 let platí jen studentům a dopravci ji při kontrole vyžadují.
+        """
+        return self.has(DiscountCard.ISIC) or self.has(DiscountCard.CZ_STUDENT)
+
+    @property
+    def category(self) -> FareCategory:
+        if self.age < 6:
+            return FareCategory.INFANT
+        if self.age < 15:
+            return FareCategory.CHILD
+        if self.age < 18:
+            return FareCategory.YOUTH
+        if self.is_senior or self.has(DiscountCard.CZ_SENIOR):
+            return FareCategory.SENIOR
+        if self.is_student:
+            return FareCategory.STUDENT
+        return FareCategory.ADULT
 
 
 @dataclass(frozen=True, slots=True)

@@ -46,6 +46,8 @@ class Provider(abc.ABC):
     provides_stops: ClassVar[bool] = False
     #: Potřebuje prohlížeč (pomalejší, náchylnější na blokaci).
     needs_browser: ClassVar[bool] = False
+    #: Nejmenší časový limit, který dopravce od enginu potřebuje (s).
+    min_timeout: ClassVar[float] = 0.0
     #: Země, které dopravce obsluhuje (informativní, pro filtrování fronty).
     countries: ClassVar[tuple[str, ...]] = ()
 

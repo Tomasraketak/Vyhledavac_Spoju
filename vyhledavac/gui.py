@@ -738,14 +738,20 @@ def _explain(message: str, blocked: bool) -> str:
                 "nebo tento zdroj vypněte.")
     if "časový limit" in low or "timeout" in low:
         return "Dopravce neodpověděl včas. Ostatní zdroje výsledky dodaly."
-    if "playwright" in low or "prohlížeč" in low:
-        return ("Chybí prohlížeč. Nainstalujte: pip install playwright "
+    # Jen skutečně chybějící prohlížeč. Dřív stačilo, aby chyba obsahovala
+    # slovo "prohlížeč", a každá chyba prohlížečového dopravce se tvářila
+    # jako "chybí prohlížeč" – i když se prohlížeč normálně otevřel.
+    if "chybí playwright" in low or "playwright není nainstalován" in low:
+        return ("Chybí Playwright. Nainstalujte: pip install playwright "
                 "&& playwright install chromium")
+    if "nelze spustit" in low:
+        return ("Prohlížeč se nepodařilo spustit – nejspíš chybí stažené Chromium. "
+                "Spusťte: python -m playwright install chromium")
     if "nenalezena" in low or "nenalezeno" in low:
         return "Tento dopravce zadanou stanici nezná – do téhle destinace nejezdí."
     if "selektor" in low or "změnil" in low:
         return "Web dopravce se změnil, scraper potřebuje aktualizovat."
-    return message[:160]
+    return message[:200]
 
 
 def main() -> None:

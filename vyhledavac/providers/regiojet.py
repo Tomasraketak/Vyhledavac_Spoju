@@ -21,7 +21,7 @@ from typing import Any
 
 from ..errors import StationNotFoundError
 from ..models import (
-    DiscountCard,
+    FareCategory,
     FareStatus,
     Journey,
     Leg,
@@ -43,6 +43,17 @@ ROUTE_TTL = 300                 # ceny se mění často
 _VEHICLE_MODES = {
     "TRAIN": Mode.TRAIN,
     "BUS": Mode.BUS,
+}
+
+
+#: Lidské názvy tarifů podle ``/consts/tariffs`` – kódy samy klamou.
+_TARIFF_NAMES = {
+    "REGULAR": "dospělý",
+    "ATTENDED_CHILD": "dítě 0–5",
+    "CHILD_UNDER_12": "dítě 6–12",
+    "CZECH_STUDENT_PASS_15": "mladistvý 13–17",
+    "CZECH_STUDENT_PASS_26": "student 18–25",
+    "ISIC": "senior 65+",
 }
 
 
@@ -73,18 +84,21 @@ class RegioJetProvider(HttpProvider):
     def _tariff(self, passenger: Passenger) -> str:
         """Namapuje cestujícího na tarif RegioJetu.
 
-        Pořadí podmínek je důležité: ISIC má přednost před věkem, protože
-        drží slevu i nad 26 let. Původní kód měl podmínky obráceně a držitele
-        ISIC nad 26 let poslal do REGULAR.
+        Kódy jsou z ``/consts/tariffs`` a jejich názvy klamou: ``ISIC``
+        je u RegioJetu **Senior od 65 let**, student s ISIC je
+        ``CZECH_STUDENT_PASS_26``. Kód ``SENIOR`` neexistuje vůbec.
         """
-        if passenger.has(DiscountCard.ISIC):
-            return "ISIC"
-        if passenger.age < 15:
-            return "CZECH_STUDENT_PASS_15"
-        if passenger.age < 26:
-            return "CZECH_STUDENT_PASS_26"
-        if passenger.is_senior:
-            return "SENIOR"
+        category = passenger.category
+        if category is FareCategory.INFANT:
+            return "ATTENDED_CHILD"                  # 0–5
+        if category is FareCategory.CHILD and passenger.age < 13:
+            return "CHILD_UNDER_12"                  # 6–12
+        if category in (FareCategory.CHILD, FareCategory.YOUTH):
+            return "CZECH_STUDENT_PASS_15"           # 13–17
+        if category is FareCategory.STUDENT:
+            return "CZECH_STUDENT_PASS_26"           # student 18–25
+        if category is FareCategory.SENIOR:
+            return "ISIC"                            # sic – senior 65+
         return "REGULAR"
 
     async def _locations(self) -> list[dict[str, Any]]:
@@ -270,7 +284,7 @@ class RegioJetProvider(HttpProvider):
                     Decimal(str(price_from)),
                     "CZK",
                     label="od",
-                    tariff=self._tariff(query.lead),
+                    tariff=_TARIFF_NAMES.get(self._tariff(query.lead), ""),
                     bookable=bookable,
                     seats_left=free_seats if isinstance(free_seats, int) else None,
                 )
@@ -289,7 +303,7 @@ class RegioJetProvider(HttpProvider):
                     Decimal(str(price)),
                     "CZK",
                     label=str(cls.get("seatClassKey") or cls.get("name") or "").strip(),
-                    tariff=self._tariff(query.lead),
+                    tariff=_TARIFF_NAMES.get(self._tariff(query.lead), ""),
                     bookable=bookable,
                 )
             )
