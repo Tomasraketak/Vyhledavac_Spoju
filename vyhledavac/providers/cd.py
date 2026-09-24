@@ -33,7 +33,7 @@ from typing import Any
 from ..errors import BlockedError, ProviderError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
-    DiscountCard,
+    FareCategory,
     FareStatus,
     Journey,
     Leg,
@@ -221,42 +221,63 @@ class CdProvider(BrowserProvider):
             log.debug("%s: nepodařilo se nastavit %s (%s)", self.name, selector, exc)
 
     async def _configure_passengers(self, page, passenger: Passenger) -> None:
-        """Nastaví slevovou kategorii.
+        """Vybere v okně "Cestující" tarif podle kategorie cestujícího.
 
-        Selhání není fatální – jen se ztratí sleva, spoje se najdou i tak.
-        Proto se tu používá ``_maybe_visible`` a vše je v ``try``.
+        Okno má tlačítko "Přidat" pro každý tarif (``button.btn-add-user``
+        s ``title="Přidat cestujícího Junior 18—25 let, Žákovský průkaz
+        ČR"``). Postup: přidat náš tarif → odebrat výchozího dospělého →
+        Hotovo → **ověřit** v souhrnu formuláře, že se tarif opravdu změnil.
+
+        Dřívější verze hledala tlačítko s "ISIC", které na cd.cz není,
+        a když ho nenašla, potichu nechala dospělého – ceny pak byly za
+        plné jízdné, i když uživatel zadal 21 let a ISIC. Teď se to nejdřív
+        zkusí a když se tarif nenastaví, dopravce to řekne poznámkou.
         """
-        wanted = _passenger_button(passenger)
-        if wanted is None:
+        choice = _cd_tariff(passenger)
+        if choice is None:
             return
+        label, pattern = choice
         try:
             await self._wait_for_loader(page)
             opener = await self._maybe_visible(page, [".connection-passenger"], timeout=5.0)
             if opener is None:
-                log.info("%s: výběr cestujících není na stránce, jedu bez slevy", self.name)
-                return
-            await opener.click(timeout=5000)
+                raise ProviderError(self.name, "okno Cestující není na stránce")
+            await opener.click(timeout=5000, force=True)
+            modal = page.locator("#passengersModal")
+            await modal.locator("button.btn-add-user").first.wait_for(state="attached", timeout=8000)
+            await page.wait_for_timeout(500)
+
+            titles = await modal.locator("button.btn-add-user").evaluate_all(
+                "buttons => buttons.map(b => b.title || '')")
+            index = next((i for i, t in enumerate(titles) if re.search(pattern, t)), None)
+            if index is None:
+                raise ProviderError(self.name, f"v okně Cestující chybí tarif {label!r}")
+            await modal.locator("button.btn-add-user").nth(index).click(force=True)
+            await page.wait_for_timeout(700)
+
+            # Výchozího dospělého odebrat – jinak by se ceny sčítaly za dva.
+            adult = modal.locator("li.user-card.selected").filter(
+                has_text=re.compile(r"Dospělý 26.64 let\s+Bez slevového", re.S))
+            if await adult.count():
+                minus = adult.first.locator(".icon-minus-circle, button:has(.icon-minus-circle)").first
+                if await minus.count():
+                    await minus.click(force=True)
+                    await page.wait_for_timeout(600)
+
+            done = modal.locator("button:has-text('Hotovo')").first
+            if await done.count():
+                await done.click(force=True)
             await page.wait_for_timeout(900)
 
-            minus = page.locator("li.user-card.selected").filter(
-                has_text="Dospělý").locator(".icon-minus-circle").first
-            if await minus.count():
-                await minus.click(timeout=3000)
-                await page.wait_for_timeout(500)
-
-            for selector in wanted:
-                button = page.locator(selector).first
-                if await button.count():
-                    await button.click(timeout=3000)
-                    await page.wait_for_timeout(600)
-                    break
-
-            done = page.locator("#passengersModal button:has-text('Hotovo')").first
-            if await done.count():
-                await done.click(timeout=3000)
-                await page.wait_for_timeout(600)
+            summary = (await opener.inner_text()).replace("\n", " ")
+            wanted_head = label.split(",")[0]
+            if wanted_head.split()[0] not in summary or "Dospělý 26" in summary and "Dospělý" not in wanted_head:
+                raise ProviderError(self.name, f"tarif se nenastavil (formulář ukazuje {summary!r})")
+            log.info("%s: cestující nastaven na %s", self.name, label)
         except Exception as exc:
-            log.info("%s: slevovou kategorii se nepodařilo nastavit (%s)", self.name, exc)
+            reason = exc.message if isinstance(exc, ProviderError) else str(exc).splitlines()[0][:120]
+            self.note(f"slevu „{label}“ se na cd.cz nepodařilo nastavit – ceny ČD jsou "
+                      f"za dospělého ({reason})")
             try:
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(400)
@@ -459,26 +480,31 @@ def _parse_price(text: str) -> Decimal | None:
         return None
 
 
+def _cd_tariff(passenger: Passenger) -> tuple[str, str] | None:
+    """Tarif ČD pro cestujícího: ``(popisek, regex na title tlačítka)``.
+
+    Nabídka na cd.cz (září 2026): Dítě 0–5 / 6–9 / 10–14, Junior 15–17,
+    Junior 18–25 (bez průkazu i se "Žákovský průkaz ČR"), Dospělý 26–64,
+    Dospělý 65+. Tlačítko s ISIC tam **není** – studenta 18–25 let s ISIC
+    zastupuje Junior se žákovským průkazem (ISIC s potvrzením o studiu ho
+    u českých dopravců nahrazuje). ``None`` = výchozí dospělý, nic neměnit.
+    """
+    age, category = passenger.age, passenger.category
+    if category is FareCategory.INFANT:
+        return "Dítě 0—5 let", r"Dítě 0.5 let"
+    if category is FareCategory.CHILD:
+        return ("Dítě 6—9 let", r"Dítě 6.9 let") if age < 10 else ("Dítě 10—14 let", r"Dítě 10.14 let")
+    if category is FareCategory.YOUTH:
+        return "Junior 15—17 let", r"Junior 15.17 let"
+    if category is FareCategory.SENIOR:
+        return "Dospělý 65 let a starší", r"65 let a starší"
+    if 18 <= age < 26:
+        if category is FareCategory.STUDENT:
+            return "Junior 18—25 let, Žákovský průkaz ČR", r"Junior 18.25 let.*Žákovský"
+        return "Junior 18—25 let", r"Junior 18.25 let$"
+    return None
+
+
 def _tariff_label(passenger: Passenger) -> str:
-    if passenger.has(DiscountCard.ISIC):
-        return "ISIC"
-    if passenger.is_child:
-        return "Dítě"
-    if passenger.is_youth:
-        return "Junior"
-    if passenger.is_senior:
-        return "Senior"
-    return "Obyčejné"
-
-
-def _passenger_button(passenger: Passenger) -> list[str] | None:
-    """Selektory tlačítka pro danou slevovou kategorii."""
-    if passenger.has(DiscountCard.ISIC):
-        return ["button.btn-add-user[title*='ISIC']", "button.btn-add-user[title*='Student']"]
-    if passenger.is_child:
-        return ["button.btn-add-user[title*='Dítě']", "button.btn-add-user[title*='15']"]
-    if passenger.is_youth:
-        return ["button.btn-add-user[title*='Junior']", "button.btn-add-user[title*='Student']"]
-    if passenger.is_senior:
-        return ["button.btn-add-user[title*='Senior']", "button.btn-add-user[title*='65']"]
-    return None  # dospělý je výchozí, není co měnit
+    choice = _cd_tariff(passenger)
+    return choice[0] if choice else "Dospělý 26—64 let"

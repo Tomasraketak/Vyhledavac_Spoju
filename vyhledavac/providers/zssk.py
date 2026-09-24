@@ -356,7 +356,7 @@ class ZsskProvider(BrowserProvider):
                 await option.click()
             await page.wait_for_timeout(1200)
 
-        card_pattern = "ISIC" if passenger.has(DiscountCard.ISIC) else r"Bez|žiadny"
+        card_pattern = "ISIC" if passenger.is_student else r"Bez|žiadny"
         card = page.locator("[data-cy='discountType-0']").first
         if await card.count():
             await card.click()
@@ -451,6 +451,6 @@ def _age_pattern(passenger: Passenger) -> str:
 def _tariff_label(passenger: Passenger) -> str:
     if passenger.has(DiscountCard.SK_FREE):
         return "Bezplatná preprava"
-    if passenger.has(DiscountCard.ISIC):
+    if passenger.is_student:
         return "ISIC"
     return "Obyčajné"

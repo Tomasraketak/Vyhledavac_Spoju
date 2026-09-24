@@ -39,16 +39,18 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
-from zoneinfo import ZoneInfo
 
 from ..errors import BlockedError, ProviderError, StationNotFoundError, TransientProviderError
 from ..http import looks_blocked
+from ..models import DEFAULT_TZ
 
 log = logging.getLogger(__name__)
 
 SHOP_HOST = "https://shop.oebbtickets.at"
 SHOP_PAGE = f"{SHOP_HOST}/de/ticket"
-VIENNA = ZoneInfo("Europe/Vienna")
+# Vídeň má stejná pravidla jako Praha. Vlastní ZoneInfo("Europe/Vienna")
+# na Windows bez balíčku tzdata shodilo import a ÖBB zmizelo z nabídky.
+VIENNA = DEFAULT_TZ
 
 #: Verze ``init`` endpointu. ÖBB je čas od času zvedá; starší obvykle
 #: chvíli dožívají. Zkoušíme od nejznámější.

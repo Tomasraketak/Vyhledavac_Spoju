@@ -183,7 +183,7 @@ asyncio.run(main())
 | **RegioJet** | `providers/regiojet.py` | JSON API jejich webu | ✅ | ✅ | ~4 s | ověřeno živě, vč. slev |
 | **FlixBus** | `providers/flixbus.py` | JSON API jejich webu | ✅ | částečně | ~2 s | ověřeno živě, vč. slev |
 | **ÖBB** | `providers/obb.py` + `_hafas.py` + `_oebb_shop.py` | jízdní řád HAFAS + JSON API e-shopu | ✅¹ | ✅ všechny | ~3 s | jízdní řád ověřen; ceny¹ |
-| **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ | částečně | ~30 s | funguje (ověřeno uživatelem) |
+| **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ | částečně | ~30 s | ověřeno živě, vč. slev |
 | **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ~30 s + ~8 s/cena | ověřeno živě, vč. slev |
 | **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ | ne | ~20 s | ověřeno živě, vč. slev |
 
@@ -213,6 +213,12 @@ totéž: dostane `SearchQuery` (odkud, kam, kdy, cestující) a vrátí seznam
   maskuje automatizaci, blokuje reklamy a obrázky a pozná ochrannou
   stránku.
 
+Když se modul dopravce vůbec nenačte (chybí knihovna apod.), v nabídce
+chybí – GUI ale v panelu vpravo napíše proč. Takhle se našla chyba, kvůli
+které na Windows chybělo ÖBB: časové pásmo „Europe/Vienna“ vyžaduje
+balíček `tzdata`, který Windows nemá. Teď je v `requirements.txt`
+a program má i vlastní záložní pásmo s letním časem.
+
 Chyba jednoho dopravce nikdy neshodí ostatní: engine každého spouští
 zvlášť s časovým limitem a chybu ukáže u jeho řádku v GUI. Když dopravce
 data dodá jen zčásti (např. jízdní řád bez cen), ukáže se žluté
@@ -224,18 +230,28 @@ Z věku a zaškrtnutého ISIC se nejdřív určí **jedna společná kategorie**
 (`Passenger.category` v `models.py`) a každý dopravce ji jen přeloží na
 svůj kód. Dřív si to každý modul počítal po svém a výsledky se rozcházely.
 
-| Kategorie | Kdo | RegioJet | FlixBus | OneTicket | ZSSK | ÖBB |
-|---|---|---|---|---|---|---|
-| dítě do 6 | 0–5 let | `ATTENDED_CHILD` | `children_0_5` | plné | do 15 | dospělý² |
-| dítě | 6–14 let | `CHILD_UNDER_12` / `CZECH_STUDENT_PASS_15` | `children_6_17` | plné | do 15 | dospělý² |
-| mládež | 15–17 let | `CZECH_STUDENT_PASS_15` | `children_6_17` | Junior 15–18 | mladý 16–25 | dospělý |
-| student | zaškrtnutý ISIC | `CZECH_STUDENT_PASS_26` | `student` | Student 18–26 | mladý / + karta ISIC | dospělý |
-| dospělý | ostatní | `REGULAR` | `adult` | Plné jízdné | dospelý | dospělý |
-| senior | 65+ | `ISIC` (sic!) | `senior` | Senior 65+ | senior 62+ | dospělý |
+| Kategorie | Kdo | ČD | RegioJet | FlixBus | OneTicket | ZSSK | ÖBB |
+|---|---|---|---|---|---|---|---|
+| dítě do 6 | 0–5 let | Dítě 0–5 | `ATTENDED_CHILD` | `children_0_5` | plné | do 15 | dospělý² |
+| dítě | 6–14 let | Dítě 6–9 / 10–14 | `CHILD_UNDER_12` / `CZECH_STUDENT_PASS_15` | `children_6_17` | plné | do 15 | dospělý² |
+| mládež | 15–17 let | Junior 15–17 | `CZECH_STUDENT_PASS_15` | `children_6_17` | Junior 15–18 | mladý 16–25 | dospělý |
+| student | ISIC a věk do 26 | Junior 18–25 + Žákovský průkaz ČR | `CZECH_STUDENT_PASS_26` | `student` | Student 18–26 | mladý + karta ISIC | dospělý |
+| dospělý | ostatní (i 18–25 bez ISIC) | Junior 18–25 / Dospělý 26–64 | `REGULAR` | `adult` | Plné jízdné | dospelý | dospělý |
+| senior | 65+ | Dospělý 65+ | `ISIC` (sic!) | `senior` | Senior 65+ | senior 62+ | dospělý |
 
-Zaškrtnutý **ISIC** znamená „mám studentskou slevu“ a platí bez ohledu na
-zadaný věk – stejně to dělá web ČD. Bez ISIC se dospělý do 26 let bere jako
-dospělý, protože česká sleva pro 18–26 let platí jen studentům.
+**Studentská sleva** platí se zaškrtnutým ISIC a jen do 26 let – tak to
+mají všichni dopravci. ČD tlačítko „ISIC“ nemají; studenta zastupuje
+tarif *Junior 18–25 let, Žákovský průkaz ČR* (ISIC s potvrzením o studiu
+žákovský průkaz nahrazuje). Bez průkazu stojí Junior 18–25 stejně jako
+dospělý – ověřeno na cd.cz. Když zaškrtnete ISIC s věkem 26+, GUI na to
+upozorní.
+
+Příklad (Praha → Brno, září 2026): ČD 305 Kč → 152 Kč, RegioJet 199 → 99 Kč,
+FlixBus 238 → 123 Kč, OneTicket 537 → 268 Kč, ZSSK Bratislava → Košice
+486 → 243 Kč.
+
+Když se slevu u prohlížečového dopravce nepodaří nastavit, program to
+napíše žlutě u dopravce – nikdy tiše neukáže cenu za dospělého.
 
 ² ÖBB počítá slevy (Vorteilscard, děti) až v košíku; program ukáže cenu
 za dospělého a upozorní na to.
@@ -320,8 +336,10 @@ vykreslí server. Postup:
 
 1. Otevře `cd.cz/spojeni-a-jizdenka/`, počká na doplnění formuláře
    JavaScriptem a zavře cookie lištu.
-2. V okně cestujících vybere tlačítko podle kategorie (ISIC, Dítě,
-   Junior, Senior).
+2. V okně *Cestující* přidá tarif podle kategorie (např. *Junior 18–25
+   let, Žákovský průkaz ČR*), odebere výchozího dospělého a v souhrnu
+   formuláře ověří, že se tarif opravdu změnil. Dřív hledal tlačítko
+   „ISIC“, které na cd.cz není, a potichu nechal dospělého.
 3. Vyplní odkud/kam přes našeptávač a odešle.
 4. Počká na stránku `/spojeni-tam/…` a z ní přečte spoje a ceny.
 

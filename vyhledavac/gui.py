@@ -37,7 +37,7 @@ from .models import (
     SearchQuery,
     SearchResult,
 )
-from .registry import HACKS, PROVIDERS, load_plugins
+from .registry import HACKS, LOAD_ERRORS, PROVIDERS, load_plugins
 
 log = logging.getLogger(__name__)
 
@@ -187,6 +187,7 @@ class App(tk.Tk):
 
         self._build_results(body)
         self._build_sidebar(body)
+        self._show_load_errors()
 
     def _build_search_bar(self, parent: tk.Widget) -> None:
         bar = card(parent)
@@ -219,7 +220,7 @@ class App(tk.Tk):
         opts.pack(side=tk.LEFT, padx=(4, 12))
         tk.Label(opts, text="Sleva", bg=CARD, fg=MUTED,
                  font=("Segoe UI", 8)).pack(anchor=tk.W)
-        self.var_isic = tk.BooleanVar(value=True)
+        self.var_isic = tk.BooleanVar(value=False)
         tk.Checkbutton(opts, text="ISIC", variable=self.var_isic, bg=CARD,
                        activebackground=CARD, font=("Segoe UI", 9)).pack(anchor=tk.W)
 
@@ -414,6 +415,11 @@ class App(tk.Tk):
         self.rows.clear()
         self.tree.delete(*self.tree.get_children())
         self._clear_problems()
+        lead = query.lead
+        if lead.has(DiscountCard.ISIC) and lead.age >= 26:
+            self._add_problem("ISIC", "studentská sleva platí jen do 26 let – hledám "
+                              "ceny pro dospělého. Jste-li mladší, opravte věk.",
+                              blocked=False, soft=True)
         self.summary.config(text="")
         self.count_label.config(text="")
         self._generation += 1
@@ -616,6 +622,14 @@ class App(tk.Tk):
         for child in self.problem_body.winfo_children():
             child.destroy()
         self.problem_card.pack_forget()
+        self._show_load_errors()
+
+    def _show_load_errors(self) -> None:
+        """Dopravce, jehož modul se nenačetl, v nabídce chybí – řekneme proč."""
+        for module, error in LOAD_ERRORS.items():
+            name = module.rsplit(".", 1)[-1]
+            self._add_problem(name, f"modul se nenačetl, v nabídce proto chybí ({error})",
+                              blocked=False, soft=True)
 
     def _add_problem(self, provider: str, message: str, blocked: bool,
                      soft: bool = False) -> None:

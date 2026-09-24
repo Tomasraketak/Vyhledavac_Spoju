@@ -1,5 +1,7 @@
 # Jádro – nutné vždy.
 httpx>=0.27
+# Databáze časových pásem – Windows ji nemá vestavěnou.
+tzdata ; sys_platform == "win32"
 
 # Volitelné: jen pro dopravce, kteří potřebují prohlížeč (ČD).
 # pip install playwright && playwright install chromium

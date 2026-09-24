@@ -14,13 +14,62 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Iterable, Sequence
 
-# Evropa/Praha používáme jako výchozí zónu pro vstupy bez zóny.
-try:  # Python 3.9+
-    from zoneinfo import ZoneInfo
+class CentralEuropeanTime(dt.tzinfo):
+    """SEČ/SELČ podle pravidel EU – náhrada, když chybí databáze pásem.
 
-    DEFAULT_TZ = ZoneInfo("Europe/Prague")
-except Exception:  # pragma: no cover - fallback pro exotická prostředí
-    DEFAULT_TZ = dt.timezone(dt.timedelta(hours=1))
+    Windows nemá systémovou databázi časových pásem a ``zoneinfo`` ji pak
+    bere z balíčku ``tzdata``. Když chybí i ten, dřívější záloha byla
+    pevné UTC+1 – v létě tak byly časy z ČD a ZSSK o hodinu posunuté
+    oproti RegioJetu a ÖBB. Letní čas v EU: od poslední neděle v březnu
+    01:00 UTC do poslední neděle v říjnu 01:00 UTC.
+    """
+
+    _STD = dt.timedelta(hours=1)
+    _DST = dt.timedelta(hours=1)
+
+    @staticmethod
+    def _last_sunday(year: int, month: int) -> dt.datetime:
+        day = dt.datetime(year, month + 1, 1) - dt.timedelta(days=1)
+        return day - dt.timedelta(days=(day.weekday() + 1) % 7)
+
+    def _is_dst_utc(self, utc: dt.datetime) -> bool:
+        start = self._last_sunday(utc.year, 3).replace(hour=1)
+        end = self._last_sunday(utc.year, 10).replace(hour=1)
+        return start <= utc.replace(tzinfo=None) < end
+
+    def utcoffset(self, when: dt.datetime | None) -> dt.timedelta:
+        return self._STD + self.dst(when)
+
+    def dst(self, when: dt.datetime | None) -> dt.timedelta:
+        if when is None:
+            return dt.timedelta(0)
+        # Místní čas → přibližné UTC (se standardním posunem) pro rozhodnutí.
+        return self._DST if self._is_dst_utc(when.replace(tzinfo=None) - self._STD) else dt.timedelta(0)
+
+    def fromutc(self, when: dt.datetime) -> dt.datetime:
+        utc = when.replace(tzinfo=None)
+        offset = self._STD + (self._DST if self._is_dst_utc(utc) else dt.timedelta(0))
+        return (utc + offset).replace(tzinfo=self)
+
+    def tzname(self, when: dt.datetime | None) -> str:
+        return "CEST" if self.dst(when) else "CET"
+
+    def __repr__(self) -> str:
+        return "CentralEuropeanTime()"
+
+
+def _central_european_zone() -> dt.tzinfo:
+    """Praha i Vídeň mají stejná pravidla – jedno pásmo pro obě."""
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo("Europe/Prague")
+    except Exception:
+        return CentralEuropeanTime()
+
+
+# Evropa/Praha používáme jako výchozí zónu pro vstupy bez zóny.
+DEFAULT_TZ = _central_european_zone()
 
 
 class Mode(str, Enum):
@@ -90,14 +139,15 @@ class Passenger:
 
     @property
     def is_student(self) -> bool:
-        """Má nárok na studentskou slevu.
+        """Má nárok na studentskou slevu: průkaz (ISIC / žákovský) a věk do 26.
 
-        Zaškrtnutý ISIC (nebo žákovský průkaz) se bere jako prohlášení
-        "mám studentskou slevu" bez ohledu na věk – stejně to dělá web ČD.
-        Bez průkazu se student u dospělých nepředpokládá: česká sleva pro
-        18–26 let platí jen studentům a dopravci ji při kontrole vyžadují.
+        Věková hranice platí u všech dopravců (ČD "Junior 18–25", RegioJet
+        "Student 18–25", OneTicket "Student 18–26"). Bez průkazu se student
+        nepředpokládá – ověřeno na cd.cz: Junior 18–25 bez průkazu stojí
+        stejně jako dospělý.
         """
-        return self.has(DiscountCard.ISIC) or self.has(DiscountCard.CZ_STUDENT)
+        has_card = self.has(DiscountCard.ISIC) or self.has(DiscountCard.CZ_STUDENT)
+        return has_card and self.age < 26
 
     @property
     def category(self) -> FareCategory:

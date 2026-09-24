@@ -20,7 +20,7 @@ ISIC = (DiscountCard.ISIC,)
     (Passenger(age=16, cards=ISIC), FareCategory.YOUTH),
     (Passenger(age=22), FareCategory.ADULT),            # bez průkazu není student
     (Passenger(age=22, cards=ISIC), FareCategory.STUDENT),
-    (Passenger(age=26, cards=ISIC), FareCategory.STUDENT),  # výchozí nastavení GUI
+    (Passenger(age=26, cards=ISIC), FareCategory.ADULT),    # studentská sleva jen do 26
     (Passenger(age=70, cards=ISIC), FareCategory.SENIOR),
     (Passenger(age=40), FareCategory.ADULT),
 ])
@@ -33,7 +33,7 @@ def test_category(passenger, category):
     (Passenger(age=10), "CHILD_UNDER_12"),
     (Passenger(age=14), "CZECH_STUDENT_PASS_15"),
     (Passenger(age=16), "CZECH_STUDENT_PASS_15"),
-    (Passenger(age=26, cards=ISIC), "CZECH_STUDENT_PASS_26"),
+    (Passenger(age=21, cards=ISIC), "CZECH_STUDENT_PASS_26"),
     (Passenger(age=70), "ISIC"),       # u RegioJetu je "ISIC" senior 65+
     (Passenger(age=40), "REGULAR"),
 ])
@@ -63,10 +63,47 @@ def test_flixbus_kids_alone_have_no_price():
 
 
 @pytest.mark.parametrize("passenger, key", [
-    (Passenger(age=26, cards=ISIC), "STUDENT_26_ISIC"),
+    (Passenger(age=21, cards=ISIC), "STUDENT_26_ISIC"),
     (Passenger(age=16), "UNDER_18"),
     (Passenger(age=70), "SENIOR"),
     (Passenger(age=40), "ADULT"),
 ])
 def test_oneticket_fare(passenger, key):
     assert OneTicketProvider(cache=MemoryCache())._fare_key(passenger) == key
+
+
+@pytest.mark.parametrize("passenger, label", [
+    (Passenger(age=21, cards=ISIC), "Junior 18—25 let, Žákovský průkaz ČR"),  # případ z praxe
+    (Passenger(age=21), "Junior 18—25 let"),
+    (Passenger(age=16), "Junior 15—17 let"),
+    (Passenger(age=8), "Dítě 6—9 let"),
+    (Passenger(age=12), "Dítě 10—14 let"),
+    (Passenger(age=70), "Dospělý 65 let a starší"),
+    (Passenger(age=40), "Dospělý 26—64 let"),
+])
+def test_cd_tariff(passenger, label):
+    from vyhledavac.providers.cd import _cd_tariff, _tariff_label
+
+    assert _tariff_label(passenger) == label
+
+
+def test_cd_patterns_match_real_button_titles():
+    """Titulky tlačítek zkopírované z cd.cz (září 2026)."""
+    import re
+    from vyhledavac.providers.cd import _cd_tariff
+
+    titles = [
+        "Přidat cestujícího Dospělý 65 let a starší",
+        "Přidat cestujícího Dospělý 26—64 let, IN 25",
+        "Přidat cestujícího Junior 18—25 let, Žákovský průkaz ČR",
+        "Přidat cestujícího Junior 18—25 let",
+        "Přidat cestujícího Junior 15—17 let",
+        "Přidat cestujícího Dítě 10—14 let",
+        "Přidat cestujícího Dítě 6—9 let",
+        "Přidat cestujícího Dítě 0—5 let",
+    ]
+    for age, cards, expected in [(21, ISIC, 2), (21, (), 3), (16, (), 4), (12, (), 5),
+                                 (8, (), 6), (3, (), 7), (70, (), 0)]:
+        _, pattern = _cd_tariff(Passenger(age=age, cards=cards))
+        hits = [i for i, t in enumerate(titles) if re.search(pattern, t)]
+        assert hits == [expected], (age, cards, hits)

@@ -72,6 +72,10 @@ HACKS: Registry = Registry("hacks")
 
 _loaded = False
 
+#: Moduly, které se nepodařilo načíst: ``{"vyhledavac.providers.obb": "chyba"}``.
+#: GUI je ukáže – dřív se chyba jen zalogovala a dopravce potichu zmizel.
+LOAD_ERRORS: dict[str, str] = {}
+
 
 def load_plugins(force: bool = False) -> None:
     """Naimportuje vestavěné moduly a případné externí pluginy.
@@ -97,6 +101,7 @@ def load_plugins(force: bool = False) -> None:
             except Exception as exc:
                 # Jeden rozbitý dopravce nesmí shodit celou aplikaci.
                 log.error("modul %s.%s se nenačetl: %s", package, info.name, exc)
+                LOAD_ERRORS[f"{package}.{info.name}"] = f"{type(exc).__name__}: {exc}"
 
     extra = os.environ.get("VYHLEDAVAC_PLUGINS", "")
     for dotted in filter(None, (p.strip() for p in extra.split(","))):
@@ -105,3 +110,4 @@ def load_plugins(force: bool = False) -> None:
             log.info("načten externí plugin %s", dotted)
         except Exception as exc:
             log.error("externí plugin %s se nenačetl: %s", dotted, exc)
+            LOAD_ERRORS[dotted] = f"{type(exc).__name__}: {exc}"
