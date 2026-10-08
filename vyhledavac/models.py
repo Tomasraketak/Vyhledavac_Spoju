@@ -439,6 +439,8 @@ class ProviderResult:
     #: Dopravce zadanou stanici nezná – do téhle destinace nejezdí. Je to
     #: chyba (spoje nejsou), ale UI ji má ukázat mírně, ne jako výpadek.
     not_served: bool = False
+    #: Průběžný stav – dopravce ještě běží (např. dozjišťuje ceny).
+    partial: bool = False
 
     @property
     def ok(self) -> bool:

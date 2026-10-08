@@ -10,7 +10,8 @@ Orchestruje dopravce, filtry a travel hacky. Klíčové vlastnosti:
   zaznamená do ``ProviderResult``. Jeden rozbitý dopravce nikdy neshodí
   hledání ani nezmizí bez upozornění.
 * **Průběžné výsledky.** Přes ``on_partial`` dostane UI výsledky hned,
-  jak dorazí první dopravce.
+  jak dorazí první dopravce. Pomalý dopravce navíc může přes
+  ``on_progress`` posílat mezistavy (jízdní řád hned, ceny postupně).
 * **Sdílená cache dotazů** – travel hacky se hodně doptávají na dílčí
   úseky a bez toho by se stejný dotaz posílal opakovaně.
 """
@@ -101,6 +102,7 @@ class SearchEngine:
         query: SearchQuery,
         *,
         on_partial: PartialCallback | None = None,
+        on_progress: PartialCallback | None = None,
         sort_by: str = "departure",
         enable_hacks: bool = True,
     ) -> SearchResult:
@@ -108,7 +110,8 @@ class SearchEngine:
         await self.converter.load()
 
         result = SearchResult(query=query)
-        direct = await self._run_providers(query, on_partial=on_partial)
+        direct = await self._run_providers(query, on_partial=on_partial,
+                                           on_progress=on_progress)
         result.extend(direct)
 
         if enable_hacks and self.hacks:
@@ -137,6 +140,7 @@ class SearchEngine:
         query: SearchQuery,
         *,
         on_partial: PartialCallback | None = None,
+        on_progress: PartialCallback | None = None,
         providers: Sequence[Provider] | None = None,
     ) -> list[ProviderResult]:
         providers = self.providers if providers is None else providers
@@ -148,11 +152,30 @@ class SearchEngine:
             # Dopravce, který ceny prokliká přes nákupní formulář (ZSSK),
             # potřebuje víc času než API – limit si může zvýšit sám.
             limit = max(self.provider_timeout, getattr(provider, "min_timeout", 0.0))
+            latest: list[ProviderResult] = []
+
+            def progress(partial: ProviderResult) -> None:
+                latest[:] = [partial]
+                if on_progress is not None:
+                    try:
+                        on_progress(partial)
+                    except Exception:
+                        log.exception("callback on_progress selhal")
+
             async with self._semaphore:
                 try:
-                    return await asyncio.wait_for(provider.run(query), timeout=limit)
+                    return await asyncio.wait_for(provider.run(query, progress), timeout=limit)
                 except asyncio.TimeoutError:
                     log.warning("%s: překročen časový limit %.0fs", provider.name, limit)
+                    if latest and latest[0].journeys:
+                        # Co už dopravce průběžně poslal, nezahodíme.
+                        kept = latest[0]
+                        return ProviderResult(
+                            provider=provider.name, journeys=kept.journeys,
+                            elapsed=limit,
+                            notes=kept.notes + [f"časový limit {limit:.0f}s vypršel – "
+                                                "výsledek není úplný"],
+                        )
                     return ProviderResult(
                         provider=provider.name,
                         error=f"časový limit {limit:.0f}s vypršel",

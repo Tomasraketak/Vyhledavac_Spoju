@@ -461,7 +461,10 @@ class App(tk.Tk):
             def partial(result: ProviderResult) -> None:
                 self.events.put((generation, "partial", result))
 
-            result = await engine.search(query, on_partial=partial,
+            def progress(result: ProviderResult) -> None:
+                self.events.put((generation, "progress", result))
+
+            result = await engine.search(query, on_partial=partial, on_progress=progress,
                                          sort_by=self.sort_by,
                                          enable_hacks=bool(hacks))
             self.events.put((generation, "done", result))
@@ -485,6 +488,8 @@ class App(tk.Tk):
                         row.set(status, detail)
                 elif kind == "partial":
                     self._on_partial(payload)
+                elif kind == "progress":
+                    self._on_progress(payload)
                 elif kind == "done":
                     self._on_done(payload)
                 elif kind == "fatal":
@@ -521,9 +526,22 @@ class App(tk.Tk):
             for note in result.notes:
                 self._add_problem(result.provider, note, blocked=False, soft=True)
 
+        # Dopravce mohl už dřív poslat průběžný stav – nahradit, ne přidat.
+        self.live = [j for j in self.live if j.provider != result.provider]
         if result.journeys:
             self.live.extend(result.journeys)
-            self._repaint()
+        self._repaint()
+
+    def _on_progress(self, result: ProviderResult) -> None:
+        """Průběžný stav pomalého dopravce: spoje hned, ceny postupně."""
+        row = self.provider_rows.get(result.provider)
+        if row:
+            priced = sum(1 for j in result.journeys if j.price is not None)
+            row.set("running", f"{len(result.journeys)} spojů · ceny {priced}/"
+                               f"{len(result.journeys)}…")
+        self.live = [j for j in self.live if j.provider != result.provider]
+        self.live.extend(result.journeys)
+        self._repaint()
 
     def _on_done(self, result: SearchResult) -> None:
         self.live = list(result.journeys)

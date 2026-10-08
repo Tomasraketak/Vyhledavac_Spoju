@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import abc
 import contextvars
+import copy
 import datetime as dt
 import logging
 import time
 from decimal import Decimal
-from typing import Any, ClassVar, Sequence
+from typing import Any, Callable, ClassVar, Sequence
 
 from ..cache import Cache, get_cache
 from ..errors import ProviderError, ProviderUnavailableError
@@ -29,6 +30,12 @@ log = logging.getLogger(__name__)
 _NOTES: contextvars.ContextVar[list[str] | None] = contextvars.ContextVar(
     "provider_notes", default=None
 )
+# Kam posílat průběžné výsledky (``Provider.publish``) – opět per volání ``run``.
+_PUBLISH: contextvars.ContextVar[Callable[[list[Journey]], None] | None] = contextvars.ContextVar(
+    "provider_publish", default=None
+)
+
+ProgressCallback = Callable[[ProviderResult], None]
 
 
 class Provider(abc.ABC):
@@ -85,6 +92,30 @@ class Provider(abc.ABC):
         notes = _NOTES.get()
         if notes is not None and message not in notes:
             notes.append(message)
+
+    def publish(self, journeys: list[Journey]) -> None:
+        """Pošle průběžný stav, zatímco ``search`` ještě běží.
+
+        Pomalý dopravce (ZSSK zjišťuje ceny spoj po spoji) tak ukáže jízdní
+        řád hned a ceny doplňuje, jak přicházejí – nečeká se na poslední.
+        Bez posluchače (CLI, travel hacky) je to no-op. Posílá se snímek:
+        dopravce si může své objekty dál měnit.
+        """
+        callback = _PUBLISH.get()
+        if callback is None:
+            return
+        snapshot = []
+        for journey in journeys:
+            if not _is_sane(journey):
+                continue
+            clone = copy.copy(journey)
+            clone.fares = list(journey.fares)
+            snapshot.append(clone)
+        try:
+            callback(snapshot)
+        except Exception:
+            log.exception("%s: průběžný výsledek se nepodařilo předat", self.name)
+
     def make_fare(
         self,
         amount: Decimal | float | int | str,
@@ -98,15 +129,27 @@ class Provider(abc.ABC):
         fare.amount_czk = self.converter.to_czk(value, cur)
         return fare
 
-    async def run(self, query: SearchQuery) -> ProviderResult:
+    async def run(
+        self, query: SearchQuery, on_progress: ProgressCallback | None = None
+    ) -> ProviderResult:
         """Spustí hledání a zabalí výsledek i chybu do ``ProviderResult``.
 
         Engine tohle volá místo ``search`` – díky tomu jeden padající
-        dopravce nikdy neshodí ostatní.
+        dopravce nikdy neshodí ostatní. ``on_progress`` dostává průběžné
+        stavy z ``publish`` (s ``partial=True``).
         """
         started = time.monotonic()
         notes: list[str] = []
         token = _NOTES.set(notes)
+
+        def forward(journeys: list[Journey]) -> None:
+            if on_progress is not None:
+                on_progress(ProviderResult(
+                    provider=self.name, journeys=journeys, partial=True,
+                    elapsed=time.monotonic() - started, notes=list(notes),
+                ))
+
+        publish_token = _PUBLISH.set(forward if on_progress is not None else None)
         try:
             journeys = await self.search(query)
         except ProviderError as exc:
@@ -133,6 +176,7 @@ class Provider(abc.ABC):
             )
         finally:
             _NOTES.reset(token)
+            _PUBLISH.reset(publish_token)
 
         journeys = [j for j in journeys if _is_sane(j)]
         return ProviderResult(

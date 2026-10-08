@@ -117,6 +117,8 @@ class BrowserSession:
         self._pw = None
         self._browser = None
         self._context = None
+        #: Další izolované kontexty (vlastní cookies = vlastní relace na webu).
+        self._extra_contexts: list[Any] = []
         self.profile = random.choice([p for p in BROWSER_PROFILES if "Firefox" not in p["user_agent"]])
 
     async def start(self) -> None:
@@ -152,7 +154,10 @@ class BrowserSession:
                 f"Spusťte 'playwright install {self.engine}'.",
             ) from exc
 
-        self._context = await self._browser.new_context(
+        self._context = await self._make_context()
+
+    async def _make_context(self):
+        context = await self._browser.new_context(
             user_agent=self.profile["user_agent"],
             locale=self.locale,
             timezone_id=self.timezone,
@@ -162,8 +167,9 @@ class BrowserSession:
             java_script_enabled=True,
             extra_http_headers={"Accept-Language": f"{self.locale},cs;q=0.9,en;q=0.7"},
         )
-        await self._context.add_init_script(_STEALTH_JS)
-        await self._context.route("**/*", self._route)
+        await context.add_init_script(_STEALTH_JS)
+        await context.route("**/*", self._route)
+        return context
 
     async def _route(self, route, request) -> None:
         """Zahodí zbytečné zdroje – načtení je pak výrazně rychlejší."""
@@ -190,7 +196,28 @@ class BrowserSession:
         page.set_default_navigation_timeout(30000)
         return page
 
+    async def new_isolated_page(self):
+        """Stránka ve vlastním kontextu – web ji vidí jako jiného návštěvníka.
+
+        Hodí se pro souběžnou práci na webech se stavem na serveru (JSF):
+        dvě záložky jedné relace by si navzájem přepisovaly rozpracovaný
+        nákup, dva kontexty ne.
+        """
+        await self.start()
+        context = await self._make_context()
+        self._extra_contexts.append(context)
+        page = await context.new_page()
+        page.set_default_timeout(20000)
+        page.set_default_navigation_timeout(30000)
+        return page
+
     async def close(self) -> None:
+        for context in self._extra_contexts:
+            try:
+                await context.close()
+            except Exception:
+                pass
+        self._extra_contexts = []
         for closer in (self._context, self._browser):
             if closer is not None:
                 try:

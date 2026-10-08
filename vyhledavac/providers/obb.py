@@ -110,6 +110,8 @@ class ObbProvider(HttpProvider):
 
         offers: list[ShopOffer] = []
         if prices_task is not None:
+            if not prices_task.done():
+                self.publish(journeys)      # jízdní řád hned, ceny za chvíli
             try:
                 offers = await asyncio.wait_for(prices_task, timeout=PRICE_BUDGET)
             except asyncio.TimeoutError:
