@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -168,7 +169,8 @@ def parse_connections(res: dict[str, Any], provider: str, tz=DEFAULT_TZ) -> list
         base_date = _parse_date(conn.get("date"))
         if base_date is None:
             continue
-        legs = _parse_sections(conn, base_date, locations, products, tz)
+        legs = _parse_sections(conn, base_date, locations, products, tz,
+                               common.get("opL") or [])
         if not legs:
             continue
         journeys.append(
@@ -188,6 +190,7 @@ def _parse_sections(
     locations: list[dict[str, Any]],
     products: list[dict[str, Any]],
     tz,
+    operators: list[dict[str, Any]] | None = None,
 ) -> list[Leg]:
     legs: list[Leg] = []
     for section in conn.get("secL") or []:
@@ -239,12 +242,41 @@ def _parse_sections(
                 departure=departure,
                 arrival=arrival,
                 mode=mode,
-                carrier=str(product.get("oprX") is not None and product.get("name") or "").strip() or line,
+                carrier=_operator(operators or [], product.get("oprX")),
                 line=line,
                 stops=stops,
             )
         )
     return legs
+
+
+def _operator(operators: list[dict[str, Any]], index: Any) -> str:
+    """Jméno provozovatele ("České dráhy", "ÖBB") – ne název vlaku.
+
+    Dřív se sem dával název produktu ("EX 611"), takže filtr dopravců
+    v rozhraní nabízel čísla vlaků.
+    """
+    if not (isinstance(index, int) and 0 <= index < len(operators)):
+        return ""
+    from ..normalize import normalize
+
+    name = str(operators[index].get("name") or "").strip()
+    key = normalize(re.sub(r",?\s*(a\.\s*s\.|s\.\s*r\.\s*o\.|gmbh|ag)\s*$", "", name, flags=re.I))
+    return _OPERATOR_NAMES.get(key, name)
+
+
+#: Sjednocená jména provozovatelů, ať filtr dopravců nemá tři podoby ČD.
+_OPERATOR_NAMES = {
+    "ceske drahy": "ČD",
+    "nahreisezug": "ÖBB",
+    "osterreichische bundesbahnen": "ÖBB",
+    "obb personenverkehr": "ÖBB",
+    "zeleznicna spolocnost slovensko": "ZSSK",
+    "regiojet": "RegioJet",
+    "leo express": "Leo Express",
+    "db fernverkehr": "DB",
+    "westbahn": "WESTbahn",
+}
 
 
 def _parse_stops(raw_stops, base_date: dt.date, locations, tz) -> list[Stop]:

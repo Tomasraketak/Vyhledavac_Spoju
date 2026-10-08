@@ -1,0 +1,87 @@
+"""Převod modelů na JSON pro webové rozhraní."""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+from typing import Any
+
+from ..models import Fare, Journey, Leg, Stop
+
+
+def _time(value: dt.datetime | None) -> str | None:
+    return value.isoformat(timespec="minutes") if value is not None else None
+
+
+def _num(value: Decimal | None) -> float | None:
+    return float(value) if value is not None else None
+
+
+def stop_to_dict(stop: Stop) -> dict[str, Any]:
+    return {"name": stop.name, "arr": _time(stop.arrival), "dep": _time(stop.departure),
+            "platform": stop.platform}
+
+
+def leg_to_dict(leg: Leg) -> dict[str, Any]:
+    return {
+        "mode": leg.mode.value,
+        "line": leg.line,
+        "carrier": leg.carrier,
+        "from": leg.origin,
+        "to": leg.destination,
+        "dep": _time(leg.departure),
+        "arr": _time(leg.arrival),
+        "reservation": leg.reservation_required,
+        "stops": [stop_to_dict(s) for s in leg.stops],
+    }
+
+
+def fare_to_dict(fare: Fare) -> dict[str, Any]:
+    return {
+        "amount": _num(fare.amount),
+        "currency": fare.currency,
+        "czk": _num(fare.amount_czk),
+        "label": fare.label,
+        "tariff": fare.tariff,
+        "bookable": fare.bookable,
+        "seats": fare.seats_left,
+    }
+
+
+def journey_to_dict(journey: Journey, key: str, *, dominated: bool = False) -> dict[str, Any]:
+    price = journey.price
+    return {
+        "id": key,
+        "provider": journey.provider,
+        "dep": _time(journey.departure),
+        "arr": _time(journey.arrival),
+        "minutes": int(journey.duration.total_seconds() // 60),
+        "transfers": journey.transfers,
+        "price": _num(price),
+        "priceLabel": journey.price_label,
+        "fareStatus": journey.fare_status.value,
+        "fares": [fare_to_dict(f) for f in journey.fares],
+        "link": journey.deep_link,
+        "notes": list(journey.notes),
+        "hack": journey.is_hack,
+        "dominated": dominated,
+        "legs": [leg_to_dict(leg) for leg in journey.legs],
+        "segments": [{
+            "provider": s.provider,
+            "from": s.origin,
+            "to": s.destination,
+            "priceLabel": s.price_label,
+            "link": s.deep_link,
+        } for s in journey.segments],
+    }
+
+
+def journey_key(journey: Journey) -> str:
+    """Stabilní klíč spoje napříč průběžnými aktualizacemi.
+
+    Rozbalený detail v prohlížeči tak zůstane otevřený, i když dopravce
+    mezitím doplní cenu.
+    """
+    lines = "|".join(leg.line for leg in journey.legs)
+    hack = "H" if journey.is_hack else ""
+    return f"{hack}{journey.provider}|{journey.departure:%Y%m%d%H%M}|{journey.arrival:%H%M}|{lines}"

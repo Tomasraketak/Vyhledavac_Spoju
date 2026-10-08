@@ -2,7 +2,7 @@
 rem ---------------------------------------------------------------------------
 rem  Vyhledávač spojů - spuštění na Windows jedním kliknutím.
 rem
-rem  Bez parametrů otevře grafické rozhraní. S parametry se chová jako
+rem  Bez parametrů otevře webové rozhraní v prohlížeči. S parametry se chová jako
 rem  příkazová řádka, takže jde volat i takto:
 rem      Vyhledavac.bat Praha Brno --sort price
 rem
@@ -103,15 +103,18 @@ rem ===========================================================================
 if not "%~1"=="" goto radka
 
 rem Rychlá kontrola, než okno konzole zmizí - ať případná chyba není němá.
-"%PYC%" -c "import tkinter, httpx, vyhledavac.gui" 2>&1
+"%PYC%" -c "import httpx, vyhledavac.web.server" 2>&1
 if errorlevel 1 goto chybaImport
 
-rem pythonw.exe neotevírá černé okno konzole za grafickým rozhraním.
+rem Webové rozhraní: malý server na tomto počítači + okno prohlížeče.
+rem pythonw.exe neotevírá černé okno konzole; server se sám ukončí,
+rem když stránku v prohlížeči zavřete. Původní okno (tkinter) dál jde
+rem spustit příkazem:  .venv\Scripts\python.exe -m vyhledavac.gui
 if exist "%PYW%" (
-    start "" "%PYW%" -m vyhledavac.gui
+    start "" "%PYW%" -m vyhledavac.web
     goto konec
 )
-"%PYC%" -m vyhledavac.gui
+"%PYC%" -m vyhledavac.web
 if errorlevel 1 goto chybaBehu
 goto konec
 
@@ -129,14 +132,14 @@ rem  Hledání Pythonu - nastaví PYTHON, nebo vrátí errorlevel 1
 rem ===========================================================================
 :najdiPython
 rem Windows Python Launcher je nejspolehlivější, umí si sám vybrat verzi.
-py -3 -c "import sys, tkinter; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON=py -3"
     exit /b 0
 )
 rem Bez launcheru zkusíme python z PATH. Pozor: zástupce z Microsoft Store
 rem se tváří jako python.exe, ale jen otevře obchod - proto ten testovací import.
-python -c "import sys, tkinter; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON=python"
     exit /b 0
@@ -149,11 +152,11 @@ rem  Chybové hlášky - ať uživatel ví, co s tím
 rem ===========================================================================
 :chybiPython
 echo.
-echo   CHYBA: Nenašel jsem Python 3.10 nebo novější s knihovnou tkinter.
+echo   CHYBA: Nenašel jsem Python 3.10 nebo novější.
 echo.
 echo   Stáhněte ho z https://www.python.org/downloads/
 echo   Při instalaci zaškrtněte "Add python.exe to PATH" a nechte
-echo   zapnuté "tcl/tk and IDLE" - bez něj nejde grafické rozhraní.
+echo   zapnuté "tcl/tk and IDLE" - hodí se pro starší okenní rozhraní.
 echo.
 echo   Verzi z Microsoft Store program nepoužije, ta bývá osekaná.
 echo.

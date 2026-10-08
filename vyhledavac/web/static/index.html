@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vyhledávač spojů</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%23ec3013'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="modernist.css">
+<link rel="stylesheet" href="app.css">
+<script>
+  // Motiv nastavit ještě před vykreslením – ať stránka neblikne.
+  try { const t = localStorage.getItem('vs.theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body>
+<div class="app">
+
+<header class="nav top">
+  <div class="nav-brand brand"><span class="brand-mark"></span><span>Vyhledávač spojů</span></div>
+  <div class="top-tools">
+    <div class="seg" id="cur-seg" role="radiogroup" aria-label="Měna">
+      <label class="seg-opt seg-sm"><input type="radio" name="cur" value="CZK">CZK</label>
+      <label class="seg-opt seg-sm"><input type="radio" name="cur" value="EUR">EUR</label>
+    </div>
+    <button class="btn btn-secondary btn-icon" type="button" id="theme-btn" aria-label="Přepnout motiv"></button>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="wrap hero-inner">
+    <div class="hero-title">
+      <div class="kicker">Vlaky · autobusy · MHD</div>
+      <h1>Hledat spojení</h1>
+    </div>
+
+    <form id="search-form" class="search-form" autocomplete="off">
+      <label class="sf-cell sf-place">
+        <span class="sf-label" data-icon="map-pin">Odkud</span>
+        <input id="f-from" name="from" list="stanice" required>
+      </label>
+      <div class="sf-cell sf-swap">
+        <button class="btn btn-secondary btn-icon" type="button" id="swap-btn" aria-label="Prohodit odkud a kam"></button>
+      </div>
+      <label class="sf-cell sf-place">
+        <span class="sf-label" data-icon="flag">Kam</span>
+        <input id="f-to" name="to" list="stanice" required>
+      </label>
+      <label class="sf-cell sf-date">
+        <span class="sf-label" data-icon="calendar-days">Datum</span>
+        <input id="f-date" name="date" type="date" required>
+      </label>
+      <label class="sf-cell sf-time">
+        <span class="sf-label" data-icon="clock">Odjezd od</span>
+        <input id="f-time" name="time" type="time" required>
+      </label>
+      <div class="sf-cell sf-submit">
+        <button class="btn btn-primary" type="submit" id="submit-btn"><span>Hledat spojení</span></button>
+        <button class="btn btn-secondary" type="button" id="cancel-btn" hidden>Zrušit</button>
+      </div>
+      <datalist id="stanice"></datalist>
+    </form>
+
+    <div class="row-chips" id="modes"></div>
+    <div id="adv"></div>
+  </div>
+</section>
+
+<main class="wrap results">
+  <div class="results-head" id="results-head"></div>
+  <div class="providers" id="providers"></div>
+  <div id="problems"></div>
+  <div class="sort-tabs" role="tablist" id="tabs"></div>
+  <div class="row-chips" id="chips"></div>
+  <div class="loader" id="loader" hidden><div></div></div>
+  <div class="journeys" id="list"></div>
+  <div id="empty"></div>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+</div>
+<script src="icons.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

@@ -18,11 +18,9 @@ frontu událostí, kterou vyzvedává ``after`` – jiný způsob není bezpečn
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import logging
 import queue
-import threading
 import tkinter as tk
 import webbrowser
 from tkinter import messagebox, ttk
@@ -38,6 +36,7 @@ from .models import (
     SearchResult,
 )
 from .registry import HACKS, LOAD_ERRORS, PROVIDERS, load_plugins
+from .runtime import AsyncRunner, explain as _explain, filter_spec, short_label as _short_label
 
 log = logging.getLogger(__name__)
 
@@ -62,25 +61,6 @@ STATUS_STYLE = {
     "blocked": ("■", WARN, "blokováno"),
     "off": ("·", LINE, "vypnuto"),
 }
-
-
-class AsyncRunner:
-    """Asyncio smyčka ve vlastním vlákně."""
-
-    def __init__(self) -> None:
-        self.loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def _run(self) -> None:
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
-    def submit(self, coro):
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
-
-    def stop(self) -> None:
-        self.loop.call_soon_threadsafe(self.loop.stop)
 
 
 def card(parent: tk.Widget, **kw: Any) -> tk.Frame:
@@ -441,16 +421,9 @@ class App(tk.Tk):
 
     # ---- běh hledání ---------------------------------------------------------
     def _filter_spec(self) -> list[Any]:
-        spec: list[Any] = [("departure_window", {"hours": 12})]
-        if self.var_direct.get():
-            spec.append(("max_transfers", {"limit": 0}))
-        spec += ["drop_sold_out", "deduplicate", "price_backfill"]
-        if self.var_only_priced.get():
-            spec.append("require_price")
-        if self.var_pareto.get():
-            spec.append("pareto")
-        spec.append(("limit", {"count": 80}))
-        return spec
+        return filter_spec(direct=self.var_direct.get(),
+                           only_priced=self.var_only_priced.get(),
+                           pareto=self.var_pareto.get())
 
     async def _run(self, query, providers, hacks, generation) -> None:
         engine = SearchEngine.build(providers, filter_spec=self._filter_spec(),
@@ -757,40 +730,6 @@ class App(tk.Tk):
     def _close(self) -> None:
         self.runner.stop()
         self.destroy()
-
-
-def _short_label(label: str) -> str:
-    """Zkrátí popisek na to, co se vejde do postranního panelu.
-
-    Dlouhý text v ``Checkbutton`` se jinak zalomí přes zaškrtávátko a panel
-    vypadá rozsypaně.
-    """
-    text = label.split("(")[0].strip()
-    return text if len(text) <= 32 else text[:31] + "…"
-
-
-def _explain(message: str, blocked: bool) -> str:
-    """Přeloží technickou chybu do věty, se kterou uživatel něco udělá."""
-    low = message.lower()
-    if blocked or "blok" in low:
-        return ("Dopravce vyhodnotil dotaz jako robota. Zkuste to za chvíli, "
-                "nebo tento zdroj vypněte.")
-    if "časový limit" in low or "timeout" in low:
-        return "Dopravce neodpověděl včas. Ostatní zdroje výsledky dodaly."
-    # Jen skutečně chybějící prohlížeč. Dřív stačilo, aby chyba obsahovala
-    # slovo "prohlížeč", a každá chyba prohlížečového dopravce se tvářila
-    # jako "chybí prohlížeč" – i když se prohlížeč normálně otevřel.
-    if "chybí playwright" in low or "playwright není nainstalován" in low:
-        return ("Chybí Playwright. Nainstalujte: pip install playwright "
-                "&& playwright install chromium")
-    if "nelze spustit" in low:
-        return ("Prohlížeč se nepodařilo spustit – nejspíš chybí stažené Chromium. "
-                "Spusťte: python -m playwright install chromium")
-    if "nenalezena" in low or "nenalezeno" in low:
-        return "Tento dopravce zadanou stanici nezná – do téhle destinace nejezdí."
-    if "selektor" in low or "změnil" in low:
-        return "Web dopravce se změnil, scraper potřebuje aktualizovat."
-    return message[:200]
 
 
 def main() -> None:

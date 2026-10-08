@@ -29,15 +29,15 @@ Původní kód padal na třech věcech:
 
 Potřebujete jen Python 3.10 nebo novější z
 [python.org](https://www.python.org/downloads/). Při instalaci na Windows
-zaškrtněte *Add python.exe to PATH* a nechte zapnuté *tcl/tk and IDLE*
-(bez něj nepůjde grafické rozhraní). Verze z Microsoft Storu nestačí.
+zaškrtněte *Add python.exe to PATH*. Verze z Microsoft Storu nestačí.
+(*tcl/tk and IDLE* je potřeba jen pro starší okenní rozhraní.)
 
 ### Nejjednodušší: dvojklik na `Vyhledavac.bat` (Windows)
 
 Stáhněte projekt (přes `git clone` níže, nebo na GitHubu *Code → Download
 ZIP* a rozbalte) a dvakrát klikněte na **`Vyhledavac.bat`**. Při prvním
-spuštění si sám připraví prostředí, pak už jen otevírá program. Po
-aktualizaci si sám doinstaluje, co přibylo.
+spuštění si sám připraví prostředí, pak už jen otevírá program – webové
+rozhraní ve vašem prohlížeči. Po aktualizaci si sám doinstaluje, co přibylo.
 
 ### Příkazy pro Windows (cmd)
 
@@ -59,15 +59,16 @@ fungují RegioJet, FlixBus a ÖBB:
 .venv\Scripts\python -m playwright install chromium
 ```
 
-**Spuštění** grafického rozhraní:
+**Spuštění** webového rozhraní (otevře se v prohlížeči):
 
 ```bat
 cd Vyhledavac_Spoju
-.venv\Scripts\pythonw -m vyhledavac.gui
+.venv\Scripts\pythonw -m vyhledavac.web
 ```
 
-(`pythonw` neotevře za oknem černou konzoli. Pokud program nenaběhne,
-spusťte místo něj `.venv\Scripts\python -m vyhledavac.gui` – uvidíte chybu.)
+(`pythonw` neotevře černou konzoli. Pokud se stránka neotevře, spusťte
+místo něj `.venv\Scripts\python -m vyhledavac.web` – uvidíte chybu.
+Starší okenní rozhraní: `.venv\Scripts\pythonw -m vyhledavac.gui`.)
 
 **Aktualizace** na nejnovější verzi:
 
@@ -98,14 +99,15 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python -m pip install playwright && .venv/bin/python -m playwright install chromium  # volitelně
 
-# spuštění GUI
-.venv/bin/python -m vyhledavac.gui
+# spuštění (webové rozhraní v prohlížeči)
+.venv/bin/python -m vyhledavac.web
 
 # aktualizace
 git pull && .venv/bin/python -m pip install --upgrade -r requirements.txt
 ```
 
-Na Linuxu bývá tkinter samostatný balíček: `sudo apt install python3-tk`.
+Starší okenní rozhraní (`python -m vyhledavac.gui`) potřebuje tkinter,
+na Linuxu bývá samostatný balíček: `sudo apt install python3-tk`.
 
 ### Bez API klíčů
 
@@ -142,7 +144,11 @@ python -m vyhledavac Praha Brno --only-priced  # jen spoje se známou cenou
 python -m vyhledavac Bratislava Košice --providers ZSSK --card sk_free
 python -m vyhledavac Praha Brno --json        # strojově čitelný výstup
 
-# grafické rozhraní
+# webové rozhraní (otevře prohlížeč)
+python -m vyhledavac.web
+python -m vyhledavac.web --port 8080 --no-browser
+
+# starší okenní rozhraní (tkinter)
 python -m vyhledavac.gui
 ```
 
@@ -313,6 +319,22 @@ dvě API · **Klíč:** ne
   `init` → `stations` → `travelActions` → `timetable` → `prices`.
   Ceny se pak přiřadí ke spojům z HAFASu podle času odjezdu a příjezdu.
 
+Před e-shopem stojí Cloudflare, který odmítá **TLS otisk Pythonu** – httpx
+dostane 403 bez ohledu na hlavičky. Program se proto ptá přes
+[`curl_cffi`](https://github.com/lexiforest/curl_cffi) s otiskem skutečného
+Chromu (je v `requirements.txt`; když chybí, zkusí se httpx a pak
+prohlížeč).
+
+Tři chyby, kvůli kterým ÖBB dlouho vracelo jen jízdní řád nebo hlášku
+„HTTP 404“:
+
+- shop přestal posílat `availabilityState`, a program proto zahazoval
+  **každou** cenu;
+- prázdné `"datetimeArrival": ""` v dotazu přimělo shop ignorovat datum
+  a vracet spoje „od teď“ – nespárovaly se pak s jízdním řádem;
+- `init` se zkoušel ve verzích v4 → v5 → v6 a skutečnou chybu z v4
+  přepsala 404 z neexistující v6.
+
 Původní skript bral ceny ze stejného e-shopu přes Firefox a klikání do
 formuláře, a to občas prošlo. Teď se ptá přímo jeho API:
 
@@ -356,21 +378,31 @@ Program to pozná a nahlásí jako dočasnou blokaci, ne jako rozbitý kód.
 **Soubor:** `providers/zssk.py` · **Typ:** prohlížeč · **Klíč:** ne
 
 `predaj.zssk.sk` je JSF aplikace bez API a v seznamu spojů ceny
-**neukazuje** – cenu zná až nákupní formulář. Postup je stejný jako
-v původním skriptu:
+**neukazuje** – cenu zná až nákupní formulář. Postup:
 
-1. Vyplní odkud/kam. U každé stanice počká na našeptávač (plní se
-   z `/autocompleteStations/…`), vybere první návrh a počká, až seznam
-   zmizí – jinak překrývá další pole.
+1. Vyplní odkud/kam. Návrhy našeptávače čte z odpovědi
+   `/autocompleteStations/…` a vybere ten, který **opravdu odpovídá**
+   zadané stanici (na „Vídeň“ ZSSK jako první nabízí slovenský Vígľaš).
+   Zkusí i jiné tvary jména (Viedeň, Wien); když nesedí nic, ZSSK tam
+   „nejezdí“.
 2. Nastaví datum ve slovenském tvaru `30. 9. 2026` a odešle.
-3. Přečte seznam spojů.
-4. **Ceny:** pro prvních 6 spojů projde *Kúpiť lístok → Voľba cestujúcich*
-   (věková kategorie, karta ISIC, případně 100% sleva) *→ Voľba
-   cestovného lístka* a přečte konečnou cenu. Pak se vrátí na seznam.
+3. Přečte seznam spojů – po jednotlivých vlacích, takže přestupy i noční
+   spoje přes půlnoc mají správné časy a data.
+4. **Jízdní řád pošle hned** – v rozhraní je vidět za ~5 s.
+5. **Ceny:** pro prvních 10 spojů projde *Kúpiť lístok → Voľba cestujúcich*
+   *→ Voľba cestovného lístka* a přečte konečnou cenu. Běží to **souběžně
+   ve 3 oddělených kontextech prohlížeče** (pro ZSSK tři různí návštěvníci)
+   a **každá cena se zobrazí hned**, jak je známá – na poslední spoj se
+   nečeká. Ceny se mezi spoji nesdílí (dynamické ceny, zahraniční lístky).
 
-Jedna cena je ~8 s, proto má trychtýř časový rozpočet (90 s) a ZSSK delší
-limit než ostatní. Selhání u jednoho spoje ostatní neovlivní; po dvou
-chybách po sobě trychtýř skončí a ukáže, u kolika spojů cenu zjistil.
+Žádné pevné prodlevy: čeká se na odpověď našeptávače či serveru, výchozí
+cestující (dospělý bez slevy) se nepřeklikává a na seznam se vrací otevřením
+`/search` (~1 s). Bratislava → Košice: dřív 106 s a cena u 4 z 5 spojů,
+teď spoje za 5 s, první cena za ~9 s, všech 5 cen za ~18 s.
+
+Spoj, u kterého formulář nepokračuje (lůžkový vůz, trasa mimo e-shop),
+se označí „nelze koupit online“ a nezkouší se znovu. Když ZSSK trasu
+neprodává vůbec (Praha → Vídeň), zbytek se přeskočí.
 
 ```bash
 python -m vyhledavac Bratislava Košice --providers ZSSK
@@ -385,14 +417,19 @@ kartou `sk_free`: `--card sk_free`. Cena `0 Kč` je pak platná cena.
 
 Prodává jízdenky napříč českými dopravci pod jednotným tarifem (SJT), takže
 je to **nejlepší zdroj cen českých vlaků**. Jejich REST API je jen pro
-smluvní partnery s klíčem, proto program čte veřejný web:
+smluvní partnery s klíčem, proto program ovládá veřejný web:
 
 1. Otevře `oneticket.cz/search` a **počká, až React vykreslí formulář**
    (první 1–3 s je stránka prázdná).
-2. Vyplní odkud, kam a datum.
+2. Vyplní odkud, kam a datum. Pokud našeptávač stanici nezná (zahraničí),
+   skončí za pár sekund s „nejezdí tam“ – dřív čekal 45 s a hlásil chybu
+   „OneTicket nevrátil žádné spojení“.
 3. V okně cestujících vynuluje výchozího dospělého a nastaví tarif podle
    kategorie (Plné, Junior, Student, Senior).
-4. Odešle a přečte spoje s cenami.
+4. Odešle a **přečte JSON, který si stránka sama stáhla** (`/search`,
+   `/price`): všechny vlaky spoje, mezizastávky, dopravce. Cena lístku SJT
+   platí pro trasu, takže se přiřadí každému spoji po stejné trase. Čtení
+   HTML zůstává jako záloha.
 
 Dřívější verze kontrolovala stránku hned po načtení, viděla ji prázdnou
 a hlásila chybu – v GUI se to navíc zobrazilo jako „chybí prohlížeč“,
@@ -435,15 +472,48 @@ vyhledavac/
 
 ---
 
-## Grafické rozhraní
+## Webové rozhraní
+
+```bash
+python -m vyhledavac.web          # otevře http://127.0.0.1:8765/ v prohlížeči
+```
+
+Na Windows stačí dvakrát kliknout na `Vyhledavac.bat` – viz [Instalace](#nejjednodušší-dvojklik-na-vyhledavacbat-windows).
+
+Malý server ze standardní knihovny (`vyhledavac/web/`), poslouchá jen na
+`127.0.0.1`. Stránka je čisté HTML/CSS/JS podle návrhu v design systému
+Modernist: ikony jsou vložené, takže funguje i bez internetu (kromě
+písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
+
+- **Hledání:** odkud, kam, datum, čas; druhy dopravy (vlak / bus / MHD);
+  v *Pokročilých možnostech* počet přestupů, jen přímá spojení, minimální
+  čas na přestup, věk a ISIC, travel hacky, „jen se známou cenou“ a
+  „skrýt dražší i pomalejší“.
+- **Zdroje dat** jsou přepínací čipy se živým stavem (hledám / ceny 3/5… /
+  N spojů · čas / nejezdí tam / chyba / blokováno). *Rychlé* = jen zdroje
+  bez prohlížeče.
+- **Výsledky** přibývají průběžně, ceny pomalých dopravců (ZSSK) se
+  doplňují do už zobrazených karet. Řazení (nejrychlejší, nejméně přestupů,
+  nejlevnější, nejdřívější) a filtry podle dopravců se přepnou okamžitě,
+  bez nového hledání.
+- **Karta spoje:** časová osa úseků barevně podle druhu dopravy, přestupy
+  (kratší než 3 min označené jako riziko), cena a zdroj. *Detail* ukáže
+  itinerář s nácestnými zastávkami, souhrn a dílčí jízdenky lomené
+  jízdenky; *Koupit* otevře web dopravce.
+- **Co se nepovedlo:** panel s vysvětlením a tlačítkem *vypnout*. Nic
+  nevyskakuje.
+- CZK / EUR, světlý / tmavý motiv, funguje i na mobilu.
+
+Server se sám ukončí, když se stránka 2 minuty neozve (`--idle 0` vypne),
+a druhé spuštění jen otevře už běžící instanci.
+
+## Okenní rozhraní (tkinter)
 
 ```bash
 python -m vyhledavac.gui
 ```
 
-Na Windows stačí dvakrát kliknout na `Vyhledavac.bat` – viz [Instalace](#nejjednodušší-dvojklik-na-vyhledavacbat-windows).
-
-Rozhraní je postavené na jednom pravidle: **výpadek jednoho dopravce nesmí
+Původní rozhraní zůstává. Stejně jako webové je postavené na jednom pravidle: **výpadek jednoho dopravce nesmí
 vypadat jako výpadek aplikace.**
 
 - **Výsledky přibývají průběžně**, jak dorazí jednotlivé zdroje – nečeká se
@@ -581,7 +651,7 @@ pip install pytest pytest-asyncio
 python -m pytest -q
 ```
 
-85 testů (77 bez GUI). Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
+Přes 170 testů. Pokrývají mimo jiné konkrétní chyby původní verze: spoje přes
 půlnoc, `limit` aplikovaný před řazením, dva různé vlaky považované za
 jeden, nebo chybějící cena vydávaná za nekonečnou.
 
