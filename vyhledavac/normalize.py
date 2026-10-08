@@ -82,6 +82,21 @@ def _expand(words: frozenset[str]) -> frozenset[str]:
     return frozenset(out)
 
 
+def aliases(name: str) -> list[str]:
+    """Jiné podoby názvu, které stojí za to zkusit v cizím našeptávači.
+
+    'Vídeň' → ['Vieden', 'Wien', 'Vienna', 'Becs']. Pořadí sleduje
+    ``_ALIASES`` (nejdřív kanonický tvar, pak varianty).
+    """
+    found: list[str] = []
+    for word in tokens(name):
+        for canonical, variants in _ALIASES.items():
+            group = [canonical, *sorted(variants)]
+            if word in {normalize(g) for g in group}:
+                found += [g for g in group if normalize(g) != word]
+    return [w.capitalize() for w in dict.fromkeys(found)]
+
+
 def same_place(a: str, b: str) -> bool:
     """Jde o totéž město/stanici? Symetrické, tolerantní k aliasům."""
     na, nb = normalize(a), normalize(b)

@@ -172,6 +172,86 @@ async def test_prices_are_not_shared_between_connections():
     assert [j.price for j in js] == [Decimal(str((5 + i) * 25)) for i in range(4)]
 
 
+@pytest.mark.asyncio
+async def test_unsellable_connection_is_not_retried():
+    from vyhledavac.providers.zssk import _NotSellable
+
+    p = provider(price_workers=1)
+    calls = []
+
+    async def funnel(page, journey, query):
+        calls.append(index(journey))
+        if index(journey) == 1:
+            raise _NotSellable("ZSSK", "lůžkový vůz")
+        return Decimal("9.60")
+
+    p._price_via_funnel = funnel
+    js = journeys(3)
+    await p._fill_missing_prices(_Session(), "page-0", js, q())
+    assert calls == [0, 1, 2]                       # bez druhého pokusu
+    assert js[1].fare_status is FareStatus.NOT_BOOKABLE
+    assert js[0].price is not None and js[2].price is not None
+
+
+# Skutečný řádek seznamu ZSSK (Praha → … , říjen 2026).
+NIGHT_TRAIN = ("22:16\tPraha hl.n.\t\nEN 443\n\n04:48\tVrútky\n06:05\tVrútky\t\nR 931\n"
+               "/ Os 7307\n\n08:20\tZvolen os.st.\n08:36\tZvolen os.st.\t\nOs 6211\n\n"
+               "08:50\tVígľaš\n10 hod. 34 min.\n592 km\n Upozornenie!  IDS Východ")
+
+
+def test_list_row_becomes_legs_with_transfers():
+    from vyhledavac.providers.zssk import _legs_from_text
+
+    legs = _legs_from_text(NIGHT_TRAIN, q())
+    assert [(l.origin, l.destination, l.line) for l in legs] == [
+        ("Praha hl.n.", "Vrútky", "EN 443"),
+        ("Vrútky", "Zvolen os.st.", "R 931 / Os 7307"),
+        ("Zvolen os.st.", "Vígľaš", "Os 6211"),
+    ]
+    assert legs[0].departure.day == 1 and legs[0].arrival.day == 2      # přes půlnoc
+    assert legs[-1].arrival.hour == 8 and legs[-1].arrival.minute == 50
+
+
+def test_night_departure_after_midnight_is_next_day():
+    from vyhledavac.providers.zssk import _legs_from_text
+
+    text = "00:36\tPraha hl.n.\t\nNJ 457\n/ EN 477\n\n06:02\tBratislava hl.st.\n12 hod."
+    legs = _legs_from_text(text, q())          # dotaz na 1. 10. 8:00
+    assert legs[0].departure.day == 2 and legs[0].line == "NJ 457 / EN 477"
+
+
+def test_station_suggestion_must_match_the_query():
+    """Na 'Vídeň' ZSSK jako první nabídne Vígľaš – ten se brát nesmí."""
+    from vyhledavac.normalize import aliases, best_match
+
+    assert best_match("Vídeň", ["VÍGĽAŠ", "Vígľašská Huta-Kalinka"]) is None
+    assert "Wien" in aliases("Vídeň") and "Vieden" in aliases("Vídeň")
+    assert best_match("Vídeň", ["Wien Hbf", "Wiener Neustadt"]) == 0
+    assert best_match("Bratislava", ["BRATISLAVA", "Bratislava hl.st."]) == 0
+
+
+@pytest.mark.asyncio
+async def test_route_not_sold_online_stops_early():
+    from vyhledavac.providers.zssk import _NotSellable
+
+    p = provider(price_workers=2)
+    calls = []
+
+    async def funnel(page, journey, query):
+        calls.append(index(journey))
+        raise _NotSellable("ZSSK", "neprodává")
+
+    p._price_via_funnel = funnel
+    token = base._NOTES.set([])
+    try:
+        await p._fill_missing_prices(_Session(), "page-0", journeys(6), q())
+        notes = base._NOTES.get()
+    finally:
+        base._NOTES.reset(token)
+    assert len(calls) <= 3
+    assert any("neprodává" in n for n in notes)
+
+
 def test_zero_euro_is_a_real_price():
     assert _parse_eur("Celková suma 0,00 €") == Decimal("0.00")
     assert _parse_eur("19,44 €") == Decimal("19.44")

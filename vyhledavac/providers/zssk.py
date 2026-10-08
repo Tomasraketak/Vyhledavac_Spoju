@@ -37,7 +37,7 @@ import re
 from decimal import Decimal
 from typing import Any
 
-from ..errors import ProviderError, TransientProviderError
+from ..errors import ProviderError, StationNotFoundError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
     DiscountCard,
@@ -134,34 +134,52 @@ class ZsskProvider(BrowserProvider):
         await self._set_value(page, "#departTime", query.departure.strftime("%H:%M"))
 
     async def _pick_station(self, page, field, name: str) -> None:
-        """Napíše stanici a vybere první návrh z našeptávače.
+        """Napíše stanici a vybere z našeptávače návrh, který jí opravdu odpovídá.
 
-        Našeptávač se plní z XHR ``/autocompleteStations/<text>``. Enter
-        stisknutý dřív nic nevybere, a dokud je seznam rozbalený, překrývá
-        pole "Kam". Proto: napsat → počkat na odpověď XHR pro *tenhle* text
-        (ne na starý seznam z předchozího pole) → Enter → seznam zmizí.
-        Psaní po znacích (60 ms/znak) nahradilo ``fill`` + poslední znak –
-        stačí k vyvolání našeptávače a ušetří sekundy.
+        Našeptávač se plní z XHR ``/autocompleteStations/<text>``. Dokud je
+        seznam rozbalený, překrývá pole "Kam". Proto: napsat → počkat na
+        odpověď XHR pro *tenhle* text (ne na starý seznam z předchozího
+        pole) → kliknout na návrh → seznam zmizí. Psaní po znacích (60 ms
+        na znak) nahradilo ``fill`` + poslední znak.
+
+        První návrh se dřív bral naslepo – na "Vídeň" ale ZSSK jako první
+        nabídne slovenský **Vígľaš** a hledalo se do něj. Návrh se proto
+        porovná se zadaným jménem; když nesedí, zkusí se slovenský či
+        německý tvar (Viedeň, Wien). Když nesedí nic, ZSSK tam nejezdí.
         """
-        suggestions = page.locator("a.dropdown-item[role='option']")
-        await field.click(force=True)
-        await field.fill(name[:-1])
-        try:
-            async with page.expect_response(
-                lambda r: "autocompleteStations" in r.url, timeout=6000
-            ):
-                await field.press_sequentially(name[-1:], delay=30)
-        except Exception:
-            log.debug("%s: našeptávač pro %r neodpověděl", self.name, name)
-        try:
-            await suggestions.first.wait_for(state="visible", timeout=2000)
-        except Exception:
-            pass
-        await field.press("Enter")
-        try:
-            await suggestions.first.wait_for(state="hidden", timeout=2000)
-        except Exception:
-            await field.press("Tab")
+        from ..normalize import aliases, best_match
+
+        # Každé pole má vlastní (skrytý) seznam – pracujeme jen s viditelným.
+        visible = page.locator("a.dropdown-item[role='option']:visible")
+        for term in [name, *aliases(name)]:
+            await field.click(force=True)
+            await field.fill(term[:-1])
+            try:
+                async with page.expect_response(
+                    lambda r: "autocompleteStations" in r.url, timeout=6000
+                ) as info:
+                    await field.press_sequentially(term[-1:], delay=30)
+                texts = [str(t).strip() for t in (await (await info.value).json() or [])]
+            except Exception:
+                log.debug("%s: našeptávač pro %r neodpověděl", self.name, term)
+                continue
+            index = best_match(name, texts)
+            if index is None:
+                log.debug("%s: na %r nabízí %s – nic nesedí", self.name, term, texts[:5])
+                continue
+            option = visible.filter(has_text=re.compile(rf"^\s*{re.escape(texts[index])}\s*$"))
+            try:
+                await option.first.click(timeout=3000)
+            except Exception:
+                # Položka mimo zobrazenou část seznamu – napíšeme ji celou.
+                await field.fill(texts[index])
+                await field.press("Enter")
+            try:
+                await visible.first.wait_for(state="hidden", timeout=2000)
+            except Exception:
+                await field.press("Tab")
+            return
+        raise StationNotFoundError(self.name, f"ZSSK nezná stanici {name!r}")
 
     async def _set_value(self, page, selector: str, value: str) -> None:
         locator = page.locator(selector).first
@@ -202,15 +220,24 @@ class ZsskProvider(BrowserProvider):
             except Exception:
                 continue
 
-            times = _TIME_RE.findall(text)
-            if len(times) < 2:
-                continue
-            departure = _combine(query.departure, times[0])
-            arrival = _combine(query.departure, times[-1])
-            if arrival < departure:
-                arrival += dt.timedelta(days=1)
+            legs = _legs_from_text(text, query)
+            if not legs:
+                times = _TIME_RE.findall(text)
+                if len(times) < 2:
+                    continue
+                departure = _day_after_query(_combine(query.departure, times[0]), query)
+                arrival = _combine(departure, times[-1])
+                if arrival < departure:
+                    arrival += dt.timedelta(days=1)
+                train = await _first_text(group, [".trainNumber span", ".trainNumber", ".train-name"])
+                legs = [Leg(
+                    origin=query.origin, destination=query.destination,
+                    departure=departure, arrival=arrival, mode=Mode.TRAIN, carrier="ZSSK",
+                    line=train or "ZSSK vlak",
+                    stops=[Stop(name=query.origin, departure=departure),
+                           Stop(name=query.destination, arrival=arrival)],
+                )]
 
-            train = await _first_text(group, [".trainNumber span", ".trainNumber", ".train-name"])
             fares = []
             status = FareStatus.UNKNOWN
             amount = _parse_eur(text)
@@ -219,21 +246,10 @@ class ZsskProvider(BrowserProvider):
                                             tariff=_tariff_label(query.lead)))
                 status = FareStatus.PRICED
 
-            leg = Leg(
-                origin=query.origin,
-                destination=query.destination,
-                departure=departure,
-                arrival=arrival,
-                mode=Mode.TRAIN,
-                carrier="ZSSK",
-                line=train or "ZSSK vlak",
-                stops=[Stop(name=query.origin, departure=departure),
-                       Stop(name=query.destination, arrival=arrival)],
-            )
             journeys.append(
                 Journey(
                     provider=self.name,
-                    legs=[leg],
+                    legs=legs,
                     fares=fares,
                     fare_status=status,
                     journey_id=str(index),
@@ -273,6 +289,7 @@ class ZsskProvider(BrowserProvider):
         for journey in pending:
             queue.put_nowait(journey)
         attempts: dict[int, int] = {}
+        unsellable: list[Journey] = []
         loop = asyncio.get_running_loop()
         deadline = loop.time() + float(self.options.get("price_budget", 110))
         tariff = _tariff_label(query.lead)
@@ -294,6 +311,20 @@ class ZsskProvider(BrowserProvider):
                 try:
                     await self._ensure_list(session, wpage, query)
                     amount = await self._price_via_funnel(wpage, journey, query)
+                except _NotSellable:
+                    # Vlastnost spoje, ne porucha webu – bez opakování.
+                    journey.fare_status = FareStatus.NOT_BOOKABLE
+                    unsellable.append(journey)
+                    # Když neprojde ani jeden z prvních spojů a žádná cena
+                    # není, ZSSK tuhle trasu online neprodává vůbec (Praha →
+                    # Vídeň) – další průchody by jen pálily čas.
+                    if len(unsellable) >= workers and not any(j.price for j in pending):
+                        while not queue.empty():
+                            queue.get_nowait()
+                        self.note("ZSSK tuto trasu přes e-shop neprodává – ceny hledejte "
+                                  "u jiného dopravce")
+                    self.publish(journeys)
+                    continue
                 except Exception as exc:
                     failures_in_row += 1
                     tries = attempts[id(journey)] = attempts.get(id(journey), 0) + 1
@@ -314,8 +345,14 @@ class ZsskProvider(BrowserProvider):
         await asyncio.gather(*(worker(n) for n in range(workers)))
 
         priced = sum(1 for j in pending if j.price is not None)
-        if priced < len(pending):
-            self.note(f"ceny ZSSK se podařilo zjistit u {priced} z {len(pending)} spojů")
+        offline = sum(1 for j in pending if j.fare_status is FareStatus.NOT_BOOKABLE)
+        if offline >= workers and not priced:
+            return      # celá trasa je mimo e-shop – poznámka už padla výš
+        if offline:
+            self.note(f"{offline} {'spoj' if offline == 1 else 'spoje' if offline < 5 else 'spojů'} "
+                      "ZSSK online neprodává (lůžkový vůz či místenka) – cenu ověřte u pokladny")
+        if priced + offline < len(pending):
+            self.note(f"ceny ZSSK se podařilo zjistit u {priced} z {len(pending) - offline} spojů")
         if len(journeys) > limit:
             self.note(f"ceny ZSSK zjišťuji jen u prvních {limit} spojů – každá "
                       "cena znamená projít nákupní formulář")
@@ -379,9 +416,18 @@ class ZsskProvider(BrowserProvider):
 
         await self._choose_passenger(page, query.lead)
 
-        await page.locator("[data-cy='continue']").first.click(force=True)
-        await page.locator("h1:has-text('Voľba cestovného lístka')").wait_for(
-            state="visible", timeout=25000)
+        offer = page.locator("h1:has-text('Voľba cestovného lístka')")
+        async with _jsf_round_trip(page, timeout=20000):
+            await page.locator("[data-cy='continue']").first.click(force=True)
+        try:
+            await offer.wait_for(state="visible", timeout=4000)
+        except Exception as exc:
+            # Server odpověděl, ale formulář zůstal na volbě cestujících –
+            # bez hlášky. Typicky lůžkový vůz nebo trasa, kterou ZSSK online
+            # neprodá (např. Praha → Vídeň). Zkoušet znovu nemá smysl.
+            if "/passenger" in page.url:
+                raise _NotSellable(self.name, "spoj nejde koupit přes e-shop ZSSK") from exc
+            await offer.wait_for(state="visible", timeout=10000)
         return await self._read_final_price(page)
 
     async def _read_final_price(self, page, timeout: float = 12.0) -> Decimal | None:
@@ -487,6 +533,74 @@ async def _first_text(scope, selectors: list[str]) -> str:
         except Exception:
             continue
     return ""
+
+
+class _NotSellable(ProviderError):
+    """Formulář u spoje nepokračuje (lůžkový vůz, místenka…) – opakovat nemá smysl."""
+
+
+_EVENT_RE = re.compile(r"^\s*(\d{1,2}):(\d{2})\s+(.+?)\s*$")
+_TRAIN_RE = re.compile(r"^/?\s*([A-Za-z]{1,5}\s+\d{1,6})\b")
+
+
+def _day_after_query(when: dt.datetime, query: SearchQuery) -> dt.datetime:
+    """ZSSK u nočních spojů vypisuje čas bez data – 00:36 je už další den."""
+    if when < query.departure - dt.timedelta(hours=1):
+        return when + dt.timedelta(days=1)
+    return when
+
+
+def _legs_from_text(text: str, query: SearchQuery) -> list[Leg]:
+    """Rozloží řádek spoje ZSSK na jednotlivé vlaky.
+
+    Text vypadá takto (odjezd, vlak, příjezd, odjezd, vlak, příjezd…)::
+
+        22:16  Praha hl.n.
+        EN 443
+        04:48  Vrútky
+        06:05  Vrútky
+        R 931
+        / Os 7307          ← průjezdný vůz, stejný úsek
+        08:20  Zvolen os.st.
+
+    Dřív se bral jen první a poslední čas a první vlak, takže spoj se třemi
+    přestupy vypadal jako přímý.
+    """
+    events: list[tuple[int, int, str]] = []
+    trains: list[list[str]] = []
+    for line in text.splitlines():
+        event = _EVENT_RE.match(line)
+        if event and "\t" in line:
+            events.append((int(event.group(1)), int(event.group(2)), event.group(3).strip()))
+            trains.append([])
+            continue
+        train = _TRAIN_RE.match(line.strip())
+        if train and events:
+            trains[-1].append(train.group(1))
+    if len(events) < 2 or len(events) % 2:
+        return []
+
+    stamps: list[dt.datetime] = []
+    for hour, minute, _ in events:
+        stamp = _combine(query.departure, (str(hour), str(minute)))
+        if not stamps:
+            stamp = _day_after_query(stamp, query)
+        else:
+            stamp = stamp.replace(year=stamps[-1].year, month=stamps[-1].month, day=stamps[-1].day)
+            if stamp < stamps[-1]:
+                stamp += dt.timedelta(days=1)
+        stamps.append(stamp)
+
+    legs = []
+    for i in range(0, len(events), 2):
+        origin, destination = events[i][2], events[i + 1][2]
+        departure, arrival = stamps[i], stamps[i + 1]
+        legs.append(Leg(
+            origin=origin, destination=destination, departure=departure, arrival=arrival,
+            mode=Mode.TRAIN, carrier="ZSSK", line=" / ".join(trains[i]) or "ZSSK vlak",
+            stops=[Stop(name=origin, departure=departure), Stop(name=destination, arrival=arrival)],
+        ))
+    return legs
 
 
 def _sk_date(when: dt.datetime) -> str:
