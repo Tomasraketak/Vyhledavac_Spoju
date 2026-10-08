@@ -21,7 +21,11 @@ stránkou *„Zugriff vorübergehend eingeschränkt“* – spolehlivě IP adres
 serveroven, domácí připojení obvykle projde. Proto jsou tu dvě cesty
 („transporty“) se stejnou logikou:
 
-* ``HttpTransport`` – přímé dotazy, rychlé (~1 s),
+* ``CurlTransport`` – přímé dotazy přes ``curl_cffi`` s TLS otiskem Chromu.
+  Cloudflare před shopem odmítá TLS otisk Pythonu (httpx dostane 403
+  bez ohledu na hlavičky), otisk skutečného prohlížeče pustí. Rychlé (~1 s).
+* ``HttpTransport`` – přímé dotazy přes httpx; záloha, když ``curl_cffi``
+  chybí (obvykle ho Cloudflare odmítne),
 * ``BrowserTransport`` – načte shop ve skutečném prohlížeči a tytéž dotazy
   pošle ``fetch()``-em zevnitř stránky. Ochrana pak vidí běžný prohlížeč
   s cookies, které si sám vyřídil. To je v jádru to, co dělal původní
@@ -53,10 +57,11 @@ SHOP_PAGE = f"{SHOP_HOST}/de/ticket"
 VIENNA = DEFAULT_TZ
 
 #: Verze ``init`` endpointu. ÖBB je čas od času zvedá; starší obvykle
-#: chvíli dožívají. Zkoušíme od nejznámější.
-INIT_VERSIONS = ("v4", "v5", "v6")
-#: Anonymní token vydrží déle, ale nechceme riskovat 401 uprostřed hledání.
-TOKEN_TTL = 15 * 60
+#: chvíli dožívají. Zkoušíme od nejznámější. Neexistující verze vrací 404.
+INIT_VERSIONS = ("v4", "v5")
+#: Anonymní token platí 5 minut (``exp - iat`` = 300 s). Obnovujeme ho
+#: s rezervou, ať nevyprší uprostřed hledání.
+TOKEN_TTL = 4 * 60
 
 BASE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
@@ -90,6 +95,64 @@ class HttpTransport:
 
     async def close(self) -> None:
         """Klient patří dopravci, ten ho i zavře."""
+
+
+class CurlTransport:
+    """Přímé dotazy s TLS otiskem skutečného Chromu (``curl_cffi``)."""
+
+    IMPERSONATE = "chrome"
+
+    def __init__(self, provider: str, *, timeout: float = 20.0, attempts: int = 2) -> None:
+        self.provider = provider
+        self.timeout = timeout
+        self.attempts = attempts
+        self._session = None
+
+    @staticmethod
+    def available() -> bool:
+        try:
+            import curl_cffi.requests  # noqa: F401
+            return True
+        except Exception:
+            return False
+
+    def _ensure(self):
+        if self._session is None:
+            from curl_cffi.requests import AsyncSession
+
+            self._session = AsyncSession(impersonate=self.IMPERSONATE, timeout=self.timeout)
+        return self._session
+
+    async def _request(self, method: str, url: str, **kwargs: Any) -> Any:
+        session = self._ensure()
+        last: ProviderError | None = None
+        for attempt in range(self.attempts):
+            if attempt:
+                await asyncio.sleep(0.8)
+            try:
+                response = await session.request(method, url, referer=SHOP_PAGE, **kwargs)
+            except Exception as exc:  # curl_cffi má vlastní hierarchii výjimek
+                last = TransientProviderError(self.provider, f"síť: {exc!r}"[:200])
+                continue
+            if response.status_code >= 500:
+                last = TransientProviderError(self.provider, f"shop ÖBB vrátil {response.status_code}")
+                continue
+            return _decode(self.provider, response.status_code, response.text)
+        raise last or TransientProviderError(self.provider, "vyčerpány pokusy")
+
+    async def get(self, url, params, headers):
+        return await self._request("GET", url, params=params, headers=headers)
+
+    async def post(self, url, body, headers):
+        return await self._request("POST", url, json=body, headers=headers)
+
+    async def close(self) -> None:
+        if self._session is not None:
+            try:
+                await self._session.close()
+            except Exception:
+                pass
+            self._session = None
 
 
 _FETCH_JS = """
@@ -252,13 +315,15 @@ def parse_connection(raw: dict[str, Any]) -> ShopOffer | None:
 def apply_offer(offer: ShopOffer, raw: dict[str, Any]) -> None:
     """Promítne položku z ``/prices`` do ``ShopOffer``.
 
-    Cena platí jen s ``availabilityState == "available"`` a bez
-    ``offerError`` – stejné pravidlo používá i web.
+    Cena platí bez ``offerError``. Starší verze shopu posílala navíc
+    ``availabilityState`` a cena platila jen s ``"available"``; současná
+    (říjen 2026) to pole vůbec nemá – posílá jen ``price`` a ``offerError``.
+    Dřív se proto zahodila každá cena.
     """
     offer.has_offer = True
     state = str(raw.get("availabilityState") or "").lower()
     price = _decimal(raw.get("price"))
-    if raw.get("offerError") or state != "available" or price is None:
+    if raw.get("offerError") or (state and state != "available") or price is None:
         offer.sold_out = "sold" in state or "ausgebucht" in state
         return
     offer.price = price
@@ -292,6 +357,10 @@ class OebbShop:
             ("cookieDate", dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
             ("isFirstVisit", "true"),
         ]
+        # 404 znamená jen "tahle verze už/ještě neexistuje". Jinou chybu si
+        # pamatujeme a nahlásíme ji – dřív ji přepsala 404 z poslední
+        # zkoušené verze a uživatel viděl nic neříkající "HTTP 404: ".
+        real: ProviderError | None = None
         last: ProviderError | None = None
         for version in INIT_VERSIONS:
             try:
@@ -301,10 +370,12 @@ class OebbShop:
                 raise
             except TransientProviderError as exc:
                 last = exc
+                if "HTTP 404" not in exc.message and real is None:
+                    real = exc
                 continue
             token = (data or {}).get("accessToken")
             if not token:
-                last = TransientProviderError(self.provider, "shop nevydal anonymní token")
+                real = real or TransientProviderError(self.provider, "shop nevydal anonymní token")
                 continue
             headers = {"AccessToken": str(token)}
             if data.get("sessionId"):
@@ -312,7 +383,7 @@ class OebbShop:
             if data.get("supportId"):
                 headers["x-ts-supportid"] = f"WEB_{data['supportId']}"
             return headers
-        raise last or TransientProviderError(self.provider, "shop nevydal anonymní token")
+        raise real or last or TransientProviderError(self.provider, "shop nevydal anonymní token")
 
     async def station(self, name: str) -> dict[str, Any]:
         data = await self.transport.get(f"{self.host}/api/hafas/v1/stations",
@@ -354,8 +425,11 @@ class OebbShop:
         last_id: str | None = None
         for page in range(max(1, pages)):
             if page == 0:
-                body = {**base, "datetimeDeparture": when_utc, "datetimeArrival": "",
-                        "passengers": [_adult()]}
+                # Žádné "datetimeArrival": "" – prázdný řetězec shop bere jako
+                # zadaný příjezd, datum odjezdu ignoruje a vrací spoje od "teď".
+                body = {**base, "datetimeDeparture": when_utc, "passengers": [_adult()],
+                        "from": start, "to": end, "count": 5,
+                        "entryPointId": "timetable"}
                 url = f"{self.host}/api/hafas/v4/timetable"
             else:
                 body = {**base, "connectionId": last_id, "count": 5, "direction": "after"}

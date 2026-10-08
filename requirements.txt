@@ -2,6 +2,8 @@
 httpx>=0.27
 # Databáze časových pásem – Windows ji nemá vestavěnou.
 tzdata ; sys_platform == "win32"
+# TLS otisk skutečného prohlížeče – bez něj Cloudflare odmítá e-shop ÖBB (ceny).
+curl_cffi>=0.7
 
 # Volitelné: jen pro dopravce, kteří potřebují prohlížeč (ČD).
 # pip install playwright && playwright install chromium

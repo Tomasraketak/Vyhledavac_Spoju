@@ -28,7 +28,14 @@ from ..errors import BlockedError, ProviderError, ProviderUnavailableError
 from ..models import FareCategory, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..registry import PROVIDERS
 from ._hafas import HafasClient, HafasProfile, parse_connections
-from ._oebb_shop import SHOP_PAGE, BrowserTransport, HttpTransport, OebbShop, ShopOffer
+from ._oebb_shop import (
+    SHOP_PAGE,
+    BrowserTransport,
+    CurlTransport,
+    HttpTransport,
+    OebbShop,
+    ShopOffer,
+)
 from .base import HttpProvider
 
 log = logging.getLogger(__name__)
@@ -141,7 +148,7 @@ class ObbProvider(HttpProvider):
         """Ceny ze shopu: nejdřív přímo, při blokaci přes prohlížeč."""
         pages = int(self.options.get("price_pages", 2))
         if not self._http_blocked:
-            shop = OebbShop(self.name, HttpTransport(self.client))
+            shop = OebbShop(self.name, self._direct_transport())
             try:
                 return await shop.search(query.origin, query.destination, query.departure,
                                          pages=pages)
@@ -150,6 +157,8 @@ class ObbProvider(HttpProvider):
                 log.info("ÖBB: shop blokuje přímé dotazy, zkouším prohlížeč")
                 if not self._browser_allowed():
                     raise
+            finally:
+                await shop.close()
 
         if not self._browser_allowed():
             raise BlockedError(self.name, "shop ÖBB blokuje přímé dotazy")
@@ -161,6 +170,12 @@ class ObbProvider(HttpProvider):
             ))
         return await self._browser_shop.search(query.origin, query.destination,
                                                query.departure, pages=pages)
+
+    def _direct_transport(self):
+        """Přímé dotazy: s TLS otiskem Chromu, když je ``curl_cffi`` k dispozici."""
+        if self.options.get("impersonate", True) and CurlTransport.available():
+            return CurlTransport(self.name)
+        return HttpTransport(self.client)
 
     def _browser_allowed(self) -> bool:
         return bool(self.options.get("browser_fallback", True)) and playwright_available()

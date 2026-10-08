@@ -61,7 +61,9 @@ class FakeTransport:
                 "c1": {"connectionId": "c1", "price": 19.9, "firstClass": 39.9,
                        "availabilityState": "available"},
                 "c2": {"connectionId": "c2", "price": 0, "availabilityState": "soldOut"},
-                "c3": {"connectionId": "c3", "price": 29.9, "availabilityState": "available"},
+                # Současný tvar odpovědi: bez availabilityState.
+                "c3": {"connectionId": "c3", "price": 29.9, "offerError": False,
+                       "firstClass": False},
             }
             return {"offers": [offers[i] for i in ids if i in offers]}
         raise AssertionError(url)
@@ -72,6 +74,9 @@ class FakeTransport:
             return {"travelActions": [{"id": "ta-1", "entrypoint": {"id": "timetable"}}]}
         if "/timetable" in url and "Scroll" not in url:
             assert body["travelActionId"] == "ta-1"
+            # Prázdný příjezd by shop přiměl ignorovat datum odjezdu.
+            assert "datetimeArrival" not in body
+            self.timetable_body = body
             return {"connections": [
                 conn("c1", "2026-10-01T08:28:00.000", "2026-10-01T10:53:00.000"),
                 conn("c2", "2026-10-01T08:57:00.000", "2026-10-01T11:49:00.000"),
@@ -110,6 +115,19 @@ def test_only_available_offer_counts_as_price():
     assert offer.price is None and not offer.sold_out
 
 
+def test_current_offer_shape_without_availability_state():
+    """Shop od podzimu 2026 posílá jen price/offerError/firstClass."""
+    offer = parse_connection(conn("z", "2026-10-01T08:00:00", "2026-10-01T09:00:00"))
+    apply_offer(offer, {"price": 38.3, "offerError": False, "firstClass": False,
+                        "specialNote": {"de": "Sparschiene"}})
+    assert offer.price == Decimal("38.3")
+    assert offer.first_class is None          # False není cena 1. třídy
+
+    offer = parse_connection(conn("w", "2026-10-01T08:00:00", "2026-10-01T09:00:00"))
+    apply_offer(offer, {"price": 38.3, "offerError": True})
+    assert offer.price is None
+
+
 # ---- klient shopu -----------------------------------------------------------
 @pytest.mark.asyncio
 async def test_shop_flow_without_api_key():
@@ -138,6 +156,31 @@ async def test_init_falls_back_to_newer_version():
     assert any("/domain/v5/init" in c for c in transport.calls)
 
 
+@pytest.mark.asyncio
+async def test_init_error_is_not_masked_by_missing_versions():
+    """Selže-li v4 jinak než 404, uživatel má vidět tu chybu, ne 404 z v5."""
+    class Broken(FakeTransport):
+        async def get(self, url, params, headers):
+            if "/domain/v4/init" in url:
+                raise TransientProviderError("ÖBB", "síť: ConnectTimeout()")
+            if "/init" in url:
+                raise TransientProviderError("ÖBB", "HTTP 404: ")
+            return await super().get(url, params, headers)
+
+    with pytest.raises(TransientProviderError) as info:
+        await OebbShop("ÖBB", Broken()).search("Wien", "Salzburg", at(8), pages=1)
+    assert "ConnectTimeout" in info.value.message
+
+
+@pytest.mark.asyncio
+async def test_timetable_request_carries_route_and_date():
+    transport = FakeTransport()
+    await OebbShop("ÖBB", transport).search("Wien", "Salzburg", at(8), pages=1)
+    body = transport.timetable_body
+    assert body["datetimeDeparture"] == "2026-10-01T06:00:00.000Z"
+    assert body["from"]["number"] == 1290401 and body["to"]["number"] == 8100002
+
+
 # ---- dopravce: spojení jízdního řádu a cen ---------------------------------
 def hafas_journeys():
     return [
@@ -152,6 +195,9 @@ class _Converter:
 
 
 def provider(**options):
+    # Testy nesmí sahat na síť přes curl_cffi – přímý transport je httpx,
+    # který si testy nahrazují falešným.
+    options.setdefault("impersonate", False)
     return ObbProvider(cache=MemoryCache(), converter=_Converter(), options=options)
 
 

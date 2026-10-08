@@ -65,6 +65,8 @@ BLOCK_MARKERS = (
     "request unsuccessful",
     "incapsula",
     "zugriff vorübergehend eingeschränkt",   # ÖBB
+    "sicherheitsüberprüfung wird durchgeführt",  # Cloudflare (německy)
+    "nur einen moment",
     "access temporarily restricted",
 )
 
