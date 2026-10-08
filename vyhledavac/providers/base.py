@@ -119,6 +119,7 @@ class Provider(abc.ABC):
                 provider=self.name,
                 error=exc.message,
                 blocked=exc.__class__.__name__ == "BlockedError",
+                not_served=type(exc).__name__ == "StationNotFoundError",
                 elapsed=time.monotonic() - started,
                 notes=notes,
             )

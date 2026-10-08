@@ -497,6 +497,13 @@ class App(tk.Tk):
     def _on_partial(self, result: ProviderResult) -> None:
         """Dorazil jeden dopravce – hned ho promítneme."""
         row = self.provider_rows.get(result.provider)
+        if result.not_served:
+            # Dopravce tam prostě nejezdí – žádná porucha, jen informace.
+            if row:
+                row.set("empty", "nejezdí tam")
+            self._add_problem(result.provider, result.error or "do této destinace nejezdí",
+                              blocked=False, soft=True)
+            return
         if row:
             if result.error:
                 row.set("blocked" if result.blocked else "error",

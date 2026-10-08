@@ -1,0 +1,381 @@
+{
+ "paths": [
+  {
+   "pathId": "2b860bd5-0c49-493e-aede-acfe43b0bf0a",
+   "startTime": "2026-10-15T08:04:00+02:00",
+   "finishTime": "2026-10-15T11:44:00+02:00",
+   "startStationId": "570762",
+   "finishStationId": "332957",
+   "viaStationIds": [
+    "571760",
+    "534149",
+    "541334",
+    "542134",
+    "333955"
+   ],
+   "startStationName": "Praha hl.n.",
+   "finishStationName": "Brno hl.n.",
+   "distance": 257,
+   "transfersCount": 0,
+   "trains": [
+    {
+     "stationName": "Praha hl.n.",
+     "dateTime1": "2026-10-15T08:04:00+02:00",
+     "dateTime2": "2026-10-15T11:44:00+02:00",
+     "line": {
+      "name": "R 977",
+      "nameCaption": "Vysočina",
+      "categoryName": "rychlík",
+      "carrierName": "České dráhy, a.s.",
+      "hasReservation": "optional",
+      "endStation": "Brno hl.n."
+     },
+     "items": [
+      {
+       "stationName": "Praha-Vršovice",
+       "fromStationId": "572768",
+       "toStationId": "570762",
+       "arrTime": null,
+       "depTime": "2026-10-15T07:55:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Praha hl.n.",
+       "fromStationId": "570762",
+       "toStationId": "571760",
+       "arrTime": "2026-10-15T07:59:00+02:00",
+       "depTime": "2026-10-15T08:04:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Praha-Libeň",
+       "fromStationId": "571760",
+       "toStationId": "534149",
+       "arrTime": "2026-10-15T08:10:00+02:00",
+       "depTime": "2026-10-15T08:11:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Kolín",
+       "fromStationId": "534149",
+       "toStationId": "540146",
+       "arrTime": "2026-10-15T08:45:00+02:00",
+       "depTime": "2026-10-15T08:47:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Kutná Hora hl.n.",
+       "fromStationId": "540146",
+       "toStationId": "540443",
+       "arrTime": "2026-10-15T08:55:00+02:00",
+       "depTime": "2026-10-15T08:57:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Čáslav",
+       "fromStationId": "540443",
+       "toStationId": "540930",
+       "arrTime": "2026-10-15T09:05:00+02:00",
+       "depTime": "2026-10-15T09:07:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Golčův Jeníkov město",
+       "fromStationId": "540930",
+       "toStationId": "541334",
+       "arrTime": "2026-10-15T09:17:00+02:00",
+       "depTime": "2026-10-15T09:19:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Světlá n.Sázavou",
+       "fromStationId": "541334",
+       "toStationId": "542134",
+       "arrTime": "2026-10-15T09:41:00+02:00",
+       "depTime": "2026-10-15T09:43:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Havlíčkův Brod",
+       "fromStationId": "542134",
+       "toStationId": "357376",
+       "arrTime": "2026-10-15T09:57:00+02:00",
+       "depTime": "2026-10-15T10:01:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Přibyslav",
+       "fromStationId": "357376",
+       "toStationId": "370155",
+       "arrTime": "2026-10-15T10:18:00+02:00",
+       "depTime": "2026-10-15T10:19:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Žďár n.Sázavou",
+       "fromStationId": "370155",
+       "toStationId": "345751",
+       "arrTime": "2026-10-15T10:36:00+02:00",
+       "depTime": "2026-10-15T10:38:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Křižanov",
+       "fromStationId": "345751",
+       "toStationId": "363952",
+       "arrTime": "2026-10-15T10:53:00+02:00",
+       "depTime": "2026-10-15T10:55:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Tišnov",
+       "fromStationId": "363952",
+       "toStationId": "333153",
+       "arrTime": "2026-10-15T11:14:00+02:00",
+       "depTime": "2026-10-15T11:15:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Brno-Královo Pole",
+       "fromStationId": "333153",
+       "toStationId": "332957",
+       "arrTime": "2026-10-15T11:30:00+02:00",
+       "depTime": "2026-10-15T11:33:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Brno hl.n.",
+       "fromStationId": "332957",
+       "toStationId": "",
+       "arrTime": "2026-10-15T11:44:00+02:00",
+       "depTime": null,
+       "used": true
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "pathId": "05603893-ead0-4273-b18b-5f0cd1f7b9c9",
+   "startTime": "2026-10-15T08:37:00+02:00",
+   "finishTime": "2026-10-15T11:13:00+02:00",
+   "startStationId": "570762",
+   "finishStationId": "332957",
+   "viaStationIds": [
+    "571760",
+    "534149",
+    "536136",
+    "539130",
+    "333955"
+   ],
+   "startStationName": "Praha hl.n.",
+   "finishStationName": "Brno hl.n.",
+   "distance": 255,
+   "transfersCount": 0,
+   "trains": [
+    {
+     "stationName": "Praha hl.n.",
+     "dateTime1": "2026-10-15T08:37:00+02:00",
+     "dateTime2": "2026-10-15T11:13:00+02:00",
+     "line": {
+      "name": "rj 55",
+      "nameCaption": "Vindobona",
+      "categoryName": "railjet",
+      "carrierName": "České dráhy, a.s.",
+      "hasReservation": "optional",
+      "endStation": "Wien Hbf"
+     },
+     "items": [
+      {
+       "stationName": "Praha hl.n.",
+       "fromStationId": "570762",
+       "toStationId": "536136",
+       "arrTime": null,
+       "depTime": "2026-10-15T08:37:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Pardubice hl.n.",
+       "fromStationId": "536136",
+       "toStationId": "539130",
+       "arrTime": "2026-10-15T09:34:00+02:00",
+       "depTime": "2026-10-15T09:36:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Česká Třebová",
+       "fromStationId": "539130",
+       "toStationId": "332957",
+       "arrTime": "2026-10-15T10:12:00+02:00",
+       "depTime": "2026-10-15T10:14:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Brno hl.n.",
+       "fromStationId": "332957",
+       "toStationId": "334250",
+       "arrTime": "2026-10-15T11:13:00+02:00",
+       "depTime": "2026-10-15T11:18:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Břeclav",
+       "fromStationId": "334250",
+       "toStationId": "30007",
+       "arrTime": "2026-10-15T11:47:00+02:00",
+       "depTime": "2026-10-15T11:55:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Wien Hbf",
+       "fromStationId": "30007",
+       "toStationId": "",
+       "arrTime": "2026-10-15T12:49:00+02:00",
+       "depTime": null,
+       "used": false
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "pathId": "b1e1b2f8-0640-4330-875c-20bf7d560308",
+   "startTime": "2026-10-15T09:01:00+02:00",
+   "finishTime": "2026-10-15T11:40:00+02:00",
+   "startStationId": "570762",
+   "finishStationId": "332957",
+   "viaStationIds": [
+    "571760",
+    "534149",
+    "536136",
+    "539130",
+    "333955"
+   ],
+   "startStationName": "Praha hl.n.",
+   "finishStationName": "Brno hl.n.",
+   "distance": 255,
+   "transfersCount": 0,
+   "trains": [
+    {
+     "stationName": "Praha hl.n.",
+     "dateTime1": "2026-10-15T09:01:00+02:00",
+     "dateTime2": "2026-10-15T11:40:00+02:00",
+     "line": {
+      "name": "RJ 1033",
+      "nameCaption": "RegioJet",
+      "categoryName": "RegioJet",
+      "carrierName": "RegioJet a.s.",
+      "hasReservation": "mandatory",
+      "endStation": "Budapest-Deli pu"
+     },
+     "items": [
+      {
+       "stationName": "Praha-Zahradní Město",
+       "fromStationId": "572792",
+       "toStationId": "570762",
+       "arrTime": null,
+       "depTime": "2026-10-15T08:47:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Praha hl.n.",
+       "fromStationId": "570762",
+       "toStationId": "536136",
+       "arrTime": "2026-10-15T08:55:00+02:00",
+       "depTime": "2026-10-15T09:01:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Pardubice hl.n.",
+       "fromStationId": "536136",
+       "toStationId": "333955",
+       "arrTime": "2026-10-15T10:03:00+02:00",
+       "depTime": "2026-10-15T10:05:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Brno-Židenice",
+       "fromStationId": "333955",
+       "toStationId": "332957",
+       "arrTime": null,
+       "depTime": "2026-10-15T11:35:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Brno hl.n.",
+       "fromStationId": "332957",
+       "toStationId": "334250",
+       "arrTime": "2026-10-15T11:40:00+02:00",
+       "depTime": "2026-10-15T11:48:00+02:00",
+       "used": true
+      },
+      {
+       "stationName": "Břeclav",
+       "fromStationId": "334250",
+       "toStationId": "30007",
+       "arrTime": "2026-10-15T12:17:00+02:00",
+       "depTime": "2026-10-15T12:20:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Wien Hbf",
+       "fromStationId": "30007",
+       "toStationId": "5140",
+       "arrTime": "2026-10-15T13:18:00+02:00",
+       "depTime": "2026-10-15T13:27:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Wien Meidling",
+       "fromStationId": "5140",
+       "toStationId": "174",
+       "arrTime": "2026-10-15T13:33:00+02:00",
+       "depTime": "2026-10-15T13:34:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Hegyeshalom",
+       "fromStationId": "174",
+       "toStationId": "166",
+       "arrTime": "2026-10-15T14:19:00+02:00",
+       "depTime": "2026-10-15T14:22:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Mosonmagyarovar",
+       "fromStationId": "166",
+       "toStationId": "802",
+       "arrTime": "2026-10-15T14:30:00+02:00",
+       "depTime": "2026-10-15T14:31:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Györ",
+       "fromStationId": "802",
+       "toStationId": "83",
+       "arrTime": "2026-10-15T14:49:00+02:00",
+       "depTime": "2026-10-15T14:50:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Budapest-Kelenföld",
+       "fromStationId": "83",
+       "toStationId": "75",
+       "arrTime": "2026-10-15T15:58:00+02:00",
+       "depTime": "2026-10-15T16:07:00+02:00",
+       "used": false
+      },
+      {
+       "stationName": "Budapest-Deli pu",
+       "fromStationId": "75",
+       "toStationId": "",
+       "arrTime": "2026-10-15T16:14:00+02:00",
+       "depTime": null,
+       "used": false
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

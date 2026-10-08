@@ -436,6 +436,9 @@ class ProviderResult:
     #: Dílčí potíže, které hledání nezastavily (např. "jízdní řád ano,
     #: ceny se nepodařilo zjistit"). Na rozdíl od ``error`` spoje jsou.
     notes: list[str] = field(default_factory=list)
+    #: Dopravce zadanou stanici nezná – do téhle destinace nejezdí. Je to
+    #: chyba (spoje nejsou), ale UI ji má ukázat mírně, ne jako výpadek.
+    not_served: bool = False
 
     @property
     def ok(self) -> bool:
