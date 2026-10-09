@@ -31,7 +31,8 @@ from typing import Sequence
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, ideska, idpk, pid, vdv
+from ..ids import IdsFare, ideska, idpk, pid
+from ..ids.online import idol, iredo, vdv
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import normalize
 from ..registry import HACKS
@@ -40,12 +41,13 @@ from .base import SearchFn, TravelHack
 log = logging.getLogger(__name__)
 
 #: Systémy, jejichž tarif umíme spočítat.
-SYSTEMS = {ideska.SYSTEM: ideska, pid.SYSTEM: pid, idpk.SYSTEM: idpk, vdv.SYSTEM: vdv}
-LINKS = {ideska.SYSTEM: ideska.URL, pid.SYSTEM: pid.URL, idpk.SYSTEM: idpk.URL, vdv.SYSTEM: vdv.URL}
-#: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (IDPK –
-#: pásmo nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
-#: jakýchkoli údajů tu trasu systému nepřeruší.
-LENIENT = {idpk.SYSTEM}
+SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol)}
+LINKS = {name: m.URL for name, m in SYSTEMS.items()}
+#: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (pásmo
+#: nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
+#: jakýchkoli údajů tu trasu systému nepřeruší; cenu určují jen zóny konců
+#: (u IDPK i projeté zóny, které známe).
+LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
@@ -102,7 +104,7 @@ def _minutes(a: dt.datetime | None, b: dt.datetime | None, fallback: float) -> f
 @HACKS.register()
 class IdsTicketHack(TravelHack):
     name = "ids_ticket"
-    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, VDV, lom na hranici systémů)"
+    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, VDV, IREDO, IDOL, lom na hranici)"
     default_min_saving_pct = 3.0
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],

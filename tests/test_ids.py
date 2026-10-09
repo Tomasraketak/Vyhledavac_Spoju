@@ -86,8 +86,10 @@ def offline_cd(monkeypatch):
         return None
 
     monkeypatch.setattr(cdtrain, "train_stops", no_route)
-    monkeypatch.setattr(vdv, "prefetch", no_prices)        # počítadlo VDV se nevolá
-    monkeypatch.setattr(vdv, "_prices", {})
+    from vyhledavac.ids import online
+    for tariff in (online.vdv, online.iredo, online.idol):        # počítadla se nevolají
+        monkeypatch.setattr(tariff, "prefetch", no_prices)
+        monkeypatch.setattr(tariff, "_prices", {})
 
 
 def cd_journey(origin, destination, dep, arr, price, line="Os 8800"):
@@ -244,7 +246,8 @@ def test_vdv_parse_calculator_table():
 
 @pytest.mark.asyncio
 async def test_ideska_then_vdv(monkeypatch):
-    monkeypatch.setitem(vdv._prices, ("758", "600"), vdv.parse(VDV_HTML))
+    from vyhledavac.ids import online
+    monkeypatch.setitem(online.vdv._prices, ("758", "600"), online.vdv.parse(VDV_HTML))
     query = SearchQuery(origin="Třeboň", destination="Havlíčkův Brod", departure=at(5))
     base = cd_journey("Třeboň", "Havlíčkův Brod", at(6, 6), at(8, 51), 269)
 

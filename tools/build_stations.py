@@ -98,7 +98,7 @@ IDS = [
     ("ODIS", "Ostravský dopravní integrovaný systém"),
 ]
 KRAJ_IDS = [0, 0, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11]
-PID, IDSJK, IDPK, VDV, JMK = 0, 1, 2, 7, 8
+PID, IDSJK, IDPK, DUK, IDOL, IREDO, VDV, JMK = 0, 1, 2, 4, 5, 6, 7, 8
 PLZENSKY = 3      # index kraje
 
 
@@ -409,10 +409,14 @@ IDESKA_PROFILES = ("1", "2", "3", "50")
 
 VDV_CALC = "https://tim.abirun.eu/KrajVysocina/TarifniPocitadlo"
 VDV_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_vdv.json.gz"
+IREDO_CALC = "https://tim.oredo.cz/TarifniPocitadlo"
+IREDO_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_iredo.json.gz"
+IDOL_CALC = "https://dopravnimapy.kraj-lbc.cz/projects/idol/pocitadlo.php"
+IDOL_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_idol.json.gz"
 
 
-def fetch_vdv(cache: Path, *, refresh: bool) -> Path:
-    """Zóny a zastávky VDV z tarifního počítadla Kraje Vysočina.
+def fetch_vdv(cache: Path, *, refresh: bool, base: str = VDV_CALC, name: str = "vdv") -> Path:
+    """Zóny a zastávky z tarifního počítadla ABIRAIL (VDV, IREDO).
 
     Počítadlo (tim.abirun.eu) má mapu: seznam zón a pro každou zónu její
     zastávky včetně nádraží. Ceny se za běhu ptají počítadla (``ids.vdv``),
@@ -421,18 +425,19 @@ def fetch_vdv(cache: Path, *, refresh: bool) -> Path:
     """
     import concurrent.futures as cf
 
-    target = cache / "vdv_stops.json"
+    target = cache / f"{name}_stops.json"
     if target.exists() and target.stat().st_size and not refresh:
         return target
     client = httpx.Client(headers={"User-Agent": "Mozilla/5.0", "X-Requested-With": "XMLHttpRequest"},
                           timeout=60, follow_redirects=True)
-    page = client.get(VDV_CALC + "/").text
+    VDV_CALC = base          # noqa: N806 – stejné API, jiná adresa
+    page = client.get(VDV_CALC + "/?iframe=true").text
     token = re.search(r"__APIRequestVerificationToken' value='([^']+)'", page).group(1)
     validity = re.search(r'<option value="(\d+)"', page).group(1)
     headers = {"__APIRequestVerificationToken": token}
     zones = client.post(VDV_CALC + "/Mapa/ZakladniDataMapy", headers=headers,
                         data={"platnostTarifuId": validity, "nadzonyId": ""}).json()["zones"]
-    print(f"  VDV: {len(zones)} zón, stahuji zastávky…", flush=True)
+    print(f"  {name.upper()}: {len(zones)} zón, stahuji zastávky…", flush=True)
 
     def stops(zone: dict) -> list:
         for _ in range(3):
@@ -462,10 +467,17 @@ def parse_vdv(path: Path) -> tuple[dict[str, str], dict[str, str], dict]:
     abbr: dict[int, str] = {}
     names: dict[str, str] = {}
     for zone in data["zones"]:
-        m = re.match(r"^(\S+)\s+(.*)$", zone["text"])
+        # VDV: „600 Havlíčkův Brod“, IREDO: „Pardubice (600)“
+        m = re.match(r"^(\d\S*)\s+(.*)$", zone["text"])
         if m:
-            abbr[zone["id"]] = m.group(1)
-            names[m.group(1)] = m.group(2).strip()
+            code, label = m.group(1), m.group(2)
+        else:
+            m = re.match(r"^(.*?)\s*\((\S+)\)\s*$", zone["text"])
+            if not m:
+                continue
+            code, label = m.group(2), m.group(1)
+        abbr[zone["id"]] = code
+        names[code] = label.strip()
     rail: dict[str, str] = {}
     bus: dict[str, str] = {}
     for stop in data["stops"]:
@@ -474,9 +486,47 @@ def parse_vdv(path: Path) -> tuple[dict[str, str], dict[str, str], dict]:
             continue
         key = normalize(stop.get("text", ""))
         (bus if stop.get("isBus") else rail).setdefault(key, zone)
-    out = {"source": VDV_CALC, "generated": dt.date.today().isoformat(),
+    out = {"generated": dt.date.today().isoformat(),
            "zones": {a: {"id": -zid, "name": names.get(a, "")} for zid, a in abbr.items()}}
     return rail, bus, out
+
+
+def fetch_idol(cache: Path, *, refresh: bool) -> tuple[dict[str, str], dict]:
+    """Zastávky IDOL se zónami ze stránky tarifního počítadla (výběr zastávek).
+
+    Hodnota volby je interní ID zóny počítadla, v závorce číslo zóny (0001 =
+    Liberec). Zastávka na hranici má dvě ID oddělená čárkou.
+    Vrací (normalizovaný název zastávky -> čísla zón, data pro ids_idol.json.gz).
+    """
+    import html as html_mod
+
+    page = fetch(cache, "idol_pocitadlo.html", IDOL_CALC, refresh=refresh).read_text("utf-8", "replace")
+    def options(select: str) -> list[tuple[str, str]]:
+        start = page.find(f"name='{select}'")
+        block = page[start:page.find("</select>", start)]
+        return [(v, html_mod.unescape(t)) for v, t in re.findall(r'<option value="([^"]+)">([^<]+)', block)]
+
+    zones: dict[str, dict] = {}
+    for value, text in options("nastupnizona"):
+        m = re.search(r"\((\d+)\)\s*$", text)
+        if m and "," not in value:
+            zones[m.group(1)] = {"id": value, "name": text[:m.start()].strip()}
+    stops: dict[str, str] = {}
+    for value, text in options("nastupnizast"):
+        # „Liberec,,nádraží (0001)“, na hranici „… (0001,1001)“ s hodnotou „100,101“
+        m = re.search(r"\(([\d, ]+)\)\s*$", text)
+        if not m:
+            continue
+        name = text[:m.start()].strip()
+        codes = [c.strip() for c in m.group(1).split(",") if c.strip()]
+        ids = value.split(",")
+        for code, zone_id in zip(codes, ids):
+            zones.setdefault(code, {"id": zone_id, "name": name.split(",")[0]})
+        if codes:
+            parts = [x.strip() for x in name.split(",")]
+            stops.setdefault(normalize(", ".join(x for x in parts if x)), ",".join(codes))
+    print(f"  IDOL: {len(zones)} zón, {len(stops)} zastávek", flush=True)
+    return stops, {"generated": dt.date.today().isoformat(), "zones": zones}
 
 
 PID_TARIFF = "https://pid.cz/jizdne-a-tarif/"
@@ -730,6 +780,9 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     ideska = fetch(cache, "ideska_zones.xml", IDESKA_ZONES, refresh=refresh)
     ideska_json = fetch(cache, "jikord.json", IDESKA_TARIFF, refresh=refresh)
     vdv_rail, vdv_bus, vdv_data = parse_vdv(fetch_vdv(cache, refresh=refresh))
+    iredo_rail, iredo_bus, iredo_data = parse_vdv(
+        fetch_vdv(cache, refresh=refresh, base=IREDO_CALC, name="iredo"))
+    idol_stops, idol_data = fetch_idol(cache, refresh=refresh)
     pid_page = fetch(cache, "pid_tarif.html", PID_TARIFF, refresh=refresh)
     pid_tariff = extract_pid_tariff(pid_page)
     osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
@@ -820,11 +873,12 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             systems[IDPK] = idpk
             if ids == IDPK and not zones:
                 zones = idpk
-        vdv_zone = vdv_bus.get(normalize(spelled)) or vdv_bus.get(normalize(name))
-        if vdv_zone:
-            systems[VDV] = vdv_zone
-            if ids == VDV and not zones:
-                zones = vdv_zone
+        for sys_i, table in ((VDV, vdv_bus), (IREDO, iredo_bus), (IDOL, idol_stops)):
+            zone = table.get(normalize(spelled)) or table.get(normalize(name))
+            if zone:
+                systems[sys_i] = zone
+                if ids == sys_i and not zones:
+                    zones = zone
         ideska_zone = ideska_stops.get(normalize(spelled)) or ideska_stops.get(normalize(name))
         if ideska_zone:
             systems[IDSJK] = ideska_zone
@@ -833,10 +887,17 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
                        "score": s["departures"]})
 
+    idol_zone_names: dict[str, str] = {}
+    for code, zone in idol_data["zones"].items():
+        for key in (normalize(zone["name"]), "~" + short_key(zone["name"])):
+            idol_zone_names.setdefault(key, code)
     idpk_by_town: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    idol_by_town: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
     for p in places:
         if IDPK in p["systems"]:
             idpk_by_town[(p["town"], p["okres"])].append((p["name"], p["systems"][IDPK]))
+        if IDOL in p["systems"]:
+            idol_by_town[(p["town"], p["okres"])].append((p["name"], p["systems"][IDOL]))
 
     # ---- vlakové stanice (vlak váží víc než autobus – jezdí dál a vozí víc lidí)
     for code, st in trains.items():
@@ -887,10 +948,11 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                 systems.setdefault(JMK, near_jmk)
         if code in pid_codes:
             systems.setdefault(PID, pid_codes[code])
-        vdv_zone = vdv_rail.get(normalize(st["name"])) or (
-            vdv_rail.get(normalize(osm_info["name"])) if osm_info and osm_info["name"] else None)
-        if vdv_zone:
-            systems[VDV] = vdv_zone
+        for sys_i, table in ((VDV, vdv_rail), (IREDO, iredo_rail)):
+            zone = table.get(normalize(st["name"])) or (
+                table.get(normalize(osm_info["name"])) if osm_info and osm_info["name"] else None)
+            if zone:
+                systems[sys_i] = zone
         if town and okres:
             # Pásmo IDPK nádraží = pásmo autobusové zastávky u nádraží (JDF), jinak obce.
             candidates = idpk_by_town.get((town, okres), [])
@@ -898,6 +960,28 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             pick = Counter(rail_like or [z for _, z in candidates]).most_common(1)
             if pick:
                 systems[IDPK] = pick[0][0]
+            # IDOL: zastávka u nádraží („Liberec,,nádraží“), jinak nejčastější zóna obce
+            candidates = idol_by_town.get((town, okres), [])
+            rail_like = [z for n, z in candidates if re.search(r"žel|nádr", n)]
+            pick = Counter(rail_like or [z for _, z in candidates]).most_common(1)
+            if pick:
+                systems[IDOL] = pick[0][0]
+        if IDOL not in systems and kraj == 6:
+            # zóny IDOL se jmenují podle obcí („Jablonec nad Nisou (1001)“):
+            # nejdelší název zóny, kterým začíná název stanice (nebo její plný název z OSM)
+            names = [n for n in (full, st["name"], osm_info["name"] if osm_info else "") if n]
+            best = None
+            for n in names:
+                words = normalize(n).split()
+                # „Jablonec nad Nisou centrum“ ~ zóna „Jablonec n. N.“ (zkratky ve jménech zón)
+                for length in range(len(words), 0, -1):
+                    prefix = " ".join(words[:length])
+                    code = idol_zone_names.get(prefix) or idol_zone_names.get("~" + short_key(prefix))
+                    if code and (best is None or length > best[0]):
+                        best = (length, code)
+                        break
+            if best:
+                systems[IDOL] = best[1]
         if not zones and ids in systems:
             zones = systems[ids]           # hlavní systém kraje (IDPK) bez vlastní zóny
         places.append({"name": st["name"], "kind": "t", "obec": full, "okres": okres,
@@ -992,6 +1076,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         "_ideska": ideska_tariff,
         "_pid": pid_tariff,
         "_vdv": vdv_data,
+        "_iredo": iredo_data,
+        "_idol": idol_data,
         "_rail": rail_graph(places),
     }
 
@@ -1019,7 +1105,8 @@ def main(argv: list[str] | None = None) -> int:
 
     data = build(args.cache, refresh=args.refresh, year=args.year)
     for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (PID_OUTPUT, data.pop("_pid")),
-                            (VDV_OUTPUT, data.pop("_vdv")),
+                            (VDV_OUTPUT, data.pop("_vdv")), (IREDO_OUTPUT, data.pop("_iredo")),
+                            (IDOL_OUTPUT, data.pop("_idol")),
                             (RAIL_OUTPUT, data.pop("_rail"))):
         with gzip.GzipFile(target, "wb", compresslevel=9, mtime=0) as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
