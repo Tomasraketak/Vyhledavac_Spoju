@@ -16,7 +16,7 @@ from vyhledavac import cdtrain, railnet, stations
 from vyhledavac.engine import SearchEngine
 from vyhledavac.hacks import ids_ticket
 from vyhledavac.hacks.ids_ticket import IdsTicketHack
-from vyhledavac.ids import ideska
+from vyhledavac.ids import ideska, vdv
 from vyhledavac.models import DiscountCard, Passenger, SearchQuery
 from vyhledavac.providers.base import Provider
 from tests.conftest import at, make_journey
@@ -81,7 +81,13 @@ def test_cd_train_page_parsing():
 def offline_cd(monkeypatch):
     async def no_route(*args, **kwargs):
         return []
+
+    async def no_prices(pairs):
+        return None
+
     monkeypatch.setattr(cdtrain, "train_stops", no_route)
+    monkeypatch.setattr(vdv, "prefetch", no_prices)        # počítadlo VDV se nevolá
+    monkeypatch.setattr(vdv, "_prices", {})
 
 
 def cd_journey(origin, destination, dep, arr, price, line="Os 8800"):
@@ -103,7 +109,9 @@ async def test_split_at_ideska_boundary():
         return [rest]
 
     found = await IdsTicketHack().find(query, [base], search)
-    assert calls == [("Počátky-Žirovnice", "Havlíčkův Brod", True)]
+    # zbytek cesty u ČD (VDV tu nemá ceny); jediný úsek na stanici lomu, s prohlížečem
+    assert ("Počátky-Žirovnice", "Havlíčkův Brod", True) in calls
+    assert len(calls) <= 2
     assert len(found) == 1
     hacked = found[0]
     first, second = hacked.segments
@@ -219,3 +227,31 @@ async def test_two_systems_in_a_row():
     assert len(found) == 1
     assert [s.provider for s in found[0].segments] == ["IDESKA", "IDPK"]
     assert found[0].price < Decimal(300)
+
+
+# ---- VDV ---------------------------------------------------------------------------
+VDV_HTML = ("<table><tr><td>Plné jednotlivé VDV</td><td>240 min</td><td>88,00 Kč</td>"
+            "<td>88,00 Kč</td></tr><tr><td>Student jednotlivé VDV</td><td>240 min</td>"
+            "<td>44,00 Kč</td><td>44,00 Kč</td></tr><tr><td>24 hodinová celosíťová VDV</td>"
+            "<td>1440 min</td><td>150,00 Kč</td><td>150,00 Kč</td></tr></table>")
+
+
+def test_vdv_parse_calculator_table():
+    rows = vdv.parse(VDV_HTML)
+    assert ("Plné jednotlivé VDV", 240, Decimal("88.00")) in rows
+    assert ("24 hodinová celosíťová VDV", 1440, Decimal("150.00")) in rows
+
+
+@pytest.mark.asyncio
+async def test_ideska_then_vdv(monkeypatch):
+    monkeypatch.setitem(vdv._prices, ("758", "600"), vdv.parse(VDV_HTML))
+    query = SearchQuery(origin="Třeboň", destination="Havlíčkův Brod", departure=at(5))
+    base = cd_journey("Třeboň", "Havlíčkův Brod", at(6, 6), at(8, 51), 269)
+
+    async def search(q, allow_browser=False):
+        return []
+
+    found = await IdsTicketHack().find(query, [base], search)
+    assert [s.provider for s in found[0].segments] == ["IDESKA", "VDV"]
+    assert found[0].segments[0].destination == "Počátky-Žirovnice"
+    assert found[0].price == Decimal(81) + Decimal(88)

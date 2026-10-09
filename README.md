@@ -709,15 +709,16 @@ u koho, za kolik, a o kolik je to levnější než jedna jízdenka ČD.
 |---|---|---|
 | IDESKA (Jihočeský kraj) | celý tarif z [kalkulačky IDESKA](https://kalkulacka.ideska.info/) | seznam zastávek kalkulačky + mapa zón |
 | PID (Praha, Středočeský) | ceník podle počtu pásem z [pid.cz](https://pid.cz/jizdne-a-tarif/) (P, 0, B, 1–13 navazují) | data PID |
+| VDV (Vysočina) | za běhu z [tarifního počítadla kraje](https://www.kr-vysocina.cz/spocitat-jizdne/ms-122447) (cena podle výchozí a cílové zóny, pamatuje se) | zastávky a nádraží z mapy počítadla, i přesahy (Počátky-Žirovnice) |
 | IDPK (Plzeňský kraj) | vzorec z Tarifu IDPK (příl. 4 Smlouvy PET IDPK, 1. 7. 2026): 14/12/10 Kč za zónu, Plzeň 18 Kč, síťová 84 Kč | pásma linek IDPK z jízdních řádů CIS JŘ; počítají se **všechny projeté** zóny, i kde vlak nestaví |
 
 Příklady (12. 10. 2026, ověřeno proti ČD): Třeboň → Havlíčkův Brod R 653
-ČD 269 Kč, IDESKA do Počátek-Žirovnice 81 Kč + ČD 166 Kč = **247 Kč**;
+ČD 269 Kč, IDESKA do Počátek-Žirovnice 81 Kč + VDV 94 Kč = **175 Kč**;
 České Budějovice → Plzeň R 638 (student s ISIC) ČD 102 Kč, IDESKA do
 Horažďovic 49 Kč + IDPK (6 zón do Plzně) 40 Kč = **89 Kč**.
 
 Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u ČD).
-Ostatní systémy (VDV, IDS JMK, ODIS…) zatím chybí – jejich úseky ocení ČD.
+Ostatní systémy (IDS JMK, IREDO, IDOL, ODIS…) zatím chybí – jejich úseky ocení ČD.
 
 Strategie nabídnou variantu jen při úspoře nad nastavený práh
 (výchozí 3 %, u skrytého města 8 %).

@@ -31,7 +31,7 @@ from typing import Sequence
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, ideska, idpk, pid
+from ..ids import IdsFare, ideska, idpk, pid, vdv
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import normalize
 from ..registry import HACKS
@@ -40,8 +40,8 @@ from .base import SearchFn, TravelHack
 log = logging.getLogger(__name__)
 
 #: Systémy, jejichž tarif umíme spočítat.
-SYSTEMS = {ideska.SYSTEM: ideska, pid.SYSTEM: pid, idpk.SYSTEM: idpk}
-LINKS = {ideska.SYSTEM: ideska.URL, pid.SYSTEM: pid.URL, idpk.SYSTEM: idpk.URL}
+SYSTEMS = {ideska.SYSTEM: ideska, pid.SYSTEM: pid, idpk.SYSTEM: idpk, vdv.SYSTEM: vdv}
+LINKS = {ideska.SYSTEM: ideska.URL, pid.SYSTEM: pid.URL, idpk.SYSTEM: idpk.URL, vdv.SYSTEM: vdv.URL}
 #: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (IDPK –
 #: pásmo nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
 #: jakýchkoli údajů tu trasu systému nepřeruší.
@@ -59,6 +59,7 @@ class RouteStop:
     systems: dict[str, tuple[str, ...]] = field(default_factory=dict)
     kraj: str = ""
     node: str = ""                  # jméno v železniční síti (pro projeté stanice)
+    estimated: bool = False         # čas je odhad ze sítě, ne z jízdního řádu vlaku
 
 
 @dataclass
@@ -101,7 +102,7 @@ def _minutes(a: dt.datetime | None, b: dt.datetime | None, fallback: float) -> f
 @HACKS.register()
 class IdsTicketHack(TravelHack):
     name = "ids_ticket"
-    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, lom na hranici systémů)"
+    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, VDV, lom na hranici systémů)"
     default_min_saving_pct = 3.0
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
@@ -115,7 +116,8 @@ class IdsTicketHack(TravelHack):
         fallback = [_stop(n) for n in railnet.route(query.origin, query.destination)]
         async with httpx.AsyncClient() as client:
             routes = await asyncio.gather(*(self._route(client, query, j) for j in base))
-        routes = [r or fallback for r in routes]
+        routes = [r or _with_times(fallback, j) for r, j in zip(routes, base)]
+        await self._prefetch(routes)
 
         # Úseky, na které se musí zeptat ČD – jedna otázka na stanici lomu.
         tails: dict[str, list[Journey]] = {}
@@ -146,6 +148,36 @@ class IdsTicketHack(TravelHack):
             if plan is not None and self.is_worth_it(plan.total, journey.price):
                 found.append(self._result(journey, route, plan))
         return found
+
+    async def _prefetch(self, routes: list[list[RouteStop]]) -> None:
+        """Systémy, jejichž ceny se zjišťují online (VDV), si je stáhnou předem.
+
+        Ptáme se jen na dvojice zón, které může plán použít: konce trasy
+        a stanice na hranicích systémů.
+        """
+        for system, module in SYSTEMS.items():
+            if not hasattr(module, "prefetch"):
+                continue
+            pairs: set[tuple[str, str]] = set()
+            for route in routes:
+                n = len(route) - 1
+                if n < 1:
+                    continue
+                points = {0, n}
+                for other in SYSTEMS:
+                    for k in (self._last_inside(route, other), self._first_inside(route, other)):
+                        if k is not None:
+                            points.add(k)
+                points = sorted(i for i in points if system in route[i].systems)
+                for a in points:
+                    for b in points:
+                        if a < b:
+                            pairs.update((x, y) for x in route[a].systems[system]
+                                         for y in route[b].systems[system])
+            try:
+                await module.prefetch(pairs)
+            except Exception:
+                log.exception("ids_ticket: ceny %s se nepodařilo stáhnout", system)
 
     # ---- trasa vlaku ------------------------------------------------------------
     async def _route(self, client: httpx.AsyncClient, query: SearchQuery,
@@ -219,7 +251,10 @@ class IdsTicketHack(TravelHack):
         def ids(system: str, i: int, j: int, a=None, b=None) -> IdsFare | None:
             a = a if a is not None else (journey.departure if i == 0 else route[i].time)
             b = b if b is not None else (journey.arrival if j == n else route[j].time)
-            return self._ids_fare(query, route, system, i, j, _minutes(a, b, whole))
+            minutes = _minutes(a, b, whole)
+            if (0 < i and route[i].estimated) or (j < n and route[j].estimated):
+                minutes = min(whole, minutes * 1.15 + 5)     # rezerva u odhadnutého času
+            return self._ids_fare(query, route, system, i, j, minutes)
 
         # 1) celá cesta v jednom systému
         for system in SYSTEMS:
@@ -303,6 +338,24 @@ class IdsTicketHack(TravelHack):
 
 
 # ---- pomůcky ---------------------------------------------------------------------
+def _with_times(route: list[RouteStop], journey: Journey) -> list[RouteStop]:
+    """Odhad časů na trase ze sítě, když trasu vlaku z cd.cz nemáme.
+
+    Jízdní doby úseků se škálují na skutečnou dobu cesty. U jízdenky, která
+    končí v bodě lomu, se počítá s rezervou (+15 % a 5 min), aby odhad nikdy
+    nebyl kratší než skutečnost.
+    """
+    cumulative = railnet.cumulative_minutes([s.node or s.name for s in route])
+    if not cumulative or cumulative[-1] <= 0:
+        return route
+    scale = journey.duration.total_seconds() / 60 / cumulative[-1]
+    timed = []
+    for stop, minutes in zip(route, cumulative):
+        when = journey.departure + dt.timedelta(minutes=minutes * scale)
+        timed.append(RouteStop(stop.name, when, stop.systems, stop.kraj, stop.node, True))
+    return timed
+
+
 def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:
     """Zóny všech stanic, kterými vlak projede – i těch, kde nestaví."""
     zones: list[tuple[str, ...]] = [part[0].systems.get(system, ())]

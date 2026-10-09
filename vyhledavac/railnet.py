@@ -142,3 +142,19 @@ def name_for_code(code: str | None) -> str | None:
         return graph[0][graph[3].index(short)]
     except ValueError:
         return None
+
+
+def cumulative_minutes(names: list[str]) -> list[float] | None:
+    """Jízdní doba od první stanice ke každé další (podle nejrychlejších úseků sítě)."""
+    graph = _graph()
+    if graph is None or not names:
+        return None
+    _, adjacent, index, _ = graph
+    out = [0.0]
+    for a, b in zip(names, names[1:]):
+        ia, ib = index.get(normalize(a)), index.get(normalize(b))
+        step = next((m for n, m in adjacent.get(ia, ()) if n == ib), None) if ia is not None else None
+        if step is None:
+            return None
+        out.append(out[-1] + step)
+    return out

@@ -98,7 +98,7 @@ IDS = [
     ("ODIS", "Ostravský dopravní integrovaný systém"),
 ]
 KRAJ_IDS = [0, 0, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11]
-PID, IDSJK, IDPK, JMK = 0, 1, 2, 8
+PID, IDSJK, IDPK, VDV, JMK = 0, 1, 2, 7, 8
 PLZENSKY = 3      # index kraje
 
 
@@ -407,6 +407,78 @@ RAIL_OUTPUT = ROOT / "vyhledavac" / "data" / "rail.json.gz"
 IDESKA_PROFILES = ("1", "2", "3", "50")
 
 
+VDV_CALC = "https://tim.abirun.eu/KrajVysocina/TarifniPocitadlo"
+VDV_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_vdv.json.gz"
+
+
+def fetch_vdv(cache: Path, *, refresh: bool) -> Path:
+    """Zóny a zastávky VDV z tarifního počítadla Kraje Vysočina.
+
+    Počítadlo (tim.abirun.eu) má mapu: seznam zón a pro každou zónu její
+    zastávky včetně nádraží. Ceny se za běhu ptají počítadla (``ids.vdv``),
+    sem stačí, která zastávka leží ve které zóně – i přesahy do sousedních
+    krajů (Počátky, …).
+    """
+    import concurrent.futures as cf
+
+    target = cache / "vdv_stops.json"
+    if target.exists() and target.stat().st_size and not refresh:
+        return target
+    client = httpx.Client(headers={"User-Agent": "Mozilla/5.0", "X-Requested-With": "XMLHttpRequest"},
+                          timeout=60, follow_redirects=True)
+    page = client.get(VDV_CALC + "/").text
+    token = re.search(r"__APIRequestVerificationToken' value='([^']+)'", page).group(1)
+    validity = re.search(r'<option value="(\d+)"', page).group(1)
+    headers = {"__APIRequestVerificationToken": token}
+    zones = client.post(VDV_CALC + "/Mapa/ZakladniDataMapy", headers=headers,
+                        data={"platnostTarifuId": validity, "nadzonyId": ""}).json()["zones"]
+    print(f"  VDV: {len(zones)} zón, stahuji zastávky…", flush=True)
+
+    def stops(zone: dict) -> list:
+        for _ in range(3):
+            try:
+                r = client.post(VDV_CALC + "/Mapa/Zastavky", headers=headers,
+                                data={"platnostTarifuId": validity, "zonaId": zone["id"]})
+                r.raise_for_status()
+                return r.json()
+            except (httpx.HTTPError, ValueError):
+                continue
+        return []
+
+    with cf.ThreadPoolExecutor(max_workers=6) as pool:
+        per_zone = list(pool.map(stops, zones))
+    data = {"zones": [{"id": z["id"], "text": z["text"]} for z in zones],
+            "stops": [s for chunk in per_zone for s in chunk]}
+    target.write_text(json.dumps(data, ensure_ascii=False), "utf-8")
+    return target
+
+
+def parse_vdv(path: Path) -> tuple[dict[str, str], dict[str, str], dict]:
+    """(nádraží -> zóna, zastávka -> zóna, data pro ids_vdv.json.gz).
+
+    Zóna se zapisuje zkratkou („1“ = Jihlava); k ní ID pro dotaz na cenu.
+    """
+    data = json.loads(path.read_text("utf-8"))
+    abbr: dict[int, str] = {}
+    names: dict[str, str] = {}
+    for zone in data["zones"]:
+        m = re.match(r"^(\S+)\s+(.*)$", zone["text"])
+        if m:
+            abbr[zone["id"]] = m.group(1)
+            names[m.group(1)] = m.group(2).strip()
+    rail: dict[str, str] = {}
+    bus: dict[str, str] = {}
+    for stop in data["stops"]:
+        zone = abbr.get(stop.get("zoneId"))
+        if not zone:
+            continue
+        key = normalize(stop.get("text", ""))
+        (bus if stop.get("isBus") else rail).setdefault(key, zone)
+    out = {"source": VDV_CALC, "generated": dt.date.today().isoformat(),
+           "zones": {a: {"id": -zid, "name": names.get(a, "")} for zid, a in abbr.items()}}
+    return rail, bus, out
+
+
 PID_TARIFF = "https://pid.cz/jizdne-a-tarif/"
 PID_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_pid.json.gz"
 
@@ -657,6 +729,7 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     jmk = fetch(cache, "jmk_gtfs.zip", URLS["jmk_gtfs.zip"], refresh=refresh)
     ideska = fetch(cache, "ideska_zones.xml", IDESKA_ZONES, refresh=refresh)
     ideska_json = fetch(cache, "jikord.json", IDESKA_TARIFF, refresh=refresh)
+    vdv_rail, vdv_bus, vdv_data = parse_vdv(fetch_vdv(cache, refresh=refresh))
     pid_page = fetch(cache, "pid_tarif.html", PID_TARIFF, refresh=refresh)
     pid_tariff = extract_pid_tariff(pid_page)
     osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
@@ -747,6 +820,11 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             systems[IDPK] = idpk
             if ids == IDPK and not zones:
                 zones = idpk
+        vdv_zone = vdv_bus.get(normalize(spelled)) or vdv_bus.get(normalize(name))
+        if vdv_zone:
+            systems[VDV] = vdv_zone
+            if ids == VDV and not zones:
+                zones = vdv_zone
         ideska_zone = ideska_stops.get(normalize(spelled)) or ideska_stops.get(normalize(name))
         if ideska_zone:
             systems[IDSJK] = ideska_zone
@@ -809,6 +887,10 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                 systems.setdefault(JMK, near_jmk)
         if code in pid_codes:
             systems.setdefault(PID, pid_codes[code])
+        vdv_zone = vdv_rail.get(normalize(st["name"])) or (
+            vdv_rail.get(normalize(osm_info["name"])) if osm_info and osm_info["name"] else None)
+        if vdv_zone:
+            systems[VDV] = vdv_zone
         if town and okres:
             # Pásmo IDPK nádraží = pásmo autobusové zastávky u nádraží (JDF), jinak obce.
             candidates = idpk_by_town.get((town, okres), [])
@@ -909,6 +991,7 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                    for p in places],
         "_ideska": ideska_tariff,
         "_pid": pid_tariff,
+        "_vdv": vdv_data,
         "_rail": rail_graph(places),
     }
 
@@ -936,6 +1019,7 @@ def main(argv: list[str] | None = None) -> int:
 
     data = build(args.cache, refresh=args.refresh, year=args.year)
     for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (PID_OUTPUT, data.pop("_pid")),
+                            (VDV_OUTPUT, data.pop("_vdv")),
                             (RAIL_OUTPUT, data.pop("_rail"))):
         with gzip.GzipFile(target, "wb", compresslevel=9, mtime=0) as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
