@@ -1,0 +1,22 @@
+// Filtr „stejný odjezd: skrýt pozdější a dražší“ z app.js – spouští test_web_filters.py.
+const fs = require('fs');
+let failed = 0;
+const check = (name, ok) => { if (ok !== true) { failed++; console.log('FAIL', name); } };
+const src = fs.readFileSync(require('path').join(__dirname, '..', '..', 'vyhledavac', 'web', 'static', 'app.js'), 'utf8');
+const start = src.indexOf('  const TIE_SALT');
+const end = src.indexOf('  // ---- peníze');
+const S = { sameDep: true };
+eval(src.slice(start, end).replace(/function (\w+)/g, 'global.$1 = function $1').replace('const TIE_SALT', 'global.TIE_SALT'));
+const J = (id, dep, arr, price, t = 0) => ({ id, depM: dep, arrM: arr, price, realTransfers: t });
+const run = list => list.filter(sameDepartureFilter()).map(j => j.id).sort().join(',');
+check('later+pricier hidden:', run([J('a', 0, 100, 200), J('b', 0, 120, 250)]) === 'a');
+check('later but cheaper kept:', run([J('a', 0, 100, 200), J('b', 0, 120, 150)]) === 'a,b');
+check('later same price hidden:', run([J('a', 0, 100, 200), J('b', 0, 120, 200)]) === 'a');
+check('different departure untouched:', run([J('a', 0, 100, 200), J('b', 5, 120, 250)]) === 'a,b');
+check('same arr+price -> fewer transfers:', run([J('a', 0, 100, 200, 1), J('b', 0, 100, 200, 0)]) === 'b');
+const tie = run([J('a', 0, 100, 200), J('b', 0, 100, 200), J('c', 0, 100, 200)]);
+check('full tie -> exactly one:', tie.split(',').length === 1);
+check('unknown price kept:', run([J('a', 0, 100, 200), J('b', 0, 120, null)]) === 'a,b');
+check('both unknown same arr dedup:', run([J('a', 0, 100, null), J('b', 0, 100, null)]).split(',').length === 1);
+check('same arr pricier hidden:', run([J('a', 0, 100, 200), J('b', 0, 100, 300)]) === 'a');
+process.exit(failed ? 1 : 0);

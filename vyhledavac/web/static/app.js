@@ -69,6 +69,7 @@
     buffer: 0,
     onlyPriced: store.get('onlyPriced', false),
     pareto: store.get('pareto', true),
+    sameDep: store.get('sameDep', true),   // skrýt horší spoje se stejným odjezdem
     sort: store.get('sort', 'earliest'),
     off: new Set(),               // vypnutí dopravci (podle jména na úseku)
     open: null,
@@ -343,7 +344,38 @@
       .filter(j => !j.carriers.some(c => S.off.has(c)))
       .filter(j => !S.onlyPriced || j.price != null)
       .filter(j => !S.pareto || !j.dominated)
+      .filter(sameDepartureFilter())
       .sort(SORTERS[S.sort]);
+  }
+
+  // Spoje se stejným odjezdem: nechat jen ty, které za něco stojí.
+  //  - přijede později a není levnější -> pryč (levnější pozdější zůstane),
+  //  - stejný příjezd i cena -> zůstane ten s méně přestupy,
+  //  - pořád shoda -> náhodně jeden (náhoda je pevná po dobu načtené stránky,
+  //    ať výběr při každém překreslení neposkakuje).
+  // Neznámou cenu nelze porovnat, takový spoj se kvůli ceně neskrývá.
+  const TIE_SALT = Math.random().toString(36).slice(2);
+  function tieRank(id) {
+    let h = 2166136261;
+    for (const c of TIE_SALT + id) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); }
+    return h >>> 0;
+  }
+
+  function beats(b, a) {
+    // Je spoj b (se stejným odjezdem) lepší než a natolik, že a skryjeme?
+    const known = a.price != null && b.price != null;
+    if (b.arrM < a.arrM) return known && b.price <= a.price;
+    if (b.arrM > a.arrM) return false;
+    // stejný příjezd
+    if (known && b.price !== a.price) return b.price < a.price;
+    if (!known && (a.price != null || b.price != null)) return false;
+    if (b.realTransfers !== a.realTransfers) return b.realTransfers < a.realTransfers;
+    return tieRank(b.id) < tieRank(a.id);
+  }
+
+  function sameDepartureFilter() {
+    if (!S.sameDep) return () => true;
+    return (j, _, list) => !list.some(o => o !== j && o.depM === j.depM && beats(o, j));
   }
 
   // ---- peníze --------------------------------------------------------------
@@ -472,6 +504,7 @@
         <span class="adv-hint">Hledají levnější kombinace jízdenek; platí od příštího hledání.</span></div>
       <div class="adv-cell"><span class="adv-title">Zobrazení</span>
         ${sw('onlyPriced', S.onlyPriced, 'Jen spoje se známou cenou')}
+        ${sw('sameDep', S.sameDep, 'Stejný odjezd: skrýt pozdější a dražší')}
         ${sw('pareto', S.pareto, 'Skrýt dražší i pomalejší')}</div>
     </div>`;
   }
@@ -754,6 +787,7 @@
     store.set('skFree', S.skFree);
     store.set('onlyPriced', S.onlyPriced);
     store.set('pareto', S.pareto);
+    store.set('sameDep', S.sameDep);
     store.set('sort', S.sort);
     store.set('cur', S.cur);
   }
@@ -785,7 +819,7 @@
       else S[key] = false;
     },
     reset() { S.modes = [...ALL_GROUPS]; S.maxT = 'any'; S.direct = false; S.buffer = 0; S.onlyPriced = false; S.off.clear(); },
-    'reset-all'() { ACTIONS.reset(); S.pareto = false; },
+    'reset-all'() { ACTIONS.reset(); S.pareto = false; S.sameDep = false; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
     'prov-fast'() { S.providersOn = new Set(S.meta.providers.filter(p => !p.browser).map(p => p.name)); },
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },

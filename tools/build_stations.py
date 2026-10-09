@@ -16,6 +16,9 @@ Zdroje (všechny veřejné a bez registrace):
 * OpenStreetMap (Overpass API): kraj a poloha každé železniční stanice.
 * PID – seznam zastávek s tarifními pásmy (data.pid.cz, CC BY 4.0).
 * IDS JMK – GTFS s tarifními zónami (kordis-jmk.cz).
+* IDESKA (IDS JK) – oficiální mapa zón (kalkulacka.ideska.info/zones.xml),
+  zóny jako mnohoúhelníky. Zastávka dostane zónu podle polohy: zastávka
+  z OSM, jinak část obce, jinak střed obce (zóny skládají celé obce).
 
 Ostatní integrované systémy zóny volně nezveřejňují – u nich databáze uvádí
 kraj a systém, zónu ne.
@@ -82,7 +85,7 @@ ISO_KRAJ = {
 # Integrovaný dopravní systém kraje: zkratka, celý název.
 IDS = [
     ("PID", "Pražská integrovaná doprava"),
-    ("IDS JK", "Integrovaný dopravní systém Jihočeského kraje"),
+    ("IDESKA", "IDS JK – Integrovaný dopravní systém Jihočeského kraje"),
     ("IDPK", "Integrovaná doprava Plzeňského kraje"),
     ("IDS KK", "Integrovaný dopravní systém Karlovarského kraje"),
     ("DÚK", "Doprava Ústeckého kraje"),
@@ -95,7 +98,7 @@ IDS = [
     ("ODIS", "Ostravský dopravní integrovaný systém"),
 ]
 KRAJ_IDS = [0, 0, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11]
-PID, JMK = 0, 8
+PID, IDSJK, JMK = 0, 1, 8
 
 # Okresy podle kódů CIS JŘ: kód -> (název, kraj).
 OKRESY = {
@@ -218,6 +221,7 @@ def parse_jdf(path: Path) -> dict[tuple[str, str], dict]:
                 if stat and stat != "CZ":
                     continue
                 okres = okres.upper()
+                obec = re.sub(r"\s*\[[A-Z]{2}\]$", "", obec)      # "Tábor [TA]"
                 if okres not in OKRESY or not obec:
                     continue
                 name = bus_display_name(obec, cast, misto)
@@ -343,6 +347,120 @@ def _nearest_zone(points, lat: float, lon: float, limit_m: float = 700) -> str |
 
 
 # ---------------------------------------------------------------------------
+#  Zóny IDESKA (IDS JK)
+# ---------------------------------------------------------------------------
+IDESKA_ZONES = "https://kalkulacka.ideska.info/zones.xml"
+OVERPASS_JCK = (
+    '[out:json][timeout:170];area["ISO3166-2"="CZ-31"]->.a;'
+    '(node(area.a)["place"]["name"];node(area.a)["highway"="bus_stop"]["name"];'
+    'node(area.a)["public_transport"="platform"]["name"];);out body;'
+)
+
+
+def _parse_wkt(text: str) -> list[list[tuple[float, float]]]:
+    """POLYGON/MULTIPOLYGON z WKT -> seznam prstenců [(lon, lat), …]."""
+    rings = []
+    for ring in re.findall(r"\(([-0-9., ]+)\)", text):
+        pts = []
+        for pair in ring.split(","):
+            parts = pair.split()
+            if len(parts) >= 2:
+                pts.append((float(parts[0]), float(parts[1])))
+        if len(pts) >= 3:
+            rings.append(pts)
+    return rings
+
+
+def _in_ring(lon: float, lat: float, ring: list[tuple[float, float]]) -> bool:
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        if (yi > lat) != (yj > lat) and lon < (xj - xi) * (lat - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+class IdeskaZones:
+    """Tarifní zóny IDESKA jako mnohoúhelníky z oficiální mapy zón.
+
+    Zóny skládají celá katastrální území obcí, takže zastávka bez přesné
+    polohy dostane správnou zónu i podle středu své obce.
+    """
+
+    def __init__(self, path: Path) -> None:
+        root = ET.fromstring(path.read_bytes())
+        real = {z.get("ID") for z in root.iter("Zone") if z.get("Area") != "Virtual"}
+        self.zones: list[tuple[str, tuple[float, float, float, float], list]] = []
+        for g in root.iter("ZoneGeometry"):
+            zid = g.get("ZoneID")
+            rings = _parse_wkt(g.get("Geometry") or "") if zid in real else []
+            if not rings:
+                continue
+            xs = [x for r in rings for x, _ in r]
+            ys = [y for r in rings for _, y in r]
+            self.zones.append((zid, (min(xs), min(ys), max(xs), max(ys)), rings))
+
+    def at(self, lat: float, lon: float) -> str:
+        hits = []
+        for zid, (x0, y0, x1, y1), rings in self.zones:
+            # sudý počet zásahů = díra v mnohoúhelníku
+            if x0 <= lon <= x1 and y0 <= lat <= y1 and sum(_in_ring(lon, lat, r) for r in rings) % 2:
+                hits.append(zid)
+        return _zones([",".join(hits)])
+
+
+class JckLocator:
+    """Poloha zastávky v Jihočeském kraji podle OSM: zastávka, část obce, obec."""
+
+    def __init__(self, path: Path) -> None:
+        self.stops: dict[str, list[tuple[float, float]]] = defaultdict(list)
+        self.places: dict[str, list[tuple[float, float, str]]] = defaultdict(list)
+        for el in json.loads(path.read_text("utf-8"))["elements"]:
+            tags, lat, lon = el.get("tags", {}), el.get("lat"), el.get("lon")
+            if lat is None or not tags.get("name"):
+                continue
+            key = normalize(tags["name"])
+            if "place" in tags:
+                self.places[key].append((lat, lon, tags["place"]))
+            else:
+                self.stops[key].append((lat, lon))
+
+    def _seat(self, okres: str) -> tuple[float, float] | None:
+        name = OKRESY.get(okres, ("",))[0]
+        towns = [p for p in self.places.get(normalize(name), []) if p[2] in ("city", "town")]
+        return towns[0][:2] if towns else None
+
+    @staticmethod
+    def _nearest(cands, ref):
+        if not cands:
+            return None
+        if ref is None or len(cands) == 1:
+            return cands[0][:2]
+        return min(cands, key=lambda c: (c[0] - ref[0]) ** 2 + (c[1] - ref[1]) ** 2)[:2]
+
+    def town(self, obec: str, okres: str) -> tuple[float, float] | None:
+        cands = [p for p in self.places.get(normalize(obec), [])
+                 if p[2] in ("city", "town", "village", "hamlet")]
+        return self._nearest(cands, self._seat(okres))
+
+    def locate(self, name: str, obec: str, okres: str) -> tuple[float, float] | None:
+        centre = self.town(obec, okres) if obec else None
+        exact = self.stops.get(normalize(name))
+        if exact:
+            return self._nearest(exact, centre)
+        parts = [x.strip() for x in name.split(",")]
+        if len(parts) > 1 and centre:
+            # "Obec, Část, místo" – část obce bývá v OSM jako samostatné místo
+            near = self._nearest(self.places.get(normalize(parts[1]), []), centre)
+            if near and abs(near[0] - centre[0]) + abs(near[1] - centre[1]) < 0.1:
+                return near
+        return centre
+
+
+# ---------------------------------------------------------------------------
 #  Sestavení
 # ---------------------------------------------------------------------------
 def parse_osm(path: Path) -> dict[str, dict]:
@@ -411,6 +529,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     rail = fetch(cache, f"JR{year}.zip", URLS["JR.zip"].format(year=year), refresh=refresh)
     pid = fetch(cache, "pid_stops.json", URLS["pid_stops.json"], refresh=refresh)
     jmk = fetch(cache, "jmk_gtfs.zip", URLS["jmk_gtfs.zip"], refresh=refresh)
+    ideska = fetch(cache, "ideska_zones.xml", IDESKA_ZONES, refresh=refresh)
+    osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
     osm = fetch_overpass(cache, "osm_rail.json", OVERPASS_QUERY, refresh=refresh)
     osm_places = fetch_overpass(cache, "osm_places.json", OVERPASS_PLACES, refresh=refresh)
 
@@ -422,6 +542,12 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     print(f"  {len(trains)} železničních stanic a zastávek", flush=True)
     pid_names, pid_codes = parse_pid(pid)
     jmk_names, jmk_points = parse_jmk(jmk)
+    ideska_zones = IdeskaZones(ideska)
+    jck = JckLocator(osm_jck)
+
+    def idsjk_zone(name: str, obec: str, okres: str, where=None) -> str:
+        where = where or jck.locate(name, obec, okres)
+        return ideska_zones.at(*where) if where else ""
     osm_codes = parse_osm(osm)
     osm_names = osm_codes.pop("__by_name__")
 
@@ -443,8 +569,12 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                 best = town
         return best
 
-    def zone_for(name: str, okres: str, kraj: int) -> tuple[int, str]:
+    def zone_for(name: str, obec: str, okres: str, kraj: int) -> tuple[int, str]:
         key = normalize(name)
+        if kraj == 2:      # vlastní systém kraje má přednost před zajíždějícím PID
+            zones = idsjk_zone(name, obec, okres)
+            if zones:
+                return IDSJK, zones
         if (key, okres) in pid_names:
             return PID, pid_names[(key, okres)]
         if kraj == 10 and key in jmk_names:
@@ -472,8 +602,14 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     # ---- autobusové zastávky
     for (name, okres), s in bus.items():
         kraj = OKRESY[okres][1]
-        ids, zones = zone_for(name, okres, kraj)
-        full = town_full(s["obec"], kraj)[0]
+        full, pop = town_full(s["obec"], kraj)
+        if not pop:
+            # Jízdní řády MHD píšou do pole obce název zastávky („Tyršova“,
+            # „aut.nádr.“) – bez skutečné obce by taková položka v nabídce mátla.
+            continue
+        # CIS zkracuje obec ("Týn n.Vlt., aut.nádr.") – polohu hledat podle plného jména
+        spelled = full + name[len(s["obec"]):] if name.startswith(s["obec"]) else name
+        ids, zones = zone_for(spelled, full, okres, kraj)
         places.append({"name": name, "kind": "b", "obec": full, "okres": okres,
                        "town": s["obec"], "alt": alt_for(name, s["obec"], full),
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
@@ -497,7 +633,13 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             kraj = OKRESY[okres][1]
         else:
             continue  # nevíme, kde leží – raději vynechat
-        if code in pid_codes:
+        jck_zone = ""
+        if kraj == 2:
+            where = (osm_info["lat"], osm_info["lon"]) if osm_info and osm_info["lat"] else None
+            jck_zone = idsjk_zone(st["name"], town or "", okres, where)
+        if jck_zone:
+            ids, zones = IDSJK, jck_zone
+        elif code in pid_codes:
             ids, zones = PID, pid_codes[code]
         elif kraj == 10 and osm_info is not None and osm_info["lat"] is not None:
             zones = _nearest_zone(jmk_points, osm_info["lat"], osm_info["lon"]) or ""
@@ -541,6 +683,9 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             zones = _zones([",".join(z for (i, z), n in votes.items() if i == ids and n >= weight * 0.15)])
         if kraj == 0:
             zones = "P"
+        elif kraj == 2 and not zones:
+            zones = idsjk_zone(full, full, okres)
+            ids = IDSJK if zones else ids
         entry = {"name": full, "kind": "c", "obec": full, "okres": okres, "town": town,
                  "alt": normalize(town) if full != town else "", "kraj": kraj, "ids": ids,
                  "zones": zones, "score": pop + total // 3}
@@ -570,6 +715,7 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             "CIS JŘ – jízdní řády autobusů (JDF) a vlaků (CZPTT), portal.cisjr.cz",
             "Pražská integrovaná doprava – zastávky a pásma, data.pid.cz (CC BY 4.0)",
             "KORDIS JMK – GTFS IDS JMK, kordis-jmk.cz",
+            "JIKORD – mapa zón IDESKA (IDS JK), kalkulacka.ideska.info",
             "© přispěvatelé OpenStreetMap (ODbL) – kraj železničních stanic, názvy a počty obyvatel obcí",
         ],
         "kraje": KRAJE,

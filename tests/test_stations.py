@@ -70,7 +70,9 @@ def test_empty_query():
     ("Brno hl.n.", "Jihomoravský kraj", "IDS JMK", "100"),
     ("Brno, ÚAN Zvonařka", "Jihomoravský kraj", "IDS JMK", "100"),
     ("Beroun", "Středočeský kraj", "PID", "4"),
-    ("Pražák", "Jihočeský kraj", "IDS JK", None),
+    ("Pražák", "Jihočeský kraj", "IDESKA", "723"),
+    ("České Budějovice", "Jihočeský kraj", "IDESKA", "100"),
+    ("Zliv", "Jihočeský kraj", "IDESKA", "107"),
     ("Ostrava-Svinov", "Moravskoslezský kraj", "ODIS", None),
     ("Liberec", "Liberecký kraj", "IDOL", None),
 ])

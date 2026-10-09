@@ -500,7 +500,7 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   ne zastávku Pražák. Hledá bez diakritiky, v libovolném pořadí slov
   („hl brno“) i podle plných názvů místo zkratek CIS („Královo Pole“ →
   *Brno-Kr. Pole*). U každého místa ukáže kraj, integrovaný systém (PID,
-  IDS JMK, IDOL, ODIS…) a tarifní zónu. Ovládá se i šipkami a Enterem.
+  IDS JMK, IDESKA, IDOL, ODIS…) a tarifní zónu. Ovládá se i šipkami a Enterem.
 - **Hledání:** odkud, kam, datum, čas; druhy dopravy (vlak / bus / MHD);
   v *Pokročilých možnostech* počet přestupů, jen přímá spojení, minimální
   čas na přestup, travel hacky, „jen se známou cenou“ a „skrýt dražší
@@ -546,12 +546,13 @@ python tools/build_stations.py            # --refresh = stáhnout zdroje znovu
 | kraj stanic, plné názvy a počty obyvatel obcí | © přispěvatelé [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL), Overpass API |
 | pásma PID | [data.pid.cz](https://pid.cz/o-systemu/opendata/) (CC BY 4.0) |
 | zóny IDS JMK | GTFS [KORDIS JMK](https://kordis-jmk.cz/gtfs/gtfs.zip) |
+| zóny IDESKA (IDS JK) | oficiální [mapa zón](https://kalkulacka.ideska.info/view.html?view) – mnohoúhelníky; zastávka podle polohy v OSM, jinak středu obce |
 
-Kraj → systém: Praha a Středočeský PID, Jihočeský IDS JK, Plzeňský IDPK,
+Kraj → systém: Praha a Středočeský PID, Jihočeský IDESKA (IDS JK), Plzeňský IDPK,
 Karlovarský IDS KK, Ústecký DÚK, Liberecký IDOL, Královéhradecký
 a Pardubický IREDO, Vysočina VDV, Jihomoravský IDS JMK, Olomoucký IDSOK,
-Zlínský IDZK, Moravskoslezský ODIS. Zóny volně zveřejňují jen PID
-a IDS JMK; u ostatních systémů se ukáže kraj a systém bez zóny.
+Zlínský IDZK, Moravskoslezský ODIS. Zóny volně zveřejňují PID, IDS JMK
+a IDESKA; u ostatních systémů se ukáže kraj a systém bez zóny.
 
 ## Okenní rozhraní (tkinter)
 
