@@ -245,8 +245,27 @@ def parse_jdf(path: Path) -> dict[tuple[str, str], dict]:
 # ---------------------------------------------------------------------------
 #  Vlaky – CZPTT
 # ---------------------------------------------------------------------------
+RAIL_EDGES: dict[tuple[str, str], int] = {}     # dvojice stanic -> nejkratší jízda v minutách
+
+
+def _minutes(loc, qualifier: str) -> int | None:
+    for timing in loc.iter("Timing"):
+        if timing.get("TimingQualifierCode") == qualifier:
+            text = timing.findtext("Time") or ""
+            m = re.match(r"(\d{2}):(\d{2})", text)
+            if m:
+                offset = int(timing.findtext("Offset") or 0)
+                return int(m.group(1)) * 60 + int(m.group(2)) + offset * 1440
+    return None
+
+
 def parse_czptt(path: Path) -> dict[str, dict]:
-    """kód stanice -> {name, trains}. Jen tuzemské stanice, kde vlak staví pro cestující."""
+    """kód stanice -> {name, trains}. Jen tuzemské stanice, kde vlak staví pro cestující.
+
+    Vedlejší produkt: ``RAIL_EDGES`` – dvojice po sobě jdoucích zastávek
+    vlaků, tedy síť, po které se hledá trasa pro lomení jízdenky na hranici
+    integrovaných systémů (dopravci trasu vlaku nevracejí).
+    """
     stations: dict[str, dict] = {}
     with zipfile.ZipFile(path) as z:
         names = [n for n in z.namelist() if n.lower().endswith(".xml")]
@@ -258,6 +277,7 @@ def parse_czptt(path: Path) -> dict[str, dict]:
             except ET.ParseError:
                 continue
             seen: set[str] = set()
+            previous = None
             for loc in root.iter("CZPTTLocation"):
                 acts = {a.text for a in loc.iter("TrainActivityType")}
                 if "0001" not in acts:
@@ -272,6 +292,13 @@ def parse_czptt(path: Path) -> dict[str, dict]:
                 seen.add(code)
                 entry = stations.setdefault(code, {"name": label, "trains": 0})
                 entry["trains"] += 1
+                arrive = _minutes(loc, "ALA")
+                leave = _minutes(loc, "ALD")
+                if previous is not None and arrive is not None and previous[1] is not None:
+                    edge = tuple(sorted((previous[0], code)))
+                    took = max(1, arrive - previous[1])
+                    RAIL_EDGES[edge] = min(RAIL_EDGES.get(edge, took), took)
+                previous = (code, leave if leave is not None else arrive)
     return stations
 
 
@@ -350,6 +377,42 @@ def _nearest_zone(points, lat: float, lon: float, limit_m: float = 700) -> str |
 #  Zóny IDESKA (IDS JK)
 # ---------------------------------------------------------------------------
 IDESKA_ZONES = "https://kalkulacka.ideska.info/zones.xml"
+IDESKA_TARIFF = "https://kalkulacka.ideska.info/jikord.json"
+IDS_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_ideska.json.gz"
+RAIL_OUTPUT = ROOT / "vyhledavac" / "data" / "rail.json.gz"
+#: Profily cestujících, jejichž jednotlivé jízdné se počítá (plné, 6–18, student, 65+).
+IDESKA_PROFILES = ("1", "2", "3", "50")
+
+
+def extract_ideska_tariff(path: Path) -> tuple[dict, dict[str, str]]:
+    """Z dat kalkulačky IDESKA vybere, co je potřeba k ceně jednotlivé jízdenky.
+
+    Vrací (tarif, normalizovaný název zastávky -> zóna). Seznam zastávek
+    obsahuje i zastávky přesahů do sousedních krajů (Počátky, Benešov…).
+    """
+    data = json.loads(path.read_text("utf-8"))
+    tariffs = [t for t in data["tariffs"]
+               if t["type"] == "Single" and t["cp"] in IDESKA_PROFILES]
+    tariff = {
+        "source": IDESKA_TARIFF,
+        "generated": dt.date.today().isoformat(),
+        "tariffUnits": data["tariffUnits"],
+        "tariffZones": data["tariffZones"],
+        "tariffs": tariffs,
+        "singleNetworkRelations": data["singleNetworkRelations"],
+        "singleNetworkExceptions": data["singleNetworkExceptions"],
+        "zoneCountries": data["zoneCountries"],
+        "zoneAreas": data["zoneAreas"],
+    }
+    stops: dict[str, str] = {}
+    for item in data["searchItems"]:
+        m = re.match(r"^(.*?)\s*\((\d+)\)\s*$", item.get("text", ""))
+        if not m or not item.get("zona"):
+            continue
+        parts = [x.strip() for x in m.group(1).split(",")]
+        name = ", ".join(x for x in parts if x)
+        stops.setdefault(normalize(name), item["zona"])
+    return tariff, stops
 OVERPASS_JCK = (
     '[out:json][timeout:170];area["ISO3166-2"="CZ-31"]->.a;'
     '(node(area.a)["place"]["name"];node(area.a)["highway"="bus_stop"]["name"];'
@@ -530,6 +593,7 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     pid = fetch(cache, "pid_stops.json", URLS["pid_stops.json"], refresh=refresh)
     jmk = fetch(cache, "jmk_gtfs.zip", URLS["jmk_gtfs.zip"], refresh=refresh)
     ideska = fetch(cache, "ideska_zones.xml", IDESKA_ZONES, refresh=refresh)
+    ideska_json = fetch(cache, "jikord.json", IDESKA_TARIFF, refresh=refresh)
     osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
     osm = fetch_overpass(cache, "osm_rail.json", OVERPASS_QUERY, refresh=refresh)
     osm_places = fetch_overpass(cache, "osm_places.json", OVERPASS_PLACES, refresh=refresh)
@@ -544,6 +608,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     jmk_names, jmk_points = parse_jmk(jmk)
     ideska_zones = IdeskaZones(ideska)
     jck = JckLocator(osm_jck)
+    ideska_tariff, ideska_stops = extract_ideska_tariff(ideska_json)
+    tariff_zones = set(ideska_tariff["zoneCountries"])
 
     def idsjk_zone(name: str, obec: str, okres: str, where=None) -> str:
         where = where or jck.locate(name, obec, okres)
@@ -610,7 +676,11 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         # CIS zkracuje obec ("Týn n.Vlt., aut.nádr.") – polohu hledat podle plného jména
         spelled = full + name[len(s["obec"]):] if name.startswith(s["obec"]) else name
         ids, zones = zone_for(spelled, full, okres, kraj)
-        places.append({"name": name, "kind": "b", "obec": full, "okres": okres,
+        systems = {ids: zones} if zones else {}
+        ideska_zone = ideska_stops.get(normalize(spelled)) or ideska_stops.get(normalize(name))
+        if ideska_zone:
+            systems[IDSJK] = ideska_zone
+        places.append({"name": name, "kind": "b", "obec": full, "okres": okres, "systems": systems,
                        "town": s["obec"], "alt": alt_for(name, s["obec"], full),
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
                        "score": s["departures"]})
@@ -652,7 +722,20 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         if osm_info is not None and osm_info["name"]:
             alts.append(normalize(osm_info["name"]))
         alt = "|".join(dict.fromkeys(a for a in alts if a and a != normalize(st["name"])))
+        systems = {ids: zones} if zones else {}
+        if osm_info is not None and osm_info["lat"] is not None:
+            # přesahy IDESKA do sousedních krajů (Počátky-Žirovnice, Benešov…)
+            jz = ",".join(z for z in ideska_zones.at(osm_info["lat"], osm_info["lon"]).split(",")
+                          if z in tariff_zones)
+            if jz:
+                systems[IDSJK] = jz
+            near_jmk = _nearest_zone(jmk_points, osm_info["lat"], osm_info["lon"], 400)
+            if near_jmk:
+                systems.setdefault(JMK, near_jmk)
+        if code in pid_codes:
+            systems.setdefault(PID, pid_codes[code])
         places.append({"name": st["name"], "kind": "t", "obec": full, "okres": okres,
+                       "systems": systems, "code": code,
                        "town": town or "", "alt": alt,
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
                        "score": st["trains"] * 10})
@@ -667,6 +750,10 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                 if z:
                     zone_votes[(p["town"], p["okres"])][(p["ids"], z)] += p["score"] + 1
     existing = {(p["name"], p["okres"]): p for p in places if p["kind"] == "b"}
+    by_town: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for p in places:
+        if p["town"] and p["okres"]:
+            by_town[(p["town"], p["okres"])].append(p)
     for (town, okres), total in totals.items():
         kraj = OKRESY[okres][1]
         full, pop = town_full(town, kraj)
@@ -686,7 +773,15 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         elif kraj == 2 and not zones:
             zones = idsjk_zone(full, full, okres)
             ids = IDSJK if zones else ids
+        members: dict[int, Counter] = defaultdict(Counter)
+        for q in by_town.get((town, okres), ()):
+            for sys_i, zs in q["systems"].items():
+                members[sys_i][zs] += q["score"] + 1
+        systems = {i: c.most_common(1)[0][0] for i, c in members.items()}
+        if zones:
+            systems[ids] = zones
         entry = {"name": full, "kind": "c", "obec": full, "okres": okres, "town": town,
+                 "systems": systems,
                  "alt": normalize(town) if full != town else "", "kraj": kraj, "ids": ids,
                  "zones": zones, "score": pop + total // 3}
         stop = existing.get((town, okres))
@@ -723,11 +818,25 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         "okresy": [[OKRESY[o][0], OKRESY[o][1]] for o in okresy],
         # [jméno, druh (c/t/b), obec, okres_idx (-1 = neznámý), kraj_idx, ids_idx, zóny,
         #  skóre, hledací aliasy (normalizované, oddělené "|", jinak "")]
+        # + systémy, do kterých místo patří: "ids_idx:zóny;…" (přesahy IDS)
         "places": [[p["name"], p["kind"], p["obec"] if p["obec"] != p["name"] else "",
                     okres_idx.get(p["okres"], -1), p["kraj"], p["ids"], p["zones"], p["score"],
-                    p["alt"]]
+                    p["alt"], ";".join(f"{i}:{z}" for i, z in sorted(p.get("systems", {}).items()))]
                    for p in places],
+        "_ideska": ideska_tariff,
+        "_rail": rail_graph(places),
     }
+
+
+def rail_graph(places: list[dict]) -> dict:
+    """Železniční síť: stanice (jména jako v databázi míst), sousedé a minuty jízdy."""
+    names: dict[str, str] = {p["code"]: p["name"] for p in places if p.get("code")}
+    order = sorted(names)
+    index = {code: i for i, code in enumerate(order)}
+    edges = [[index[a], index[b], minutes] for (a, b), minutes in sorted(RAIL_EDGES.items())
+             if a in index and b in index]
+    # kódy SR70 – ČD je používá v adrese detailu vlaku (s předponou 54)
+    return {"stations": [names[c] for c in order], "codes": order, "edges": edges}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -741,6 +850,10 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     data = build(args.cache, refresh=args.refresh, year=args.year)
+    for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (RAIL_OUTPUT, data.pop("_rail"))):
+        with gzip.GzipFile(target, "wb", compresslevel=9, mtime=0) as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        print(f"  {target.name}: {target.stat().st_size // 1024} kB")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     raw = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     with gzip.GzipFile(args.output, "wb", compresslevel=9, mtime=0) as fh:

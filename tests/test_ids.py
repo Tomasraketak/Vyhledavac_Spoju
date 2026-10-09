@@ -1,0 +1,167 @@
+"""Jízdenky IDS: tarif IDESKA, přesahy, trasa vlaku a hack s lomem na hranici systému.
+
+Síť se nevolá – trasa vlaku z cd.cz je nahrazená prázdnou odpovědí, takže
+hack použije síť z jízdního řádu (data v repozitáři), a „ČD“ pro druhý
+úsek je falešný hledač.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from decimal import Decimal
+
+import pytest
+
+from vyhledavac import cdtrain, railnet, stations
+from vyhledavac.engine import SearchEngine
+from vyhledavac.hacks import ids_ticket
+from vyhledavac.hacks.ids_ticket import IdsTicketHack
+from vyhledavac.ids import ideska
+from vyhledavac.models import Passenger, SearchQuery
+from vyhledavac.providers.base import Provider
+from tests.conftest import at, make_journey
+
+
+# ---- tarif ---------------------------------------------------------------------
+def test_ideska_fare_by_zones_and_validity():
+    fare = ideska.best_fare("326", "932", Passenger(age=30), 60)      # Třeboň -> Počátky
+    assert fare is not None and fare.price > 0 and fare.minutes >= 60
+    city = ideska.best_fare("100", "100", Passenger(age=30), 25)       # jen po Budějovicích
+    assert city is not None and city.price < fare.price
+
+
+def test_ideska_profiles():
+    adult = ideska.best_fare("100", "200", Passenger(age=30), 60)
+    child = ideska.best_fare("100", "200", Passenger(age=12), 60)
+    assert child.price < adult.price
+    assert ideska.best_fare("100", "200", Passenger(age=4), 60).price == 0
+
+
+def test_validity_too_short_gives_no_fare():
+    assert ideska.best_fare("100", "100", Passenger(age=30), 24 * 60 * 10) is None
+
+
+# ---- přesahy a síť -------------------------------------------------------------
+@pytest.mark.parametrize("station, zone", [
+    ("Počátky-Žirovnice", "932"), ("Benešov u Prahy", "425"),
+    ("Nepomuk", "977"), ("Horažďovice předměstí", "973"), ("Třeboň", "326"),
+])
+def test_ideska_overlaps(station, zone):
+    assert zone in stations.place(station).systems["IDESKA"]
+
+
+def test_havlickuv_brod_is_outside_ideska():
+    assert "IDESKA" not in stations.place("Havlíčkův Brod").systems
+
+
+def test_rail_route_follows_real_line():
+    route = railnet.route("Třeboň", "Havlíčkův Brod")
+    assert route[0] == "Třeboň" and route[-1] == "Havlíčkův Brod"
+    assert "Počátky-Žirovnice" in route and "Praha hl. n." not in route
+
+
+def test_domestic_detection():
+    assert stations.is_domestic("Praha", "Brno")
+    assert not stations.is_domestic("Praha", "Vídeň")
+
+
+def test_cd_train_page_parsing():
+    html = ('{"route":[{"name":"Praha hl.n.","timeArr":null,"timeDep":"18:14",'
+            '"stationUrl":"/stanice/5457076/","stationInfo":[{"text":"x"}]},'
+            '{"name":"Nymburk hl.n.","timeArr":"18:53","timeDep":"18:55","stationUrl":"/stanice/5453214/"},'
+            '{"name":"Hradec Králové hl.n.","timeArr":"19:50","timeDep":null,"stationUrl":"/stanice/5453120/"}]}')
+    stops = cdtrain.parse(html, at(0))
+    assert [s.name for s in stops] == ["Praha hl.n.", "Nymburk hl.n.", "Hradec Králové hl.n."]
+    assert stops[1].arrival == at(18, 53) and stops[0].code == "5457076"
+    assert cdtrain.train_number("R 933 Krakonoš") == "933"
+
+
+# ---- hack ----------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def offline_cd(monkeypatch):
+    async def no_route(*args, **kwargs):
+        return []
+    monkeypatch.setattr(cdtrain, "train_stops", no_route)
+
+
+def cd_journey(origin, destination, dep, arr, price, line="Os 8800"):
+    j = make_journey(provider="ČD", origin=origin, destination=destination,
+                     dep=dep, arr=arr, price=price, line=line)
+    j.legs[0].carrier = "ČD"
+    return j
+
+
+@pytest.mark.asyncio
+async def test_split_at_ideska_boundary():
+    query = SearchQuery(origin="Třeboň", destination="Havlíčkův Brod", departure=at(9))
+    base = cd_journey("Třeboň", "Havlíčkův Brod", at(10), at(12, 30), 250)
+    calls = []
+
+    async def search(q, allow_browser=False):
+        calls.append((q.origin, q.destination, allow_browser))
+        rest = cd_journey(q.origin, q.destination, at(11, 20), at(12, 30), 90)
+        return [rest]
+
+    found = await IdsTicketHack().find(query, [base], search)
+    assert calls == [("Počátky-Žirovnice", "Havlíčkův Brod", True)]
+    assert len(found) == 1
+    hacked = found[0]
+    first, second = hacked.segments
+    assert first.provider == "IDESKA" and first.destination == "Počátky-Žirovnice"
+    assert second.origin == "Počátky-Žirovnice" and second.price == Decimal(90)
+    assert hacked.price == first.price + second.price < Decimal(250)
+    assert "Nepřestupujete" in hacked.notes[0] and "ušetříte" in hacked.notes[0]
+    assert hacked.legs == base.legs                 # pořád tentýž vlak
+
+
+@pytest.mark.asyncio
+async def test_whole_trip_inside_ideska():
+    query = SearchQuery(origin="České Budějovice", destination="Tábor", departure=at(9))
+    base = cd_journey("České Budějovice", "Tábor", at(10), at(11), 160)
+
+    async def search(q, allow_browser=False):
+        raise AssertionError("celá cesta v IDESKA nepotřebuje další dotaz")
+
+    found = await IdsTicketHack().find(query, [base], search)
+    assert len(found) == 1 and found[0].segments[0].provider == "IDESKA"
+    assert found[0].price < Decimal(160)
+
+
+@pytest.mark.asyncio
+async def test_not_offered_when_not_cheaper_or_express():
+    query = SearchQuery(origin="České Budějovice", destination="Tábor", departure=at(9))
+
+    async def search(q, allow_browser=False):
+        return []
+
+    cheap = cd_journey("České Budějovice", "Tábor", at(10), at(11), 20)
+    express = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="IC 520")
+    assert await IdsTicketHack().find(query, [cheap, express], search) == []
+
+
+# ---- engine: vnitrostátní cesta bez ÖBB a ZSSK -------------------------------------
+class Fake(Provider):
+    def __init__(self, name, international_only=False, **kw):
+        super().__init__(**kw)
+        self.name = name
+        self.international_only = international_only
+        self.asked = 0
+
+    async def search(self, query):
+        self.asked += 1
+        return [make_journey(provider=self.name, price=100)]
+
+
+@pytest.mark.asyncio
+async def test_domestic_trip_skips_international_providers():
+    cd, obb = Fake("ČD"), Fake("ÖBB", international_only=True)
+    seen = []
+    engine = SearchEngine([cd, obb])
+    await engine.search(SearchQuery(origin="Praha", destination="Brno", departure=at(8)),
+                        on_partial=seen.append, enable_hacks=False)
+    assert cd.asked == 1 and obb.asked == 0
+    assert any(r.provider == "ÖBB" and r.skipped for r in seen)
+
+    await engine.search(SearchQuery(origin="Praha", destination="Vídeň", departure=at(8)),
+                        enable_hacks=False)
+    assert obb.asked == 1

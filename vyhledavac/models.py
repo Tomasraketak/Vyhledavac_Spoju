@@ -441,6 +441,9 @@ class ProviderResult:
     not_served: bool = False
     #: Průběžný stav – dopravce ještě běží (např. dozjišťuje ceny).
     partial: bool = False
+    #: Dopravce se pro tohle hledání vůbec nedotazoval (např. ÖBB na
+    #: vnitrostátní cestě po Česku) – důvod je v ``error``.
+    skipped: bool = False
 
     @property
     def ok(self) -> bool:

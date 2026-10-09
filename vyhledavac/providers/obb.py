@@ -66,6 +66,7 @@ class ObbProvider(HttpProvider):
     provides_prices = True
     provides_stops = True
     countries = ("AT", "CZ", "SK", "DE", "HU", "SI", "IT", "CH")
+    international_only = True
     min_interval = 0.6
 
     profile: ClassVar[HafasProfile] = OEBB_PROFILE

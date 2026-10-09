@@ -52,6 +52,9 @@ class Place:
     zones: tuple[str, ...] = ()
     score: int = 0
     country: str = ""             # jen u zahraničí
+    # Všechny integrované systémy, do kterých místo patří, i přesahy
+    # z jiných krajů: {"IDESKA": ("932",), "PID": ("5",)}.
+    systems: dict[str, tuple[str, ...]] = field(default_factory=dict, compare=False)
     keys: tuple[str, ...] = field(default=(), compare=False, repr=False)
 
     def to_dict(self) -> dict[str, Any]:
@@ -60,6 +63,7 @@ class Place:
             "okres": self.okres or None, "kraj": self.kraj or None,
             "ids": self.ids or None, "idsName": self.ids_name or None,
             "zones": list(self.zones), "country": self.country or None,
+            "systems": {k: list(v) for k, v in self.systems.items() if k != self.ids},
         }
 
 
@@ -82,10 +86,16 @@ class StationDB:
             name, kind, obec, okres_i, kraj_i, ids_i, zones, score = row[:8]
             alt = row[8] if len(row) > 8 else ""
             keys = (normalize(name), *(a for a in alt.split("|") if a))
+            systems: dict[str, tuple[str, ...]] = {}
+            for part in (row[9] if len(row) > 9 else "").split(";"):
+                if ":" in part:
+                    sys_i, sys_zones = part.split(":", 1)
+                    systems[ids[int(sys_i)][0]] = tuple(z for z in sys_zones.split(",") if z)
             places.append(Place(
                 name=name, kind=kind, obec=obec, okres=okresy[okres_i][0] if okres_i >= 0 else "",
                 kraj=kraje[kraj_i], ids=ids[ids_i][0], ids_name=ids[ids_i][1],
                 zones=tuple(z for z in zones.split(",") if z), score=score, keys=keys,
+                systems=systems,
             ))
         for name, country, alt in _FOREIGN:
             keys = (normalize(name), *(normalize(a) for a in alt.split("|") if a))
@@ -176,6 +186,17 @@ def database() -> StationDB | None:
 def suggest(query: str, limit: int = 10) -> list[dict[str, Any]]:
     db = database()
     return [p.to_dict() for p in db.suggest(query, limit)] if db else []
+
+
+def place(name: str) -> Place | None:
+    db = database()
+    return db.info(name) if db and name else None
+
+
+def is_domestic(*names: str) -> bool:
+    """Leží všechna místa v Česku? (Neznámé místo = nevíme, tedy ne.)"""
+    found = [place(n) for n in names]
+    return all(p is not None and not p.country for p in found)
 
 
 @lru_cache(maxsize=4096)

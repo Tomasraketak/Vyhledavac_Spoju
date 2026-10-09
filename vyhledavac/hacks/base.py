@@ -28,7 +28,9 @@ from ..models import FareStatus, Journey, Leg, SearchQuery
 log = logging.getLogger(__name__)
 
 #: Funkce, kterou hack hledá dílčí úseky.
-SearchFn = Callable[[SearchQuery], Awaitable[list[Journey]]]
+#: ``search(query, allow_browser=False)`` – dílčí úsek u dopravců. Hledání
+#: přes prohlížeč (ČD) je pomalé, hack si ho musí vyžádat výslovně.
+SearchFn = Callable[..., Awaitable[list[Journey]]]
 
 
 class TravelHack(abc.ABC):

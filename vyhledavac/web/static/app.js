@@ -49,7 +49,9 @@
   };
   const zonesText = z => !z || !z.length ? '' : (z.length === 1 ? `zóna ${z[0]}` : `zóny ${z.join(', ')}`);
   // "Jihomoravský kraj · IDS JMK · zóna 100" – nebo stát u zahraničí.
-  const placeMeta = p => p ? (p.country ? [p.country] : [p.kraj, p.ids, zonesText(p.zones)]).filter(Boolean).join(' · ') : '';
+  // Přesahy: místo patří i do jiného systému ("také IDESKA zóna 932").
+  const alsoText = p => Object.entries((p && p.systems) || {}).map(([s, z]) => `také ${s}${z.length ? ' ' + z.join(', ') : ''}`).join(' · ');
+  const placeMeta = p => p ? (p.country ? [p.country] : [p.kraj, p.ids, zonesText(p.zones), alsoText(p)]).filter(Boolean).join(' · ') : '';
 
   // ---- stav ----------------------------------------------------------------
   const today = new Date();
@@ -57,7 +59,7 @@
   const S = {
     meta: null,
     providersOn: null,            // Set jmen – nastaví se po načtení meta
-    hacksOn: new Set(store.get('hacks', ['split_ticket'])),
+    hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket'])),
     age: store.get('age', 26),
     isic: store.get('isic', false),
     skFree: store.get('skFree', false),
@@ -81,6 +83,14 @@
     es: null,
     clientError: '',
   };
+
+  // Hack s jízdenkami IDS přibyl později – zapnout ho jednou i těm, kdo už
+  // mají výběr hacků uložený.
+  if (!store.get('idsHackOffered', false)) {
+    S.hacksOn.add('ids_ticket');
+    store.set('idsHackOffered', true);
+    store.set('hacks', [...S.hacksOn]);
+  }
 
   // ---- formulář ------------------------------------------------------------
   const form = $('#search-form');

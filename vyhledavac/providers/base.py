@@ -57,6 +57,9 @@ class Provider(abc.ABC):
     min_timeout: ClassVar[float] = 0.0
     #: Země, které dopravce obsluhuje (informativní, pro filtrování fronty).
     countries: ClassVar[tuple[str, ...]] = ()
+    #: Na cestách jen po Česku se dopravce neptá – vnitrostátní spoje
+    #: (a jejich ceny) mají čeští dopravci, dotaz by jen zdržoval.
+    international_only: ClassVar[bool] = False
 
     def __init__(
         self,

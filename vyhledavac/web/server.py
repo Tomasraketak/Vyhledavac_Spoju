@@ -57,6 +57,8 @@ log = logging.getLogger(__name__)
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8765
+#: Hacky zapnuté při prvním spuštění.
+DEFAULT_HACKS = ("split_ticket", "ids_ticket")
 #: Po kolika sekundách bez jediného dotazu z prohlížeče se server ukončí.
 IDLE_SHUTDOWN = 120.0
 
@@ -97,6 +99,9 @@ class SearchSession:
         if lead.has(DiscountCard.ISIC) and lead.age >= 26:
             self._problem("ISIC", "studentská sleva platí jen do 26 let – hledám ceny pro "
                                   "dospělého. Jste-li mladší, opravte věk.", "soft")
+        if "ids_ticket" in hacks and "ČD" not in providers:
+            self._problem("IDS", "jízdenky integrovaných systémů (IDESKA) porovnávám s cenou "
+                                 "Českých drah – zapněte zdroj ČD.", "soft")
         if lead.has(DiscountCard.SK_FREE) and "ZSSK" not in providers:
             self._problem("ZSSK", "bezplatnou přepravu na Slovensku uplatní jen ZSSK, která "
                                   "není zapnutá – ceny ostatních dopravců jsou bez ní.", "soft")
@@ -118,7 +123,10 @@ class SearchSession:
     def on_partial(self, result: ProviderResult) -> None:
         name = result.provider
         entry: dict[str, Any] = {"name": name, "elapsed": round(result.elapsed, 1)}
-        if result.not_served:
+        if result.skipped:
+            entry.update(status="empty", detail="jen zahraničí")
+            self.live.pop(name, None)
+        elif result.not_served:
             entry.update(status="empty", detail="nejezdí tam")
             self._problem(name, result.error or "do této destinace nejezdí", "not_served")
             self.live.pop(name, None)
@@ -235,7 +243,7 @@ class WebApp:
                 "countries": list(getattr(cls, "countries", ())),
             } for name, cls in PROVIDERS.items()],
             "hacks": [{"name": name, "label": short_label(getattr(cls, "label", name)),
-                       "default": name == "split_ticket"} for name, cls in HACKS.items()],
+                       "default": name in DEFAULT_HACKS} for name, cls in HACKS.items()],
             "playwright": playwright_available(),
             "eurRate": float(rate) if rate else 25.0,
             "loadErrors": {k: str(v) for k, v in LOAD_ERRORS.items()},

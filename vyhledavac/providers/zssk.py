@@ -85,6 +85,7 @@ class ZsskProvider(BrowserProvider):
     provides_prices = True
     provides_stops = False
     countries = ("SK",)
+    international_only = True
     #: Hledání ~10 s + ceny přes trychtýř (rozpočet ``price_budget``).
     #: Co do limitu nestihne, zůstane – engine drží poslední průběžný stav.
     min_timeout = 150.0

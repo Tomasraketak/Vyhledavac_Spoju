@@ -547,6 +547,8 @@ python tools/build_stations.py            # --refresh = stáhnout zdroje znovu
 | pásma PID | [data.pid.cz](https://pid.cz/o-systemu/opendata/) (CC BY 4.0) |
 | zóny IDS JMK | GTFS [KORDIS JMK](https://kordis-jmk.cz/gtfs/gtfs.zip) |
 | zóny IDESKA (IDS JK) | oficiální [mapa zón](https://kalkulacka.ideska.info/view.html?view) – mnohoúhelníky; zastávka podle polohy v OSM, jinak středu obce |
+| tarif IDESKA, zastávky přesahů | [kalkulačka IDESKA](https://kalkulacka.ideska.info/) (`jikord.json`) → `data/ids_ideska.json.gz` |
+| železniční síť (kudy vlaky jezdí) | CIS JŘ – CZPTT → `data/rail.json.gz` |
 
 Kraj → systém: Praha a Středočeský PID, Jihočeský IDESKA (IDS JK), Plzeňský IDPK,
 Karlovarský IDS KK, Ústecký DÚK, Liberecký IDOL, Královéhradecký
@@ -686,8 +688,34 @@ levnější; vystoupíte dřív. Nabízí se jen když vlak ve vašem cíli skut
 staví a nejde o spoj s povinnou místenkou. Výsledek vždy nese varování –
 zbytek jízdenky propadá a někteří dopravci to v podmínkách zakazují.
 
-Obě strategie nabídnou variantu jen při úspoře nad nastavený práh
+**`ids_ticket` – jízdenka integrovaného systému místo ČD.** Na regionálních
+vlacích ČD (Os, Sp, R) platí i jízdenky IDS a bývají výrazně levnější. Hack
+u každého vlaku ČD zjistí skutečnou trasu (zastávky a časy z detailu vlaku
+na cd.cz, jinak ze sítě sestavené z celostátního jízdního řádu) a:
+
+- celá cesta v systému → nabídne jízdenku IDS, je-li levnější;
+- cesta ze systému ven nebo dovnitř → rozdělí ji v **poslední stanici, kde
+  systém ještě platí** (přesahy do sousedních krajů jsou v datech: IDESKA
+  třeba do Počátek-Žirovnice, Benešova u Prahy, Nepomuku, Horažďovic),
+  na tu část spočítá jízdenku IDS a na zbytek se zeptá ČD. Vypíše, že se
+  nepřestupuje, jen kupují dvě jízdenky, kolik stojí každá a o kolik je
+  to levnější než jedna jízdenka ČD.
+
+Příklad (12. 10. 2026, R 653 Rožmberk): Třeboň → Havlíčkův Brod u ČD
+269 Kč; Třeboň → Počátky-Žirovnice IDESKA 81 Kč + Počátky-Žirovnice →
+Havlíčkův Brod ČD 166 Kč = **247 Kč**.
+
+Zatím umí tarif **IDESKA** (Jihočeský kraj) – kalkulačka IDESKA zveřejňuje
+celý tarif i seznam zastávek se zónami, výpočet běží offline. Potřebuje
+zapnutý zdroj ČD (cena k porovnání a cena druhého úseku). Ostatní systémy
+přibudou: PID má ceník podle počtu pásem na webu, kalkulačka IDPK je za
+ochranou Cloudflare, web VDV zatím nebyl dostupný.
+
+Strategie nabídnou variantu jen při úspoře nad nastavený práh
 (výchozí 3 %, u skrytého města 8 %).
+
+**Cesty jen po Česku** se neposílají na ÖBB a ZSSK (jen zdržují; vnitrostátní
+spoje a ceny mají čeští dopravci). V přehledu zdrojů u nich stojí „jen zahraničí“.
 
 ---
 

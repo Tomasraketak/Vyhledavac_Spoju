@@ -42,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="další slevová karta (lze opakovat)")
     parser.add_argument("--providers", nargs="+", default=DEFAULT_PROVIDERS,
                         help=f"dopravci (výchozí: {' '.join(DEFAULT_PROVIDERS)})")
-    parser.add_argument("--hacks", nargs="*", default=["split_ticket"],
+    parser.add_argument("--hacks", nargs="*", default=["split_ticket", "ids_ticket"],
                         help="travel hacky; prázdné = vypnuto")
     parser.add_argument("--sort", choices=["departure", "price", "duration"],
                         default="departure", help="řazení výsledků")

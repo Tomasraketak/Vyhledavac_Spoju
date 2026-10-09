@@ -66,6 +66,7 @@ class SearchEngine:
         self._semaphore = asyncio.Semaphore(concurrency)
         self._leg_cache: dict[tuple, list[Journey]] = {}
         self._leg_locks: dict[tuple, asyncio.Lock] = {}
+        self._skipped: set[str] = set()
 
     # ---- tovární metody ------------------------------------------------------
     @classmethod
@@ -110,8 +111,18 @@ class SearchEngine:
         await self.converter.load()
 
         result = SearchResult(query=query)
+        self._skipped = self._domestic_skips(query)
+        for name in sorted(self._skipped):
+            skipped = ProviderResult(provider=name, skipped=True,
+                                     error="cesta je jen po Česku – tento zdroj se ptá jen na zahraničí")
+            if on_partial is not None:
+                try:
+                    on_partial(skipped)
+                except Exception:
+                    log.exception("callback on_partial selhal")
+        active = [p for p in self.providers if p.name not in self._skipped]
         direct = await self._run_providers(query, on_partial=on_partial,
-                                           on_progress=on_progress)
+                                           on_progress=on_progress, providers=active)
         result.extend(direct)
 
         if enable_hacks and self.hacks:
@@ -134,6 +145,15 @@ class SearchEngine:
             len(result.failed_providers),
         )
         return result
+
+    def _domestic_skips(self, query: SearchQuery) -> set[str]:
+        """Dopravci, na které se u vnitrostátní cesty po Česku nemá cenu ptát."""
+        international = {p.name for p in self.providers if getattr(p, "international_only", False)}
+        if not international:
+            return set()
+        from . import stations          # databáze zastávek se načítá líně
+
+        return international if stations.is_domestic(query.origin, query.destination) else set()
 
     async def _run_providers(
         self,
@@ -210,10 +230,10 @@ class SearchEngine:
                 found.extend(produced)
         return found
 
-    async def _leg_search(self, query: SearchQuery) -> list[Journey]:
+    async def _leg_search(self, query: SearchQuery, *, allow_browser: bool = False) -> list[Journey]:
         """Hledání dílčího úseku pro hacky – s deduplikací souběžných dotazů."""
         key = (query.origin.lower(), query.destination.lower(),
-               query.departure.isoformat())
+               query.departure.isoformat(), allow_browser)
         if key in self._leg_cache:
             return self._leg_cache[key]
 
@@ -225,9 +245,11 @@ class SearchEngine:
             # jízdní řád bez ceny je pro výpočet úspory k ničemu. Zároveň
             # vynecháme ty, co potřebují prohlížeč: hacků je hodně a každý
             # start prohlížeče by trval déle než celé hledání.
+            skipped = self._skipped
             sellers = [
                 p for p in self.providers
-                if p.provides_prices and not (p.needs_browser and self.skip_browser_in_hacks)
+                if p.provides_prices and p.name not in skipped
+                and (allow_browser or not (p.needs_browser and self.skip_browser_in_hacks))
             ]
             results = await self._run_providers(query, providers=sellers)
             journeys = [j for r in results for j in r.journeys]
