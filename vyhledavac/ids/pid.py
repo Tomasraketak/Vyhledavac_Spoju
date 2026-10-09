@@ -71,6 +71,11 @@ def fares(zone_from: str, zone_to: str, passenger: Passenger) -> list[IdsFare]:
     if kind is None:
         return [IdsFare(SYSTEM, Decimal(0), None, "dítě do 6 let zdarma", zone_from, zone_to)]
     out: list[IdsFare] = []
+    if zone_from in PRAHA and zone_to in PRAHA and (6 <= passenger.age < 15 or passenger.age >= 65):
+        # Přeprava za 0 Kč v Praze: děti 6–15 a senioři 65+ (s dokladem / aplikací v Lítačce)
+        who = "dítě 6–15" if passenger.age < 15 else "senior 65+"
+        out.append(IdsFare(SYSTEM, Decimal(0), None, f"{who} v Praze zdarma (doklad PID / Lítačka)",
+                           zone_from, zone_to))
     if zone_from in PRAHA and zone_to in PRAHA:
         for minutes, row in data["praha"].items():
             if row.get(kind) is not None:

@@ -98,8 +98,11 @@ IDS = [
     ("ODIS", "Ostravský dopravní integrovaný systém"),
 ]
 KRAJ_IDS = [0, 0, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11]
-PID, IDSJK, IDPK, DUK, IDOL, IREDO, VDV, JMK = 0, 1, 2, 4, 5, 6, 7, 8
+PID, IDSJK, IDPK, DUK, IDOL, IREDO, VDV, JMK, IDSOK, IDZK, ODIS = 0, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11
 PLZENSKY = 3      # index kraje
+#: kód dopravního systému v JDF (Linext.txt) -> index IDS; jen systémy, kde se zóny
+#: berou z jízdních řádů (ostatní mají vlastní zdroj)
+JDF_SYSTEMS = {"30811": ODIS}
 
 
 def idpk_zones(zones: set[str], okres: str) -> str:
@@ -158,7 +161,8 @@ def fetch(cache: Path, name: str, url: str, *, refresh: bool) -> Path:
     print(f"  stahuji {url}", flush=True)
     for attempt in range(4):
         try:
-            with httpx.stream("GET", url, timeout=600, follow_redirects=True) as r:
+            with httpx.stream("GET", url, timeout=600, follow_redirects=True,
+                              headers={"User-Agent": "Mozilla/5.0"}) as r:
                 r.raise_for_status()
                 tmp = target.with_suffix(".part")
                 with tmp.open("wb") as fh:
@@ -241,16 +245,28 @@ def parse_jdf(path: Path) -> dict[tuple[str, str], dict]:
                 name = bus_display_name(obec, cast, misto)
                 key = (name, okres)
                 stops.setdefault(key, {"obec": obec, "okres": okres, "departures": 0,
-                                       "zones": set()})
+                                       "zones": set(), "systems": defaultdict(set)})
                 local[number] = key
             # Tarifní pásma integrovaných linek (IDPK, IDESKA, PID…) ze Zaslinky.txt:
             # linka, tarifní číslo, pásma ("052,053"), číslo zastávky, …
+            # Linext.txt: kód dopravního systému linky (30811 = ODIS); IDSOK píše
+            # zóny s předponou „I“ (I71 = Olomouc).
+            linext = _find(files, "linext.txt")
+            line_systems = {row[0]: JDF_SYSTEMS[row[2]] for row in
+                            (_jdf_rows(inner.read(linext)) if linext else ())
+                            if len(row) > 2 and row[2] in JDF_SYSTEMS}
             zaslinky = _find(files, "zaslinky.txt")
             if zaslinky:
                 for row in _jdf_rows(inner.read(zaslinky)):
                     if len(row) >= 4 and row[2] and row[3] in local:
-                        stops[local[row[3]]]["zones"].update(
-                            z.strip() for z in row[2].split(",") if z.strip())
+                        entry = stops[local[row[3]]]
+                        zones = [z.strip() for z in row[2].split(",") if z.strip()]
+                        entry["zones"].update(zones)
+                        idsok = [z[1:] for z in zones if re.fullmatch(r"I\d+", z)]
+                        if idsok:
+                            entry["systems"][IDSOK].update(idsok)
+                        elif row[0] in line_systems:
+                            entry["systems"][line_systems[row[0]]].update(zones)
             if not zasspoje:
                 continue
             for row in _jdf_rows(inner.read(zasspoje)):
@@ -783,6 +799,10 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     iredo_rail, iredo_bus, iredo_data = parse_vdv(
         fetch_vdv(cache, refresh=refresh, base=IREDO_CALC, name="iredo"))
     idol_stops, idol_data = fetch_idol(cache, refresh=refresh)
+    duk_stops, duk_data = fetch_duk(cache, refresh=refresh)
+    idzk_stops, idzk_data = fetch_idzk(cache, refresh=refresh)
+    #: systémy se zónami zastávek podle jména / kódu stanice (přesahy do krajů včetně)
+    extra = [duk_stops, idzk_stops]
     pid_page = fetch(cache, "pid_tarif.html", PID_TARIFF, refresh=refresh)
     pid_tariff = extract_pid_tariff(pid_page)
     osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
@@ -792,6 +812,17 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     print("Zpracovávám autobusy (JDF)…", flush=True)
     bus = parse_jdf(jdf)
     print(f"  {len(bus)} autobusových zastávek", flush=True)
+    for index in (IDSOK, ODIS):        # zóny z jízdních řádů linek systému
+        table = SystemStops(index)
+        for (name, _), s in bus.items():
+            zones = set(s["systems"].get(index, ()))
+            if index == ODIS:
+                # linky ODIS do Olomouckého kraje uvádějí tam zóny IDSOK (bez „I“)
+                zones -= s["systems"].get(IDSOK, set())
+            if zones:
+                table.bus.setdefault(normalize(name), ",".join(sorted(zones, key=lambda z: (len(z), z))))
+        print(f"  {IDS[index][0]}: {len(table.bus)} zastávek se zónou (JDF)", flush=True)
+        extra.append(table)
     print("Zpracovávám vlaky (CZPTT)…", flush=True)
     trains = parse_czptt(rail)
     print(f"  {len(trains)} železničních stanic a zastávek", flush=True)
@@ -882,6 +913,12 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         ideska_zone = ideska_stops.get(normalize(spelled)) or ideska_stops.get(normalize(name))
         if ideska_zone:
             systems[IDSJK] = ideska_zone
+        for table in extra:
+            zone = table.for_stop(spelled, name)
+            if zone:
+                systems[table.index] = zone
+                if ids == table.index and not zones:
+                    zones = zone
         places.append({"name": name, "kind": "b", "obec": full, "okres": okres, "systems": systems,
                        "town": s["obec"], "alt": alt_for(name, s["obec"], full),
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
@@ -893,7 +930,12 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             idol_zone_names.setdefault(key, code)
     idpk_by_town: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
     idol_by_town: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    extra_by_town: dict[tuple[int, str, str], list[tuple[str, str]]] = defaultdict(list)
     for p in places:
+        for table in extra:
+            if table.index in p["systems"]:
+                extra_by_town[(table.index, p["town"], p["okres"])].append(
+                    (p["name"], p["systems"][table.index]))
         if IDPK in p["systems"]:
             idpk_by_town[(p["town"], p["okres"])].append((p["name"], p["systems"][IDPK]))
         if IDOL in p["systems"]:
@@ -966,6 +1008,19 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             pick = Counter(rail_like or [z for _, z in candidates]).most_common(1)
             if pick:
                 systems[IDOL] = pick[0][0]
+        for table in extra:
+            zone = table.for_station(code, st["name"], full,
+                                     osm_info["name"] if osm_info and osm_info["name"] else "")
+            if not zone and town and okres:
+                # nádraží chybí v seznamu systému: zóna zastávky u nádraží, jinak obce –
+                # jen v obci, kde systém opravdu jezdí (aspoň 2 zastávky)
+                candidates = extra_by_town.get((table.index, town, okres), [])
+                rail_like = [z for n, z in candidates if re.search(r"žel|nádr", n)]
+                pick = Counter(rail_like or [z for _, z in candidates]).most_common(1)
+                if pick and (rail_like or len(candidates) >= 2):
+                    zone = pick[0][0]
+            if zone:
+                systems[table.index] = zone
         if IDOL not in systems and kraj == 6:
             # zóny IDOL se jmenují podle obcí („Jablonec nad Nisou (1001)“):
             # nejdelší název zóny, kterým začíná název stanice (nebo její plný název z OSM)
@@ -1061,6 +1116,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
             "Pražská integrovaná doprava – zastávky a pásma, data.pid.cz (CC BY 4.0)",
             "KORDIS JMK – GTFS IDS JMK, kordis-jmk.cz",
             "JIKORD – mapa zón IDESKA (IDS JK), kalkulacka.ideska.info",
+            "DÚK – zóny zastávek z kalkulačky jízdného, kalkulator.dopravauk.cz",
+            "IDZK – tarifní body z kalkulačky jízdného, idzk.info/kalkulator-ng",
             "© přispěvatelé OpenStreetMap (ODbL) – kraj železničních stanic, názvy a počty obyvatel obcí",
         ],
         "kraje": KRAJE,
@@ -1078,6 +1135,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         "_vdv": vdv_data,
         "_iredo": iredo_data,
         "_idol": idol_data,
+        "_duk": duk_data,
+        "_idzk": idzk_data,
         "_rail": rail_graph(places),
     }
 
@@ -1091,6 +1150,101 @@ def rail_graph(places: list[dict]) -> dict:
              if a in index and b in index]
     # kódy SR70 – ČD je používá v adrese detailu vlaku (s předponou 54)
     return {"stations": [names[c] for c in order], "codes": order, "edges": edges}
+
+
+DUK_API = "https://client.dukapka.cz/api"
+#: Klíč, který veřejně používá kalkulačka kalkulator.dopravauk.cz (je v jejím JS).
+DUK_KEY = "980z80c35x"
+DUK_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_duk.json.gz"
+IDZK_CALC = "https://idzk.info/kalkulator-ng/"
+IDZK_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_idzk.json.gz"
+
+
+class SystemStops:
+    """Zóny zastávek jednoho systému: nádraží podle kódu SR70 / jména, zastávky podle jména."""
+
+    def __init__(self, index: int) -> None:
+        self.index = index
+        self.rail_code: dict[str, str] = {}
+        self.rail: dict[str, str] = {}
+        self.bus: dict[str, str] = {}
+
+    def for_station(self, code: str, *names: str) -> str | None:
+        hit = self.rail_code.get(code)
+        for name in names:
+            if hit:
+                break
+            hit = self.rail.get(normalize(name)) if name else None
+        return hit
+
+    def for_stop(self, *names: str) -> str | None:
+        for name in names:
+            hit = self.bus.get(normalize(name)) if name else None
+            if hit:
+                return hit
+        return None
+
+
+def _cis_name(name: str) -> str:
+    """„Děčín,,hl.nádr.“ -> „Děčín, hl.nádr.“ (tvar jmen zastávek z JDF)."""
+    return ", ".join(p.strip() for p in name.split(",") if p.strip())
+
+
+def fetch_duk(cache: Path, *, refresh: bool) -> tuple[SystemStops, dict]:
+    """Zastávky a zóny DÚK z API kalkulačky (client.dukapka.cz).
+
+    Nádraží mají číslo 54 + SR70 (5453179 = Ústí nad Labem hl.n.), autobusové
+    zastávky jméno ve tvaru CIS. Ceny se za běhu ptají API podle zón.
+    """
+    target = cache / "duk_pricelist.json"
+    if not target.exists() or not target.stat().st_size or refresh:
+        r = httpx.get(f"{DUK_API}/v1/price-lists/current", headers={"X-API-Key": DUK_KEY},
+                      params=dict(zones=1, superzones=1, stops=1), timeout=120)
+        r.raise_for_status()
+        target.write_bytes(r.content)
+    data = json.loads(target.read_text("utf-8"))
+    out = SystemStops(DUK)
+    for stop in data["stops"]:
+        zone = str(stop.get("zone") or "")
+        if not zone:
+            continue
+        number = str(stop["number"])
+        if len(number) == 7 and number.startswith("54"):
+            out.rail_code.setdefault(number[2:], zone)
+            out.rail.setdefault(normalize(stop["name"]), zone)
+        else:
+            out.bus.setdefault(normalize(_cis_name(stop["name"])), zone)
+    zones = {str(z["number"]): {"id": z["number"], "name": z.get("name", "")} for z in data["zones"]}
+    print(f"  DÚK: {len(zones)} zón, {len(out.rail_code)} nádraží, {len(out.bus)} zastávek", flush=True)
+    return out, {"generated": dt.date.today().isoformat(), "priceList": data.get("id"), "zones": zones}
+
+
+def fetch_idzk(cache: Path, *, refresh: bool) -> tuple[SystemStops, dict]:
+    """Tarifní body IDZK z kalkulačky „tarif nové generace“ (idzk.info/kalkulator-ng).
+
+    Stránka obsahuje seznam zastávek (🚉 vlak, 🚍 autobus) a funkci, která jméno
+    převádí na číslo tarifního bodu (obec / část obce). Cena se za běhu ptá
+    ``result.php`` podle dvojice bodů.
+    """
+    page = fetch(cache, "idzk_kalkulator.html", IDZK_CALC, refresh=refresh).read_text("utf-8", "replace")
+    src = re.search(r"window\.acSource = \[(.*?)\];", page, re.S)
+    mapping = dict(re.findall(r"if \(place == '([^']*)'\) \{ return '(\d+)'; \}", page))
+    out = SystemStops(IDZK)
+    zones: dict[str, dict] = {}
+    for name in re.findall(r"'((?:[^'\\]|\\.)*)'", src.group(1) if src else ""):
+        point = mapping.get(name.lower())
+        if not point:
+            continue
+        label = re.sub(r"^[^\w]+", "", name).strip()
+        clean = re.sub(r"\s*\((železniční )?(zastávka|stanice)[^)]*\)", "", label).strip()
+        zones.setdefault(point, {"id": point, "name": clean.split(",")[0]})
+        if name.startswith("\U0001F689"):
+            out.rail.setdefault(normalize(clean), point)
+        else:
+            out.bus.setdefault(normalize(clean), point)
+    print(f"  IDZK: {len(zones)} tarifních bodů, {len(out.rail)} nádraží, {len(out.bus)} zastávek",
+          flush=True)
+    return out, {"generated": dt.date.today().isoformat(), "zones": zones}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1107,6 +1261,7 @@ def main(argv: list[str] | None = None) -> int:
     for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (PID_OUTPUT, data.pop("_pid")),
                             (VDV_OUTPUT, data.pop("_vdv")), (IREDO_OUTPUT, data.pop("_iredo")),
                             (IDOL_OUTPUT, data.pop("_idol")),
+                            (DUK_OUTPUT, data.pop("_duk")), (IDZK_OUTPUT, data.pop("_idzk")),
                             (RAIL_OUTPUT, data.pop("_rail"))):
         with gzip.GzipFile(target, "wb", compresslevel=9, mtime=0) as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))

@@ -101,6 +101,7 @@ COOKIE_BUTTONS = [
 @PROVIDERS.register()
 class CdProvider(BrowserProvider):
     name = "ČD"
+    multi_passenger = True
     label = "České dráhy (vyžaduje prohlížeč)"
     currency = "CZK"
     provides_prices = True
@@ -116,7 +117,7 @@ class CdProvider(BrowserProvider):
             await page.wait_for_timeout(int(self.options.get("settle_ms", 5000)))
             await session.accept_cookies(page, COOKIE_BUTTONS)
             await self._assert_widget_rendered(page)
-            await self._configure_passengers(page, query.lead)
+            await self._configure_passengers(page, query.passengers)
             await self._fill_route(session, page, query)
             await self._submit(page)
             return await self._parse_results(session, page, query)
@@ -220,23 +221,26 @@ class CdProvider(BrowserProvider):
         except Exception as exc:
             log.debug("%s: nepodařilo se nastavit %s (%s)", self.name, selector, exc)
 
-    async def _configure_passengers(self, page, passenger: Passenger) -> None:
-        """Vybere v okně "Cestující" tarif podle kategorie cestujícího.
+    async def _configure_passengers(self, page, passengers: tuple[Passenger, ...]) -> None:
+        """Nastaví v okně "Cestující" tarif každého cestujícího.
 
         Okno má tlačítko "Přidat" pro každý tarif (``button.btn-add-user``
         s ``title="Přidat cestujícího Junior 18—25 let, Žákovský průkaz
-        ČR"``). Postup: přidat náš tarif → odebrat výchozího dospělého →
-        Hotovo → **ověřit** v souhrnu formuláře, že se tarif opravdu změnil.
+        ČR"``). Postup: přidat tarify skupiny → odebrat výchozího dospělého,
+        pokud ve skupině dospělý není → Hotovo → **ověřit** v souhrnu
+        formuláře, že se tarif opravdu změnil.
 
         Dřívější verze hledala tlačítko s "ISIC", které na cd.cz není,
         a když ho nenašla, potichu nechala dospělého – ceny pak byly za
         plné jízdné, i když uživatel zadal 21 let a ISIC. Teď se to nejdřív
         zkusí a když se tarif nenastaví, dopravce to řekne poznámkou.
         """
-        choice = _cd_tariff(passenger)
-        if choice is None:
-            return
-        label, pattern = choice
+        choices = [_cd_tariff(p) for p in passengers]
+        if len(choices) == 1 and choices[0] is None:
+            return                                  # jeden dospělý = výchozí stav
+        adults = sum(1 for c in choices if c is None)
+        wanted = [c for c in choices if c is not None] + [ADULT] * max(0, adults - 1)
+        label = ", ".join(_tariff_label(p) for p in passengers)
         try:
             await self._wait_for_loader(page)
             opener = await self._maybe_visible(page, [".connection-passenger"], timeout=5.0)
@@ -249,20 +253,22 @@ class CdProvider(BrowserProvider):
 
             titles = await modal.locator("button.btn-add-user").evaluate_all(
                 "buttons => buttons.map(b => b.title || '')")
-            index = next((i for i, t in enumerate(titles) if re.search(pattern, t)), None)
-            if index is None:
-                raise ProviderError(self.name, f"v okně Cestující chybí tarif {label!r}")
-            await modal.locator("button.btn-add-user").nth(index).click(force=True)
-            await page.wait_for_timeout(700)
+            for name, pattern in wanted:
+                index = next((i for i, t in enumerate(titles) if re.search(pattern, t)), None)
+                if index is None:
+                    raise ProviderError(self.name, f"v okně Cestující chybí tarif {name!r}")
+                await modal.locator("button.btn-add-user").nth(index).click(force=True)
+                await page.wait_for_timeout(700)
 
-            # Výchozího dospělého odebrat – jinak by se ceny sčítaly za dva.
-            adult = modal.locator("li.user-card.selected").filter(
-                has_text=re.compile(r"Dospělý 26.64 let\s+Bez slevového", re.S))
-            if await adult.count():
-                minus = adult.first.locator(".icon-minus-circle, button:has(.icon-minus-circle)").first
-                if await minus.count():
-                    await minus.click(force=True)
-                    await page.wait_for_timeout(600)
+            if not adults:
+                # Výchozího dospělého odebrat – jinak by se ceny sčítaly i za něj.
+                adult = modal.locator("li.user-card.selected").filter(
+                    has_text=re.compile(r"Dospělý 26.64 let\s+Bez slevového", re.S))
+                if await adult.count():
+                    minus = adult.first.locator(".icon-minus-circle, button:has(.icon-minus-circle)").first
+                    if await minus.count():
+                        await minus.click(force=True)
+                        await page.wait_for_timeout(600)
 
             done = modal.locator("button:has-text('Hotovo')").first
             if await done.count():
@@ -270,14 +276,17 @@ class CdProvider(BrowserProvider):
             await page.wait_for_timeout(900)
 
             summary = (await opener.inner_text()).replace("\n", " ")
-            wanted_head = label.split(",")[0]
-            if wanted_head.split()[0] not in summary or "Dospělý 26" in summary and "Dospělý" not in wanted_head:
-                raise ProviderError(self.name, f"tarif se nenastavil (formulář ukazuje {summary!r})")
-            log.info("%s: cestující nastaven na %s", self.name, label)
+            if len(passengers) == 1:
+                wanted_head = label.split(",")[0]
+                if wanted_head.split()[0] not in summary or "Dospělý 26" in summary and "Dospělý" not in wanted_head:
+                    raise ProviderError(self.name, f"tarif se nenastavil (formulář ukazuje {summary!r})")
+            elif "Dospělý 26" in summary and not adults and len(summary) < 40:
+                raise ProviderError(self.name, f"cestující se nenastavili (formulář ukazuje {summary!r})")
+            log.info("%s: cestující nastaveni na %s (%s)", self.name, label, summary)
         except Exception as exc:
             reason = exc.message if isinstance(exc, ProviderError) else str(exc).splitlines()[0][:120]
-            self.note(f"slevu „{label}“ se na cd.cz nepodařilo nastavit – ceny ČD jsou "
-                      f"za dospělého ({reason})")
+            self.note(f"cestující „{label}“ se na cd.cz nepodařilo nastavit – ceny ČD jsou "
+                      f"za jednoho dospělého ({reason})")
             try:
                 await page.keyboard.press("Escape")
                 await page.wait_for_timeout(400)
@@ -418,7 +427,7 @@ class CdProvider(BrowserProvider):
         fares = []
         if amount is not None:
             fares.append(self.make_fare(amount, "CZK", label="ČD e-shop",
-                                        tariff=_tariff_label(query.lead)))
+                                        tariff=_group_label(query.passengers)))
             status = FareStatus.PRICED
         elif sold_out:
             status = FareStatus.SOLD_OUT
@@ -505,6 +514,18 @@ def _cd_tariff(passenger: Passenger) -> tuple[str, str] | None:
     return None
 
 
+#: Tlačítko dalšího dospělého bez slevy.
+ADULT = ("Dospělý 26—64 let", r"Dospělý 26.64 let(?!.*(průkaz|karta|In))")
+
+
 def _tariff_label(passenger: Passenger) -> str:
     choice = _cd_tariff(passenger)
     return choice[0] if choice else "Dospělý 26—64 let"
+
+
+def _group_label(passengers: tuple[Passenger, ...]) -> str:
+    """Popis tarifu pro skupinu („Dospělý 26—64 let + Dítě 6—9 let“)."""
+    from collections import Counter
+
+    counts = Counter(_tariff_label(p) for p in passengers)
+    return " + ".join(f"{n}× {k}" if n > 1 else k for k, n in counts.items())

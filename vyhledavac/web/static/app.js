@@ -54,15 +54,24 @@
   const placeMeta = p => p ? (p.country ? [p.country] : [p.kraj, p.ids, zonesText(p.zones), alsoText(p)]).filter(Boolean).join(' · ') : '';
 
   // ---- stav ----------------------------------------------------------------
+  const MAX_PAX = 9;
+  function loadPax() {
+    const saved = store.get('pax', null);
+    if (Array.isArray(saved) && saved.length) {
+      return saved.slice(0, MAX_PAX).map(p => ({
+        age: Math.max(0, Math.min(120, parseInt(p.age, 10) || 0)), isic: !!p.isic, skFree: !!p.skFree,
+      }));
+    }
+    return [{ age: store.get('age', 26), isic: store.get('isic', false), skFree: store.get('skFree', false) }];
+  }
   const today = new Date();
   const pad = n => String(n).padStart(2, '0');
   const S = {
     meta: null,
     providersOn: null,            // Set jmen – nastaví se po načtení meta
     hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket'])),
-    age: store.get('age', 26),
-    isic: store.get('isic', false),
-    skFree: store.get('skFree', false),
+    // Cestující: [{age, isic, skFree}] – starší verze ukládala jednoho do kořene.
+    pax: loadPax(),
     pass: false,                  // rozbalený panel Cestující
     modes: [...ALL_GROUPS],
     adv: false,
@@ -256,7 +265,8 @@
     if (!providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
     const body = {
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
-      age: Number(S.age), isic: S.isic, skFree: S.skFree, providers, hacks: [...S.hacksOn],
+      passengers: S.pax.map(p => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree })),
+      providers, hacks: [...S.hacksOn],
     };
     if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
     closeStream();
@@ -462,43 +472,57 @@
   }
 
   // Kategorie cestujícího – stejná pravidla jako Passenger.category na serveru.
-  function passengerCategory() {
-    const age = Number(S.age);
+  function passengerCategory(p) {
+    const age = Number(p.age);
     if (age < 6) return 'dítě do 6 let';
     if (age < 15) return 'dítě 6–14 let';
     if (age < 18) return 'mladistvý 15–17 let';
     if (age >= 65) return 'senior 65+';
-    if (S.isic && age < 26) return 'student s ISIC';
+    if (p.isic && age < 26) return 'student s ISIC';
     return 'dospělý';
   }
 
   function passengerSummary() {
-    const parts = [`${S.age} let`, passengerCategory()];
-    if (S.skFree) parts.push('SK zdarma');
-    return parts.join(' · ');
+    if (S.pax.length === 1) {
+      const p = S.pax[0];
+      const parts = [`${p.age} let`, passengerCategory(p)];
+      if (p.skFree) parts.push('SK zdarma');
+      return parts.join(' · ');
+    }
+    const counts = new Map();
+    S.pax.forEach(p => { const c = passengerCategory(p); counts.set(c, (counts.get(c) || 0) + 1); });
+    const n = S.pax.length;
+    return `${n} ${n < 5 ? 'cestující' : 'cestujících'} · ` + [...counts].map(([c, k]) => (k > 1 ? `${k}× ` : '') + c).join(', ');
+  }
+
+  function paxSwitch(act, i, on, label) {
+    return `<button type="button" class="switch" role="switch" aria-checked="${on}" data-act="${act}" data-key="${i}"><span class="track"><span class="knob"></span></span><span>${label}</span></button>`;
   }
 
   function renderPass() {
     const box = $('#pass');
     if (!S.pass) { box.innerHTML = ''; return; }
-    const age = Number(S.age);
-    const isicNote = S.isic && age >= 26
+    const isicNote = S.pax.some(p => p.isic && Number(p.age) >= 26)
       ? '<span class="adv-hint warn">ISIC dává slevu jen do 26 let – ceny budou pro dospělého.</span>' : '';
-    const skNote = S.skFree && S.providersOn && !S.providersOn.has('ZSSK')
+    const skNote = S.pax.some(p => p.skFree) && S.providersOn && !S.providersOn.has('ZSSK')
       ? '<span class="adv-hint warn">Bezplatnou přepravu uplatní jen ZSSK – zapněte ji ve Zdrojích dat.</span>' : '';
+    const rows = S.pax.map((p, i) => `<div class="pax-row">
+        <span class="pax-n">${i + 1}.</span>
+        <label class="adv-age"><input type="number" min="0" max="120" value="${esc(p.age)}" data-act="age" data-key="${i}" aria-label="Věk cestujícího ${i + 1}"> let</label>
+        <span class="pax-cat">${esc(passengerCategory(p))}</span>
+        ${paxSwitch('pax-isic', i, p.isic, 'ISIC')}
+        ${paxSwitch('pax-sk', i, p.skFree, 'SK 100%')}
+        ${S.pax.length > 1 ? `<button type="button" class="btn btn-ghost pax-del" data-act="pax-del" data-key="${i}" aria-label="Odebrat cestujícího ${i + 1}">${icon('x', 16)}</button>` : ''}
+      </div>`).join('');
     box.innerHTML = `<div class="adv-grid">
-      <div class="adv-cell"><span class="adv-title">Věk cestujícího</span>
-        <label class="adv-age"><input type="number" min="0" max="120" value="${esc(S.age)}" data-act="age"> let</label>
-        <span class="adv-hint">Podle věku dopravci volí tarif: dítě, mladistvý, junior/student, dospělý, senior.</span></div>
-      <div class="adv-cell"><span class="adv-title">Průkaz studenta</span>
-        ${sw('isic', S.isic, 'Mám ISIC')}
-        <span class="adv-hint">Studentské jízdné do 26 let: RegioJet Student 18–25, ČD Junior se žákovským průkazem, FlixBus a OneTicket student, ZSSK karta ISIC.</span>${isicNote}</div>
-      <div class="adv-cell"><span class="adv-title">Slovensko</span>
-        ${sw('skFree', S.skFree, 'Mám nárok na bezplatnou přepravu (100% zľava)')}
-        <span class="adv-hint">Pro registrované žáky a studenty do 26 let a seniory 62+ ve vlacích ZSSK. Ostatní dopravci ji neznají a účtují běžný tarif.</span>${skNote}</div>
-      <div class="adv-cell"><span class="adv-title">Tarif při hledání</span>
-        <strong>${esc(passengerCategory())}${S.skFree ? ' · ZSSK zdarma' : ''}</strong>
-        <span class="adv-hint">Platí od příštího hledání. ÖBB ukazuje vždy cenu pro dospělého bez slevy.</span></div>
+      <div class="adv-cell pax-cell"><span class="adv-title">Cestující</span>
+        ${rows}
+        ${S.pax.length < MAX_PAX ? `<button type="button" class="btn btn-secondary pax-add" data-act="pax-add">${icon('plus', 16)}<span>Přidat cestujícího</span></button>` : ''}
+        <span class="adv-hint">Podle věku dopravci volí tarif: dítě, mladistvý, junior/student, dospělý, senior. Cena je za celou skupinu.</span>${isicNote}${skNote}</div>
+      <div class="adv-cell"><span class="adv-title">Slevy</span>
+        <span class="adv-hint"><strong>ISIC</strong> – studentské jízdné do 26 let: RegioJet Student 18–25, ČD Junior se žákovským průkazem, FlixBus a OneTicket student, ZSSK karta ISIC, studentské jízdné integrovaných systémů.</span>
+        <span class="adv-hint"><strong>SK 100%</strong> – bezplatná přeprava ve vlacích ZSSK pro registrované žáky a studenty do 26 let a seniory 62+. Ostatní dopravci ji neznají.</span>
+        <span class="adv-hint">ZSSK a ÖBB umí cenu jen pro jednoho cestujícího; ÖBB vždy pro dospělého bez slevy.</span></div>
     </div>`;
   }
 
@@ -792,9 +816,7 @@
   function persistOptions() {
     if (S.providersOn) store.set('providers', [...S.providersOn]);
     store.set('hacks', [...S.hacksOn]);
-    store.set('age', S.age);
-    store.set('isic', S.isic);
-    store.set('skFree', S.skFree);
+    store.set('pax', S.pax);
     store.set('onlyPriced', S.onlyPriced);
     store.set('pareto', S.pareto);
     store.set('sameDep', S.sameDep);
@@ -830,6 +852,10 @@
     },
     reset() { S.modes = [...ALL_GROUPS]; S.maxT = 'any'; S.direct = false; S.buffer = 0; S.onlyPriced = false; S.off.clear(); },
     'reset-all'() { ACTIONS.reset(); S.pareto = false; S.sameDep = false; },
+    'pax-add'() { if (S.pax.length < MAX_PAX) S.pax.push({ age: 26, isic: false, skFree: false }); },
+    'pax-del'(key) { if (S.pax.length > 1) S.pax.splice(Number(key), 1); },
+    'pax-isic'(key) { const p = S.pax[Number(key)]; if (p) p.isic = !p.isic; },
+    'pax-sk'(key) { const p = S.pax[Number(key)]; if (p) p.skFree = !p.skFree; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
     'prov-fast'() { S.providersOn = new Set(S.meta.providers.filter(p => !p.browser).map(p => p.name)); },
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },
@@ -867,7 +893,8 @@
       S[el.dataset.key] = el.dataset.key === 'buffer' ? Number(el.value) : el.value;
     } else if (el.dataset.act === 'age') {
       const v = Math.max(0, Math.min(120, parseInt(el.value, 10) || 0));
-      S.age = v;
+      const p = S.pax[Number(el.dataset.key) || 0];
+      if (p) p.age = v;
     } else if (el.name === 'cur') {
       S.cur = el.value;
     } else return;

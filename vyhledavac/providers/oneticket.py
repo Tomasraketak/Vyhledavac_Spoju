@@ -114,6 +114,7 @@ _TIME_RE = re.compile(r"\b(\d{1,2}):(\d{2})\b")
 @PROVIDERS.register()
 class OneTicketProvider(BrowserProvider):
     name = "OneTicket"
+    multi_passenger = True
     label = "OneTicket / SJT – ceny českých vlaků (prohlížeč, ~20 s)"
     currency = "CZK"
     provides_prices = True

@@ -95,14 +95,22 @@ class SearchSession:
             name: {"name": name, "status": "running", "detail": "hledám…"} for name in providers
         }
         self.problems: list[dict[str, Any]] = []
-        lead = query.lead
-        if lead.has(DiscountCard.ISIC) and lead.age >= 26:
+        if any(p.has(DiscountCard.ISIC) and p.age >= 26 for p in query.passengers):
             self._problem("ISIC", "studentská sleva platí jen do 26 let – hledám ceny pro "
                                   "dospělého. Jste-li mladší, opravte věk.", "soft")
+        if len(query.passengers) > 1:
+            classes = dict(PROVIDERS.items())
+            single = sorted(name for name in providers if name in classes
+                            and classes[name].provides_prices
+                            and not classes[name].multi_passenger)
+            if single:
+                self._problem(", ".join(single),
+                              "umí cenu jen pro jednoho cestujícího – ukazuje cenu za prvního "
+                              "z nich, ne za celou skupinu.", "soft")
         if "ids_ticket" in hacks and "ČD" not in providers:
             self._problem("IDS", "jízdenky integrovaných systémů (IDESKA) porovnávám s cenou "
                                  "Českých drah – zapněte zdroj ČD.", "soft")
-        if lead.has(DiscountCard.SK_FREE) and "ZSSK" not in providers:
+        if any(p.has(DiscountCard.SK_FREE) for p in query.passengers) and "ZSSK" not in providers:
             self._problem("ZSSK", "bezplatnou přepravu na Slovensku uplatní jen ZSSK, která "
                                   "není zapnutá – ceny ostatních dopravců jsou bez ní.", "soft")
         for module, error in LOAD_ERRORS.items():
@@ -302,16 +310,29 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
         when = dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=DEFAULT_TZ)
     except ValueError as exc:
         raise ValueError("Neplatné datum nebo čas.") from exc
+    raw = body.get("passengers")
+    if not isinstance(raw, list) or not raw:
+        raw = [body]                       # starší klient: jeden cestující v kořeni
+    if len(raw) > MAX_PASSENGERS:
+        raise ValueError(f"Nejvýš {MAX_PASSENGERS} cestujících.")
+    passengers = tuple(_passenger(item if isinstance(item, dict) else {}) for item in raw)
+    return SearchQuery(origin=origin, destination=destination, departure=when,
+                       passengers=passengers)
+
+
+MAX_PASSENGERS = 9
+
+
+def _passenger(item: dict[str, Any]) -> Passenger:
     try:
-        age = int(body.get("age", 26))
+        age = int(item.get("age", 26))
     except (TypeError, ValueError) as exc:
         raise ValueError("Věk musí být číslo.") from exc
     if not 0 <= age <= 120:
         raise ValueError("Věk musí být mezi 0 a 120.")
-    cards = tuple(card for card, on in ((DiscountCard.ISIC, body.get("isic")),
-                                        (DiscountCard.SK_FREE, body.get("skFree"))) if on)
-    return SearchQuery(origin=origin, destination=destination, departure=when,
-                       passengers=(Passenger(age=age, cards=cards),))
+    cards = tuple(card for card, on in ((DiscountCard.ISIC, item.get("isic")),
+                                        (DiscountCard.SK_FREE, item.get("skFree"))) if on)
+    return Passenger(age=age, cards=cards)
 
 
 # ---------------------------------------------------------------------------

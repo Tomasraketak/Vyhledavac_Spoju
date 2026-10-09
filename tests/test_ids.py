@@ -87,7 +87,7 @@ def offline_cd(monkeypatch):
 
     monkeypatch.setattr(cdtrain, "train_stops", no_route)
     from vyhledavac.ids import online
-    for tariff in (online.vdv, online.iredo, online.idol):        # počítadla se nevolají
+    for tariff in (online.vdv, online.iredo, online.idol, online.duk, online.idzk):  # počítadla se nevolají
         monkeypatch.setattr(tariff, "prefetch", no_prices)
         monkeypatch.setattr(tariff, "_prices", {})
 
@@ -285,8 +285,8 @@ def test_idol_parse_single_fares():
 
 def test_jmk_price_by_zone_count():
     zones = ["100", "101", "310", "320"]
-    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=30), 60).price == Decimal(41)
-    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=12), 60).price == Decimal(20)
+    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=30), 60).price == Decimal(37)
+    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=12), 60).price == Decimal("18.50")
 
 
 @pytest.mark.asyncio
@@ -302,3 +302,64 @@ async def test_vdv_then_jmk_chain(monkeypatch):
     found = await IdsTicketHack().find(query, [base], search)
     assert [s.provider for s in found[0].segments] == ["VDV", "IDS JMK"]
     assert found[0].segments[0].destination == "Křižanov"
+
+
+@pytest.mark.asyncio
+async def test_group_sums_fares_per_passenger():
+    """Dospělý + dítě + student + batole: každý svou jízdenku, cena se sečte."""
+    from vyhledavac.models import DiscountCard
+
+    people = (Passenger(age=40), Passenger(age=10), Passenger(age=21, cards=(DiscountCard.ISIC,)),
+              Passenger(age=3))
+    query = SearchQuery(origin="České Budějovice", destination="Tábor", departure=at(9),
+                        passengers=people)
+    single = [await IdsTicketHack().find(SearchQuery(origin="České Budějovice", destination="Tábor",
+                                                     departure=at(9), passengers=(p,)),
+                                         [cd_journey("České Budějovice", "Tábor", at(10), at(11), 999)],
+                                         None) for p in people]
+    found = await IdsTicketHack().find(query, [cd_journey("České Budějovice", "Tábor", at(10), at(11),
+                                                          999)], None)
+    expected = sum(s[0].price for s in single)
+    assert found[0].price == expected
+    assert single[3][0].price == 0                       # do 6 let zdarma
+    assert single[1][0].price < single[0][0].price       # dítě má slevu
+
+
+def test_pid_free_in_prague_for_children_and_seniors():
+    assert pid.best_fare("P", "B", Passenger(age=10), 30).price == 0
+    assert pid.best_fare("P", "0", Passenger(age=72), 30).price == 0
+    assert pid.best_fare("P", "3", Passenger(age=10), 30).price > 0       # mimo Prahu jen sleva
+
+
+def test_idsok_ceník_a_b_and_regional_710():
+    from vyhledavac.ids import idsok
+
+    adult, junior, student = Passenger(age=30), Passenger(age=12), Passenger(age=20, cards=(DiscountCard.ISIC,))
+    assert idsok.best_for_route([("1",), ("12",), ("17",)], adult, 60).price == Decimal(25)
+    assert idsok.best_for_route([("1",), ("12",), ("17",)], junior, 60).price == Decimal(6)
+    # přes Olomouc: vlakem stačí regionální zóna 710 (Ceník A), s MHD by to byl Ceník B
+    via = [("72",), ("71",), ("75",)]
+    assert idsok.best_for_route(via, adult, 60).price == Decimal(25)
+    assert any(f.price == Decimal(43) for f in idsok.fares_for_path(["72", "71", "75"], adult))
+    assert any(f.price == Decimal(29) for f in idsok.fares_for_path(["72", "71", "75"], student))
+    assert idsok.best_for_route([("71",)], adult, 30) is None           # jen MHD Olomouc
+
+
+def test_duk_parse_takes_cheapest_offer_per_level():
+    data = {"coverages": [
+        {"isNetwork": False, "offers": [
+            {"price": 5900, "cp": 1, "format": "Paper", "products": [{"validDurationMinutes": 120}]},
+            {"price": 5310, "cp": 1, "format": "MobileApp", "products": [{"validDurationMinutes": 120}]},
+            {"price": 2650, "cp": 6, "format": "MobileApp", "products": [{"validDurationMinutes": 120}]},
+            {"price": 1320, "cp": 53, "products": [{"validDurationMinutes": 120}]}]},
+        {"isNetwork": True, "offers": [{"price": 20000, "cp": 1, "products": [{}]}]}]}
+    rows = online.duk.parse(data)
+    assert ("jednotlivé plné", 120, Decimal("53.1")) in rows
+    assert ("jednotlivé zvýhodněné 50 %", 120, Decimal("26.5")) in rows
+    assert len(rows) == 2
+
+
+def test_idzk_parse_city_ticket_variants():
+    html = ('<p class="thePrice">18<span> Kč<em> &nbsp;/ &nbsp;Platnost jízdenky 30 min</em></span><br />'
+            '24<span> Kč<em> &nbsp;/ &nbsp;Platnost jízdenky 60 min</em></span></p>')
+    assert online.idzk.parse(html) == [(30, Decimal(18)), (60, Decimal(24))]

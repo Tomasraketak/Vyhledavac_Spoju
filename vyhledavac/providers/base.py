@@ -60,6 +60,8 @@ class Provider(abc.ABC):
     #: Na cestách jen po Česku se dopravce neptá – vnitrostátní spoje
     #: (a jejich ceny) mají čeští dopravci, dotaz by jen zdržoval.
     international_only: ClassVar[bool] = False
+    #: Umí cenu pro skupinu různých cestujících (jinak se ptá za prvního).
+    multi_passenger: ClassVar[bool] = False
 
     def __init__(
         self,

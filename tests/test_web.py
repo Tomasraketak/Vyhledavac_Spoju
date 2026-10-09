@@ -234,3 +234,19 @@ def test_search_and_event_stream(http):
 def test_search_validation_error_is_readable(http):
     status, body = _post(http + "/api/search", {"from": "", "to": "Brno"})
     assert status == 400 and "odkud" in body["error"]
+
+
+def test_parse_query_several_passengers():
+    q = web.parse_query({"from": "Praha", "to": "Brno", "passengers": [
+        {"age": 40}, {"age": 8}, {"age": 20, "isic": True}]})
+    assert [p.age for p in q.passengers] == [40, 8, 20]
+    assert q.passengers[2].category is FareCategory.STUDENT
+    with pytest.raises(ValueError):
+        web.parse_query({"from": "Praha", "to": "Brno", "passengers": [{"age": 30}] * 10})
+
+
+def test_group_warns_about_single_passenger_providers():
+    q = web.parse_query({"from": "Praha", "to": "Vídeň", "passengers": [{"age": 40}, {"age": 8}]})
+    data = snapshot(web.SearchSession(q, ["RegioJet", "ÖBB"], []))
+    assert any("ÖBB" in p["provider"] and "jednoho" in p["message"] for p in data["problems"])
+    assert not any("RegioJet" in p["provider"] for p in data["problems"])

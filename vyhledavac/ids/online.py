@@ -8,6 +8,8 @@ synchronní a jen čte, co už je v paměti.
 * ``TimTariff`` – „Tarifní počítadlo“ od firmy ABIRAIL (tim.*): VDV
   (Vysočina) a IREDO (Královéhradecký a Pardubický kraj).
 * ``IdolTariff`` – počítadlo IDOL (Liberecký kraj) na dopravnimapy.kraj-lbc.cz.
+* ``DukTariff`` – API kalkulačky DÚK (Ústecký kraj), client.dukapka.cz.
+* ``IdzkTariff`` – kalkulačka IDZK (Zlínský kraj) „tarif nové generace“.
 
 Zóny zastávek se stahují při sestavení dat (``tools/build_stations.py``).
 """
@@ -200,6 +202,85 @@ class IdolTariff(OnlineTariff):
         return rows
 
 
+class DukTariff(OnlineTariff):
+    """DÚK: ``POST /v1/pricing/by-zones`` – cena podle tarifních jednic mezi zónami.
+
+    Každá jízdenka má cenu v hotovosti, bezhotovostně a v aplikaci (o 10 %
+    levnější); bere se nejnižší. Jednotlivé jízdné má jen tři hladiny:
+    plné, zvýhodněné 50 % (děti 6–18, studenti do 26, senioři 65+) a 25 %
+    (ZTP); děti do 6 let jezdí zdarma.
+    """
+
+    SYSTEM = "DÚK"
+    URL = "https://kalkulator.dopravauk.cz/"
+    api = "https://client.dukapka.cz/api"
+    key = "980z80c35x"           # veřejný klíč kalkulačky (je v jejím JS)
+    data_file = "ids_duk.json.gz"
+    LEVELS = {1: "jednotlivé plné", 6: "jednotlivé zvýhodněné 50 %"}
+    names = {"full": (LEVELS[1],), "youth": (LEVELS[6],), "student": (LEVELS[6],),
+             "senior": (LEVELS[6],)}
+
+    async def _fetch(self, client: httpx.AsyncClient, zone_from: str, zone_to: str) -> None:
+        response = await client.post(f"{self.api}/v1/pricing/by-zones", headers={"X-API-Key": self.key},
+                                     json={"from": int(zone_from), "to": int(zone_to), "network": False,
+                                           "bags": False, "cps": list(self.LEVELS), "tps": [1],
+                                           "dukapkaRegLevel": None})
+        response.raise_for_status()
+        self._prices[(zone_from, zone_to)] = self.parse(response.json())
+
+    @classmethod
+    def parse(cls, data: dict) -> list[tuple[str, int | None, Decimal]]:
+        best: dict[tuple[str, int | None], Decimal] = {}
+        for coverage in data.get("coverages") or ():
+            if coverage.get("isNetwork"):
+                continue
+            for offer in coverage.get("offers") or ():
+                name = cls.LEVELS.get(offer.get("cp"))
+                products = offer.get("products") or [{}]
+                if name is None or offer.get("price") is None:
+                    continue
+                minutes = products[0].get("validDurationMinutes")
+                price = Decimal(offer["price"]) / 100
+                key = (name, minutes)
+                if key not in best or price < best[key]:
+                    best[key] = price
+        return [(name, minutes, price) for (name, minutes), price in best.items()]
+
+
+class IdzkTariff(OnlineTariff):
+    """IDZK „tarif nové generace“: ``GET result.php?fare=…&a=<bod>&b=<bod>``.
+
+    Cena je pevná pro dvojici tarifních bodů (obec / část obce) bez ohledu na
+    trasu. Zlevněné jízdné (dítě 6–17, student 18–25, senior 65+) je
+    polovina; počítadlo ho vrací pro „dite“ stejně jako pro ostatní slevy.
+    """
+
+    SYSTEM = "IDZK"
+    URL = "https://idzk.info/kalkulator-ng/"
+    api = "https://idzk.info/kalkulator-ng"
+    data_file = "ids_idzk.json.gz"
+    FARES = {"obyc": "obyčejné", "dite": "zlevněné 50 %"}
+    names = {"full": ("obyčejné",), "youth": ("zlevněné 50 %",), "student": ("zlevněné 50 %",),
+             "senior": ("zlevněné 50 %",)}
+
+    async def _fetch(self, client: httpx.AsyncClient, zone_from: str, zone_to: str) -> None:
+        rows = []
+        for fare, name in self.FARES.items():
+            response = await client.get(f"{self.api}/result.php", params={
+                "fare": fare, "a": self.zones[zone_from]["id"], "b": self.zones[zone_to]["id"]})
+            response.raise_for_status()
+            rows += [(name, minutes, price) for minutes, price in self.parse(response.text)]
+        self._prices[(zone_from, zone_to)] = rows
+
+    @staticmethod
+    def parse(html: str) -> list[tuple[int, Decimal]]:
+        """(platnost v min, cena) – městská jízdenka má dvě varianty (30 a 60 min)."""
+        return [(int(m), Decimal(p)) for p, m in
+                re.findall(r"(\d+)<span> Kč<em>[^<]*?Platnost jízdenky (\d+) min", html)]
+
+
 vdv = Vdv()
 iredo = Iredo()
 idol = IdolTariff()
+duk = DukTariff()
+idzk = IdzkTariff()

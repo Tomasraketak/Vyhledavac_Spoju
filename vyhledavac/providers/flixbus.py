@@ -54,6 +54,7 @@ _FLIX_PRODUCTS = {
 @PROVIDERS.register()
 class FlixBusProvider(HttpProvider):
     name = "FlixBus"
+    multi_passenger = True
     label = "FlixBus / FlixTrain (celá Evropa)"
     currency = "CZK"
     provides_prices = True

@@ -60,6 +60,7 @@ _TARIFF_NAMES = {
 @PROVIDERS.register()
 class RegioJetProvider(HttpProvider):
     name = "RegioJet"
+    multi_passenger = True
     label = "RegioJet (vlaky i autobusy, CZ/SK/AT/DE/PL)"
     currency = "CZK"
     provides_prices = True

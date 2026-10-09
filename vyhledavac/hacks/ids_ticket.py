@@ -31,8 +31,8 @@ from typing import Sequence
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, ideska, idpk, jmk, pid
-from ..ids.online import idol, iredo, vdv
+from ..ids import IdsFare, group_fare, ideska, idpk, idsok, jmk, pid
+from ..ids.online import duk, idol, idzk, iredo, vdv
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import normalize
 from ..registry import HACKS
@@ -41,13 +41,14 @@ from .base import SearchFn, TravelHack
 log = logging.getLogger(__name__)
 
 #: Systémy, jejichž tarif umíme spočítat.
-SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk)}
+SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk, duk, idzk, idsok)}
 LINKS = {name: m.URL for name, m in SYSTEMS.items()}
 #: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (pásmo
 #: nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
 #: jakýchkoli údajů tu trasu systému nepřeruší; cenu určují jen zóny konců
 #: (u IDPK i projeté zóny, které známe).
-LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM, jmk.SYSTEM}
+LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM, jmk.SYSTEM, duk.SYSTEM, idzk.SYSTEM,
+           idsok.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
@@ -241,9 +242,11 @@ class IdsTicketHack(TravelHack):
             return None        # PID neplatí na cesty jen po jiném kraji
         module = SYSTEMS[system]
         if hasattr(module, "best_for_route"):        # cena podle všech projetých zón
-            return module.best_for_route(_passed_zones(part, system), query.lead, minutes)
-        return module.best_between(route[i].systems[system], route[j].systems[system],
-                                   query.lead, minutes)
+            passed = _passed_zones(part, system)
+            return group_fare(query.passengers,
+                              lambda p: module.best_for_route(passed, p, minutes))
+        return group_fare(query.passengers, lambda p: module.best_between(
+            route[i].systems[system], route[j].systems[system], p, minutes))
 
     def _best_plan(self, query: SearchQuery, journey: Journey, route: list[RouteStop],
                    cd_tails: dict[str, list[Journey]],
