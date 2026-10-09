@@ -36,14 +36,14 @@
     <form id="search-form" class="search-form" autocomplete="off">
       <label class="sf-cell sf-place">
         <span class="sf-label" data-icon="map-pin">Odkud</span>
-        <input id="f-from" name="from" list="stanice" required>
+        <input id="f-from" name="from" required>
       </label>
       <div class="sf-cell sf-swap">
         <button class="btn btn-secondary btn-icon" type="button" id="swap-btn" aria-label="Prohodit odkud a kam"></button>
       </div>
       <label class="sf-cell sf-place">
         <span class="sf-label" data-icon="flag">Kam</span>
-        <input id="f-to" name="to" list="stanice" required>
+        <input id="f-to" name="to" required>
       </label>
       <label class="sf-cell sf-date">
         <span class="sf-label" data-icon="calendar-days">Datum</span>
@@ -57,7 +57,6 @@
         <button class="btn btn-primary" type="submit" id="submit-btn"><span>Hledat spojení</span></button>
         <button class="btn btn-secondary" type="button" id="cancel-btn" hidden>Zrušit</button>
       </div>
-      <datalist id="stanice"></datalist>
     </form>
 
     <div class="row-chips" id="modes"></div>

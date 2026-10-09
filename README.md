@@ -449,6 +449,8 @@ vyhledavac/
 ├── cache.py         SQLite cache s TTL (nahradila CSV soubory)
 ├── money.py         kurzy ČNB
 ├── normalize.py     porovnávání názvů stanic (diakritika, aliasy)
+├── stations.py      databáze zastávek: našeptávač, kraj, IDS, tarifní zóna
+├── data/            stations.json.gz – sestavuje tools/build_stations.py
 ├── registry.py      registr pluginů
 ├── engine.py        orchestrace, izolace chyb, průběžné výsledky
 ├── providers/       dopravci      (regiojet, flixbus, obb, cd)
@@ -485,6 +487,13 @@ Malý server ze standardní knihovny (`vyhledavac/web/`), poslouchá jen na
 Modernist: ikony jsou vložené, takže funguje i bez internetu (kromě
 písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
 
+- **Našeptávač** u polí Odkud/Kam: všechny vlakové stanice a autobusové
+  zastávky v ČR (~43 tisíc míst) plus hlavní zahraniční cíle, seřazené
+  podle důležitosti (obyvatelé obce + počet spojů) – „Pra“ nabídne Prahu,
+  ne zastávku Pražák. Hledá bez diakritiky, v libovolném pořadí slov
+  („hl brno“) i podle plných názvů místo zkratek CIS („Královo Pole“ →
+  *Brno-Kr. Pole*). U každého místa ukáže kraj, integrovaný systém (PID,
+  IDS JMK, IDOL, ODIS…) a tarifní zónu. Ovládá se i šipkami a Enterem.
 - **Hledání:** odkud, kam, datum, čas; druhy dopravy (vlak / bus / MHD);
   v *Pokročilých možnostech* počet přestupů, jen přímá spojení, minimální
   čas na přestup, věk a ISIC, travel hacky, „jen se známou cenou“ a
@@ -498,14 +507,39 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   bez nového hledání.
 - **Karta spoje:** časová osa úseků barevně podle druhu dopravy, přestupy
   (kratší než 3 min označené jako riziko), cena a zdroj. *Detail* ukáže
-  itinerář s nácestnými zastávkami, souhrn a dílčí jízdenky lomené
-  jízdenky; *Koupit* otevře web dopravce.
+  itinerář s nácestnými zastávkami, u nástupní a výstupní stanice kraj,
+  IDS a zónu (v souhrnu *Tarifní zóny* odkud → kam), souhrn a dílčí
+  jízdenky lomené jízdenky; *Koupit* otevře web dopravce.
 - **Co se nepovedlo:** panel s vysvětlením a tlačítkem *vypnout*. Nic
   nevyskakuje.
 - CZK / EUR, světlý / tmavý motiv, funguje i na mobilu.
 
 Server se sám ukončí, když se stránka 2 minuty neozve (`--idle 0` vypne),
 a druhé spuštění jen otevře už běžící instanci.
+
+### Databáze zastávek
+
+`vyhledavac/data/stations.json.gz` (~0,6 MB) je součástí repozitáře, za
+běhu se nic nestahuje. Obnovit ji (třeba s novým jízdním řádem v prosinci)
+jde jedním příkazem – stáhne ~150 MB zdrojů do `.cache/stations/`:
+
+```bash
+python tools/build_stations.py            # --refresh = stáhnout zdroje znovu
+```
+
+| Údaj | Zdroj |
+|---|---|
+| autobusové zastávky, okres, počet spojů | CIS JŘ – JDF, [portal.cisjr.cz](https://portal.cisjr.cz/pub/jdf/) |
+| vlakové stanice a zastávky, počet vlaků | CIS JŘ – CZPTT, [portal.cisjr.cz](https://portal.cisjr.cz/pub/draha/celostatni/szdc/) |
+| kraj stanic, plné názvy a počty obyvatel obcí | © přispěvatelé [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL), Overpass API |
+| pásma PID | [data.pid.cz](https://pid.cz/o-systemu/opendata/) (CC BY 4.0) |
+| zóny IDS JMK | GTFS [KORDIS JMK](https://kordis-jmk.cz/gtfs/gtfs.zip) |
+
+Kraj → systém: Praha a Středočeský PID, Jihočeský IDS JK, Plzeňský IDPK,
+Karlovarský IDS KK, Ústecký DÚK, Liberecký IDOL, Královéhradecký
+a Pardubický IREDO, Vysočina VDV, Jihomoravský IDS JMK, Olomoucký IDSOK,
+Zlínský IDZK, Moravskoslezský ODIS. Zóny volně zveřejňují jen PID
+a IDS JMK; u ostatních systémů se ukáže kraj a systém bez zóny.
 
 ## Okenní rozhraní (tkinter)
 

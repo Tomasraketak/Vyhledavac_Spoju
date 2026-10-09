@@ -68,6 +68,20 @@ svg.i { display: block; flex: none; }
 .sf-cell input:focus-visible { outline: none; }
 .sf-cell:focus-within { box-shadow: inset 0 -3px 0 var(--color-accent), 0 0 0 1px var(--color-divider); }
 
+/* ---- našeptávač -------------------------------------------------------- */
+.suggest { position: absolute; z-index: 50; max-height: min(440px, 60vh); overflow-y: auto; background: var(--color-surface); border: 2px solid var(--color-text); box-shadow: var(--shadow-lg); box-sizing: border-box; }
+.sg-item { display: flex; align-items: flex-start; gap: 12px; padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--color-divider); }
+.sg-item:last-child { border-bottom: 0; }
+.sg-item:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.sg-item[aria-selected="true"] { background: var(--color-text); color: var(--color-bg); }
+.sg-item[aria-selected="true"] .sg-sub, .sg-item[aria-selected="true"] .sg-icon { color: inherit; opacity: .8; }
+.sg-icon { color: var(--color-neutral-700); padding-top: 2px; }
+.sg-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sg-name { font-size: 15px; font-weight: 600; }
+.sg-name mark { background: transparent; color: inherit; text-decoration: underline; text-decoration-color: var(--color-accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.sg-sub { font-size: 12px; color: var(--color-neutral-700); }
+.place-info { display: inline-flex; align-items: center; gap: 4px; flex-basis: 100%; font-size: 12px !important; color: var(--color-neutral-700) !important; }
+
 .row-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .row-label { font-size: 12px; color: var(--color-neutral-700); margin-right: 4px; }
 .vsep { width: 2px; height: 24px; background: var(--color-divider); margin: 0 8px; }

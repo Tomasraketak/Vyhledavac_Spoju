@@ -6,6 +6,7 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any
 
+from .. import stations
 from ..models import Fare, Journey, Leg, Stop
 
 
@@ -33,6 +34,9 @@ def leg_to_dict(leg: Leg) -> dict[str, Any]:
         "arr": _time(leg.arrival),
         "reservation": leg.reservation_required,
         "stops": [stop_to_dict(s) for s in leg.stops],
+        # kraj, integrovaný systém a tarifní zóna nástupní a výstupní stanice
+        "fromInfo": stations.info(leg.origin),
+        "toInfo": stations.info(leg.destination),
     }
 
 

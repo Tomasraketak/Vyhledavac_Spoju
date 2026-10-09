@@ -25,6 +25,7 @@ import logging
 import mimetypes
 import threading
 import time
+import urllib.parse
 import uuid
 import webbrowser
 from decimal import Decimal
@@ -33,6 +34,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .. import stations
 from ..browser import playwright_available
 from ..engine import SearchEngine
 from ..filters.base import FilterPipeline
@@ -341,6 +343,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(self.app.meta())
         if path == "/api/ping":
             return self._json({"ok": True})
+        if path == "/api/stations":
+            params = urllib.parse.parse_qs(self.path.partition("?")[2])
+            q = (params.get("q") or [""])[0][:80]
+            try:
+                limit = max(1, min(30, int((params.get("limit") or ["10"])[0])))
+            except ValueError:
+                limit = 10
+            return self._json({"q": q, "places": stations.suggest(q, limit)})
         if path.startswith("/api/search/") and path.endswith("/events"):
             session = self._session(path.split("/")[3])
             if session is None:
@@ -461,6 +471,8 @@ def main(argv: list[str] | None = None) -> None:
             webbrowser.open(url)
         return
 
+    # Databázi zastávek načíst hned – první písmeno v našeptávači pak nečeká.
+    threading.Thread(target=stations.database, daemon=True).start()
     app = WebApp()
     server = make_server(app, args.port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"

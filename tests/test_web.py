@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import threading
+import urllib.parse
 import urllib.request
 from decimal import Decimal
 
@@ -179,6 +180,23 @@ def test_static_page_and_meta(http):
     assert status == 200 and kind.startswith("text/html") and "Vyhledávač spojů" in body
     assert _get(http + "/app.js")[0] == 200
     assert json.loads(_get(http + "/api/meta")[2])["providers"][0]["name"] == "RegioJet"
+
+
+def test_station_suggestions(http):
+    status, kind, body = _get(http + "/api/stations?q=" + urllib.parse.quote("brno hl") + "&limit=5")
+    data = json.loads(body)
+    assert status == 200 and kind.startswith("application/json")
+    hit = next(p for p in data["places"] if p["name"] == "Brno hl. n.")
+    assert hit["kraj"] == "Jihomoravský kraj" and hit["ids"] == "IDS JMK" and hit["zones"] == ["100"]
+    assert len(data["places"]) <= 5
+    assert json.loads(_get(http + "/api/stations?q=")[2])["places"] == []
+
+
+def test_leg_carries_station_info():
+    journey = make_journey(origin="Praha hl.n.", destination="Brno hl.n.")
+    leg = journey_to_dict(journey, journey_key(journey))["legs"][0]
+    assert leg["fromInfo"]["ids"] == "PID" and leg["fromInfo"]["zones"] == ["P"]
+    assert leg["toInfo"]["kraj"] == "Jihomoravský kraj"
 
 
 def test_static_does_not_leave_its_folder(http):

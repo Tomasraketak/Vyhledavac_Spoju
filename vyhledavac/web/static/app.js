@@ -41,10 +41,15 @@
   const ALL_GROUPS = ['train', 'bus', 'city'];
   const RISKY_TRANSFER = 3;   // min – kratší přestup označíme jako riskantní
 
-  const STATIONS = ['Praha hl.n.', 'Praha-Smíchov', 'Praha, ÚAN Florenc', 'Brno hl.n.', 'Brno, ÚAN Zvonařka',
-    'Ostrava hl.n.', 'Olomouc hl.n.', 'Pardubice hl.n.', 'Plzeň hl.n.', 'České Budějovice', 'Liberec',
-    'Hradec Králové hl.n.', 'Zlín', 'Jihlava', 'Bratislava hl.st.', 'Košice', 'Žilina', 'Vídeň', 'Wien Hbf',
-    'Salzburg Hbf', 'Linz Hbf', 'Graz Hbf', 'Mnichov', 'Berlín', 'Drážďany', 'Budapešť', 'Krakov', 'Varšava'];
+  // Druh místa v našeptávači.
+  const PLACE_KIND = {
+    c: { icon: 'map-pin', name: 'obec' },
+    t: { icon: 'train-front', name: 'vlak' },
+    b: { icon: 'bus', name: 'autobus' },
+  };
+  const zonesText = z => !z || !z.length ? '' : (z.length === 1 ? `zóna ${z[0]}` : `zóny ${z.join(', ')}`);
+  // "Jihomoravský kraj · IDS JMK · zóna 100" – nebo stát u zahraničí.
+  const placeMeta = p => p ? (p.country ? [p.country] : [p.kraj, p.ids, zonesText(p.zones)]).filter(Boolean).join(' · ') : '';
 
   // ---- stav ----------------------------------------------------------------
   const today = new Date();
@@ -87,21 +92,148 @@
     document.querySelectorAll('.sf-label[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon, 13)));
     $('#swap-btn').innerHTML = icon('arrow-left-right', 18);
     $('#submit-btn').insertAdjacentHTML('beforeend', icon('arrow-right', 16));
-    fillStations();
-  }
-
-  function fillStations() {
-    const history = store.get('history', []);
-    const names = [...new Set([...history, ...STATIONS])];
-    $('#stanice').innerHTML = names.map(n => `<option value="${esc(n)}"></option>`).join('');
+    suggester(fFrom);
+    suggester(fTo);
   }
 
   function remember(from, to) {
     const history = store.get('history', []).filter(n => n !== from && n !== to);
     store.set('history', [from, to, ...history].slice(0, 20));
     store.set('last', { from, to });
-    fillStations();
   }
+
+  // ---- našeptávač zastávek ---------------------------------------------------
+  // Jeden seznam pod aktivním polem. Leží mimo formulář (ten má overflow:
+  // hidden), pozice se počítá z buňky pole.
+  const sugBox = document.createElement('div');
+  sugBox.className = 'suggest';
+  sugBox.id = 'suggest-list';
+  sugBox.setAttribute('role', 'listbox');
+  sugBox.hidden = true;
+  document.body.appendChild(sugBox);
+  const sug = { input: null, items: [], active: -1, seq: 0, timer: null };
+
+  function highlight(name, q) {
+    // Zvýraznit začátky slov, které odpovídají dotazu (bez ohledu na diakritiku).
+    const fold = t => t.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const words = fold(q).split(/[^a-z0-9]+/).filter(Boolean);
+    if (!words.length) return esc(name);
+    const folded = fold(name);
+    const marks = new Array(name.length).fill(false);
+    words.forEach(w => {
+      const re = new RegExp(`(^|[^a-z0-9])(${w})`, 'g');   // slova jsou jen [a-z0-9]
+      let m;
+      while ((m = re.exec(folded))) { const start = m.index + m[1].length; for (let i = start; i < start + w.length; i++) marks[i] = true; }
+    });
+    let out = '', on = false;
+    for (let i = 0; i < name.length; i++) {
+      if (marks[i] !== on) { out += marks[i] ? '<mark>' : '</mark>'; on = marks[i]; }
+      out += esc(name[i]);
+    }
+    return out + (on ? '</mark>' : '');
+  }
+
+  function placeSub(p) {
+    const parts = [PLACE_KIND[p.kind] ? PLACE_KIND[p.kind].name : ''];
+    if (p.obec && p.obec !== p.name) parts.push(p.obec);
+    if (p.okres && p.kind === 'c' && p.okres !== p.name && p.kraj !== 'Hlavní město Praha') parts.push(`okres ${p.okres}`);
+    parts.push(placeMeta(p));
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  function renderSuggest() {
+    const { input, items, active } = sug;
+    if (!input || !items.length || document.activeElement !== input) { closeSuggest(); return; }
+    const q = input.value;
+    sugBox.innerHTML = items.map((p, i) => {
+      if (p.history) {
+        return `<div class="sg-item" role="option" id="sg-${i}" data-i="${i}" aria-selected="${i === active}">
+          <span class="sg-icon">${icon('rotate-ccw', 16)}</span><span class="sg-text"><span class="sg-name">${esc(p.name)}</span><span class="sg-sub">nedávno hledané</span></span></div>`;
+      }
+      const k = PLACE_KIND[p.kind] || PLACE_KIND.c;
+      return `<div class="sg-item" role="option" id="sg-${i}" data-i="${i}" aria-selected="${i === active}">
+        <span class="sg-icon">${icon(k.icon, 16)}</span>
+        <span class="sg-text"><span class="sg-name">${highlight(p.name, q)}</span><span class="sg-sub">${esc(placeSub(p))}</span></span></div>`;
+    }).join('');
+    const cell = input.closest('.sf-cell') || input;
+    const r = cell.getBoundingClientRect();
+    sugBox.style.left = `${r.left + window.scrollX}px`;
+    sugBox.style.top = `${r.bottom + window.scrollY}px`;
+    sugBox.style.width = `${Math.max(r.width, 320)}px`;
+    sugBox.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    if (active >= 0) input.setAttribute('aria-activedescendant', `sg-${active}`);
+    else input.removeAttribute('aria-activedescendant');
+  }
+
+  function closeSuggest() {
+    sugBox.hidden = true;
+    if (sug.input) { sug.input.setAttribute('aria-expanded', 'false'); sug.input.removeAttribute('aria-activedescendant'); }
+    sug.items = []; sug.active = -1;
+  }
+
+  async function loadSuggest(input) {
+    const q = input.value.trim();
+    const seq = ++sug.seq;
+    if (!q) {
+      sug.items = store.get('history', []).slice(0, 8).map(name => ({ name, history: true }));
+      sug.active = -1; sug.input = input;
+      return renderSuggest();
+    }
+    try {
+      const res = await fetch(`/api/stations?q=${encodeURIComponent(q)}&limit=10`);
+      const data = await res.json();
+      if (seq !== sug.seq || sug.input !== input) return;      // mezitím psal dál
+      sug.items = data.places || [];
+      sug.active = -1;
+      renderSuggest();
+    } catch (e) { /* bez našeptávače se dá hledat taky */ }
+  }
+
+  function pickSuggest(i) {
+    const p = sug.items[i];
+    if (!p || !sug.input) return;
+    sug.input.value = p.name;
+    const next = sug.input === fFrom ? fTo : fDate;
+    closeSuggest();
+    next.focus();
+  }
+
+  function suggester(input) {
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-autocomplete', 'list');
+    input.setAttribute('aria-controls', 'suggest-list');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('spellcheck', 'false');
+    input.addEventListener('input', () => {
+      sug.input = input;
+      clearTimeout(sug.timer);
+      sug.timer = setTimeout(() => loadSuggest(input), 110);
+    });
+    input.addEventListener('focus', () => { sug.input = input; loadSuggest(input); });
+    input.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== input) closeSuggest(); }, 120));
+    input.addEventListener('keydown', ev => {
+      if (sugBox.hidden || sug.input !== input) {
+        if (ev.key === 'ArrowDown') { loadSuggest(input); ev.preventDefault(); }
+        return;
+      }
+      const n = sug.items.length;
+      if (ev.key === 'ArrowDown') { sug.active = (sug.active + 1) % n; renderSuggest(); ev.preventDefault(); }
+      else if (ev.key === 'ArrowUp') { sug.active = sug.active <= 0 ? n - 1 : sug.active - 1; renderSuggest(); ev.preventDefault(); }
+      else if (ev.key === 'Enter' && sug.active >= 0) { pickSuggest(sug.active); ev.preventDefault(); }
+      else if (ev.key === 'Escape') { closeSuggest(); ev.preventDefault(); }
+      else if (ev.key === 'Tab' && sug.active >= 0) { input.value = sug.items[sug.active].name; closeSuggest(); }
+    });
+  }
+
+  // mousedown místo click – jinak pole ztratí fokus dřív, než se výběr zapíše
+  sugBox.addEventListener('mousedown', ev => {
+    const item = ev.target.closest('.sg-item');
+    if (!item) return;
+    ev.preventDefault();
+    pickSuggest(Number(item.dataset.i));
+  });
+  window.addEventListener('resize', () => { if (!sugBox.hidden) renderSuggest(); });
 
   // ---- hledání -------------------------------------------------------------
   async function startSearch(ev) {
@@ -461,6 +593,12 @@
     </article>`;
   }
 
+  // Kraj · integrovaný systém · zóna stanice (z databáze zastávek).
+  function placeInfo(p) {
+    const text = placeMeta(p);
+    return text ? `<span class="place-info" title="${esc(p.idsName || p.country || '')}">${icon('map-pin', 12)}${esc(text)}</span>` : '';
+  }
+
   function journeyDetail(j) {
     const steps = [];
     j.legs.forEach((leg, i) => {
@@ -479,7 +617,7 @@
           <div class="step-time"><strong>${hhmm(leg.dep)}</strong></div>
           <div class="rail"><span class="node" style="border-color:${m.bg}"></span><span class="bar" style="background:${m.bg}"></span><span class="node" style="border-color:${m.bg}"></span></div>
           <div class="step-body">
-            <div class="step-place"><strong>${esc(leg.from)}</strong><span>${startPlat}</span></div>
+            <div class="step-place"><strong>${esc(leg.from)}</strong><span>${startPlat}</span>${placeInfo(leg.fromInfo)}</div>
             <div class="step-line"><span class="badge" style="background:${m.bg};color:${m.fg}">${icon(m.icon, 14)}${esc(legLabel(leg))}</span>
               <span class="meta">${esc(leg.carrier || j.provider)} · ${dur(minutes(leg.arr) - minutes(leg.dep))}</span>
               ${leg.reservation ? '<span class="tag tag-neutral">povinná místenka</span>' : ''}</div>
@@ -487,7 +625,7 @@
             ${on ? `<div class="stops">${mid.map(s => `<div><span>${hhmm(s.arr || s.dep)}</span><span>${esc(s.name)}</span></div>`).join('')}</div>` : ''}
           </div>
           <div class="step-arr"><strong>${hhmm(leg.arr)}</strong></div>
-          <div class="step-place" style="padding-bottom:6px"><strong>${esc(leg.to)}</strong><span>${endPlat}</span></div>
+          <div class="step-place" style="padding-bottom:6px"><strong>${esc(leg.to)}</strong><span>${endPlat}</span>${placeInfo(leg.toInfo)}</div>
         </div>`);
       }
       const next = j.legs[i + 1];
@@ -513,6 +651,10 @@
     const fareLabel = fare && fare.label !== 'od' ? fare.label : '';
     if (fare && (fare.tariff || fareLabel)) rows.push(['Tarif', [fareLabel, fare.tariff].filter(Boolean).join(' · ')]);
     if (j.walkMin) rows.push(['Přesuny pěšky', dur(j.walkMin)]);
+    const rides = j.legs.filter(l => l.mode !== 'walk');
+    const startInfo = (rides[0] || j.legs[0]).fromInfo, endInfo = (rides[rides.length - 1] || j.legs[j.legs.length - 1]).toInfo;
+    const zoneOf = p => p && p.zones && p.zones.length ? `${p.ids} ${p.zones.join(', ')}` : '';
+    if (zoneOf(startInfo) || zoneOf(endInfo)) rows.push(['Tarifní zóny', `${zoneOf(startInfo) || '?'} → ${zoneOf(endInfo) || '?'}`]);
     const segments = j.segments.length ? `<div class="segments"><div class="sec-title" style="margin:0">Jízdenky ke koupi</div>${j.segments.map((s, i) =>
       `<div>${i + 1}. ${esc(s.from)} → ${esc(s.to)} · ${esc(s.provider)}: <strong>${esc(s.priceLabel)}</strong>${s.link ? ` · <a href="${esc(s.link)}" target="_blank" rel="noopener">koupit</a>` : ''}</div>`).join('')}</div>` : '';
     const notes = j.notes.map(n => `<p class="note-warn">${esc(n)}</p>`).join('');

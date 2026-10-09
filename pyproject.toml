@@ -20,6 +20,9 @@ vyhledavac = "vyhledavac.cli:main"
 [tool.setuptools.packages.find]
 include = ["vyhledavac*"]
 
+[tool.setuptools.package-data]
+vyhledavac = ["data/*.json.gz", "web/static/*"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 testpaths = ["tests"]
