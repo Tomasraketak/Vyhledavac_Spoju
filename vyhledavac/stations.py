@@ -193,6 +193,19 @@ def place(name: str) -> Place | None:
     return db.info(name) if db and name else None
 
 
+def rail_place(name: str) -> Place | None:
+    """Jako ``place``, ale u shody jména dá přednost železniční stanici před obcí.
+
+    „Beroun“ je obec i nádraží – pro výpočet zón vlaku chceme nádraží.
+    """
+    db = database()
+    if db is None or not name:
+        return None
+    hits = db.exact.get(normalize(name), [])
+    trains = [p for p in hits if p.kind == "t"]
+    return max(trains, key=lambda p: p.score) if trains else db.info(name)
+
+
 def is_domestic(*names: str) -> bool:
     """Leží všechna místa v Česku? (Neznámé místo = nevíme, tedy ne.)"""
     found = [place(n) for n in names]

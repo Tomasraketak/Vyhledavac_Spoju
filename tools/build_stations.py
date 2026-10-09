@@ -98,7 +98,21 @@ IDS = [
     ("ODIS", "Ostravský dopravní integrovaný systém"),
 ]
 KRAJ_IDS = [0, 0, 1, 2, 3, 4, 5, 6, 6, 7, 8, 9, 10, 11]
-PID, IDSJK, JMK = 0, 1, 8
+PID, IDSJK, IDPK, JMK = 0, 1, 2, 8
+PLZENSKY = 3      # index kraje
+
+
+def idpk_zones(zones: set[str], okres: str) -> str:
+    """Pásma IDPK z pásem linek v JDF.
+
+    IDPK píše pásma třímístně s nulou na začátku (001 Plzeň, 052 Horažďovice…).
+    Kódy 1xx se kryjí s IDESKA (100 České Budějovice), proto se berou jen
+    u zastávek v Plzeňském kraji; vyšší kódy jsou zóny jiných systémů.
+    """
+    plzen = OKRESY.get(okres, ("", -1))[1] == PLZENSKY
+    keep = sorted(z for z in zones if re.fullmatch(r"0\d\d", z)
+                  or (plzen and re.fullmatch(r"1\d\d", z) and int(z) <= 191))
+    return ",".join(keep)
 
 # Okresy podle kódů CIS JŘ: kód -> (název, kraj).
 OKRESY = {
@@ -226,8 +240,17 @@ def parse_jdf(path: Path) -> dict[tuple[str, str], dict]:
                     continue
                 name = bus_display_name(obec, cast, misto)
                 key = (name, okres)
-                stops.setdefault(key, {"obec": obec, "okres": okres, "departures": 0})
+                stops.setdefault(key, {"obec": obec, "okres": okres, "departures": 0,
+                                       "zones": set()})
                 local[number] = key
+            # Tarifní pásma integrovaných linek (IDPK, IDESKA, PID…) ze Zaslinky.txt:
+            # linka, tarifní číslo, pásma ("052,053"), číslo zastávky, …
+            zaslinky = _find(files, "zaslinky.txt")
+            if zaslinky:
+                for row in _jdf_rows(inner.read(zaslinky)):
+                    if len(row) >= 4 and row[2] and row[3] in local:
+                        stops[local[row[3]]]["zones"].update(
+                            z.strip() for z in row[2].split(",") if z.strip())
             if not zasspoje:
                 continue
             for row in _jdf_rows(inner.read(zasspoje)):
@@ -382,6 +405,46 @@ IDS_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_ideska.json.gz"
 RAIL_OUTPUT = ROOT / "vyhledavac" / "data" / "rail.json.gz"
 #: Profily cestujících, jejichž jednotlivé jízdné se počítá (plné, 6–18, student, 65+).
 IDESKA_PROFILES = ("1", "2", "3", "50")
+
+
+PID_TARIFF = "https://pid.cz/jizdne-a-tarif/"
+PID_OUTPUT = ROOT / "vyhledavac" / "data" / "ids_pid.json.gz"
+
+
+def extract_pid_tariff(path: Path) -> dict:
+    """Ceník jednotlivého jízdného PID ze stránky pid.cz/jizdne-a-tarif.
+
+    Tabulka „Jednotlivé jízdné v regionu“: počet pásem, platnost a ceny
+    plnocenné / zvýhodněné / zvláštní, vždy v aplikaci PID Lítačka a na papír.
+    Plus jízdenky jen pro Prahu (30 a 90 minut).
+    """
+    import html as html_mod
+
+    raw = path.read_text("utf-8")
+    raw = re.sub(r"<(script|style)\b.*?</\1>", "", raw, flags=re.S)
+    text = html_mod.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " | ", raw)))
+    text = re.sub(r"(\|\s*)+", "| ", text.replace("\xa0", " "))
+
+    def kc(value: str) -> int | None:
+        m = re.match(r"\s*(\d[\d ]*)\s*Kč", value)
+        return int(m.group(1).replace(" ", "")) if m else None
+
+    region = text.find("regionu | Plnocenné jízdné | Zvýhodněné jízdné")
+    zones: dict[str, dict] = {}
+    for m in re.finditer(r"\b(\d+) pás(?:ma|em) \| (\d+) min\. \|((?: [^|]+ \|){6})", text[region:region + 6000]):
+        cells = [c.strip() for c in m.group(3).split("|") if c.strip()]
+        full_app, full_paper, red_app, red_paper = (kc(c) for c in cells[:4])
+        zones[m.group(1)] = {"minutes": int(m.group(2)), "full": full_app or full_paper,
+                             "reduced": red_app or red_paper}
+    praha: dict[str, dict] = {}
+    for m in re.finditer(r"\b(30|90) min\.\* \|((?: [^|]+ \|){4})", text[:max(region, 0)]):
+        cells = [c.strip() for c in m.group(2).split("|") if c.strip()]
+        praha[m.group(1)] = {"minutes": int(m.group(1)), "full": kc(cells[0]), "reduced": kc(cells[2])}
+    if len(zones) < 10 or len(praha) < 2:
+        raise SystemExit(f"Ceník PID se nepodařilo přečíst (pásma {len(zones)}, Praha {len(praha)}) – "
+                         "stránka pid.cz se změnila, upravte extract_pid_tariff().")
+    return {"source": PID_TARIFF, "generated": dt.date.today().isoformat(),
+            "zones": zones, "praha": praha}
 
 
 def extract_ideska_tariff(path: Path) -> tuple[dict, dict[str, str]]:
@@ -594,6 +657,8 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
     jmk = fetch(cache, "jmk_gtfs.zip", URLS["jmk_gtfs.zip"], refresh=refresh)
     ideska = fetch(cache, "ideska_zones.xml", IDESKA_ZONES, refresh=refresh)
     ideska_json = fetch(cache, "jikord.json", IDESKA_TARIFF, refresh=refresh)
+    pid_page = fetch(cache, "pid_tarif.html", PID_TARIFF, refresh=refresh)
+    pid_tariff = extract_pid_tariff(pid_page)
     osm_jck = fetch_overpass(cache, "osm_jck.json", OVERPASS_JCK, refresh=refresh)
     osm = fetch_overpass(cache, "osm_rail.json", OVERPASS_QUERY, refresh=refresh)
     osm_places = fetch_overpass(cache, "osm_places.json", OVERPASS_PLACES, refresh=refresh)
@@ -677,6 +742,11 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
         spelled = full + name[len(s["obec"]):] if name.startswith(s["obec"]) else name
         ids, zones = zone_for(spelled, full, okres, kraj)
         systems = {ids: zones} if zones else {}
+        idpk = idpk_zones(s.get("zones", set()), okres)
+        if idpk:
+            systems[IDPK] = idpk
+            if ids == IDPK and not zones:
+                zones = idpk
         ideska_zone = ideska_stops.get(normalize(spelled)) or ideska_stops.get(normalize(name))
         if ideska_zone:
             systems[IDSJK] = ideska_zone
@@ -684,6 +754,11 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                        "town": s["obec"], "alt": alt_for(name, s["obec"], full),
                        "kraj": kraj, "ids": ids, "zones": _with_prague(zones, kraj),
                        "score": s["departures"]})
+
+    idpk_by_town: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    for p in places:
+        if IDPK in p["systems"]:
+            idpk_by_town[(p["town"], p["okres"])].append((p["name"], p["systems"][IDPK]))
 
     # ---- vlakové stanice (vlak váží víc než autobus – jezdí dál a vozí víc lidí)
     for code, st in trains.items():
@@ -734,6 +809,15 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                 systems.setdefault(JMK, near_jmk)
         if code in pid_codes:
             systems.setdefault(PID, pid_codes[code])
+        if town and okres:
+            # Pásmo IDPK nádraží = pásmo autobusové zastávky u nádraží (JDF), jinak obce.
+            candidates = idpk_by_town.get((town, okres), [])
+            rail_like = [z for n, z in candidates if re.search(r"žel|nádr", n)]
+            pick = Counter(rail_like or [z for _, z in candidates]).most_common(1)
+            if pick:
+                systems[IDPK] = pick[0][0]
+        if not zones and ids in systems:
+            zones = systems[ids]           # hlavní systém kraje (IDPK) bez vlastní zóny
         places.append({"name": st["name"], "kind": "t", "obec": full, "okres": okres,
                        "systems": systems, "code": code,
                        "town": town or "", "alt": alt,
@@ -824,6 +908,7 @@ def build(cache: Path, *, refresh: bool, year: int) -> dict:
                     p["alt"], ";".join(f"{i}:{z}" for i, z in sorted(p.get("systems", {}).items()))]
                    for p in places],
         "_ideska": ideska_tariff,
+        "_pid": pid_tariff,
         "_rail": rail_graph(places),
     }
 
@@ -850,7 +935,8 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     data = build(args.cache, refresh=args.refresh, year=args.year)
-    for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (RAIL_OUTPUT, data.pop("_rail"))):
+    for target, payload in ((IDS_OUTPUT, data.pop("_ideska")), (PID_OUTPUT, data.pop("_pid")),
+                            (RAIL_OUTPUT, data.pop("_rail"))):
         with gzip.GzipFile(target, "wb", compresslevel=9, mtime=0) as fh:
             fh.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
         print(f"  {target.name}: {target.stat().st_size // 1024} kB")

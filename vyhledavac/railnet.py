@@ -70,7 +70,18 @@ def station_for(name: str) -> int | None:
     return best
 
 
-def route(origin: str, destination: str) -> list[str]:
+def physical_route(origin: str, destination: str) -> list[str]:
+    """Trasa po koleji přes všechny stanice, i ty, kde rychlík nestaví.
+
+    Váha úseku je druhá mocnina jízdní doby: dlouhé skoky rychlíků
+    (Strakonice – Horažďovice bez zastavení) tak prohrají s řetězem krátkých
+    úseků osobních vlaků po téže trati. Potřeba pro tarify, které počítají
+    všechny projeté zóny (IDPK).
+    """
+    return route(origin, destination, power=2)
+
+
+def route(origin: str, destination: str, *, power: int = 1) -> list[str]:
     """Nejrychlejší trasa mezi dvěma místy – seznam stanic.
 
     Váha úseku je nejkratší jízdní doba vlaku z jízdního řádu, takže trasa
@@ -92,10 +103,11 @@ def route(origin: str, destination: str) -> list[str]:
         if d > dist.get(node, 1 << 30):
             continue
         for nxt, minutes in adjacent[node]:
-            if d + minutes < dist.get(nxt, 1 << 30):
-                dist[nxt] = d + minutes
+            cost = d + minutes ** power
+            if cost < dist.get(nxt, 1 << 30):
+                dist[nxt] = cost
                 prev[nxt] = node
-                heapq.heappush(queue, (d + minutes, nxt))
+                heapq.heappush(queue, (cost, nxt))
     if goal not in dist:
         return []
     path = [goal]

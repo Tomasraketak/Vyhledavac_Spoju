@@ -1,20 +1,21 @@
-"""Jízdenka integrovaného systému místo jízdenky ČD – celá cesta, nebo její část.
+"""Jízdenky integrovaných systémů místo jízdenky ČD – celá cesta, nebo její části.
 
-Na regionálních vlacích ČD platí i jízdenky IDS a bývají až o polovinu
-levnější (ČD je ostatně v e-shopu nabízí jako jednu z variant ceny).
-Hack pro každý nalezený vlak ČD zjistí jeho skutečnou trasu a:
+Na regionálních vlacích ČD platí i jízdenky IDS a bývají výrazně
+levnější. (ČD je prodávají jen v aplikaci Můj vlak – webový e-shop je
+nenabízí, proto se ceny IDS počítají z tarifů systémů, viz ``vyhledavac.ids``.)
 
-* **celá cesta v IDESKA** -> spočítá cenu jízdenky IDESKA a nabídne ji,
-  je-li levnější;
-* **cesta z IDESKA ven** (Třeboň -> Havlíčkův Brod) -> najde poslední
-  stanici, kde ještě platí IDESKA (díky přesahům třeba Počátky-Žirovnice
-  na Vysočině), na první úsek spočítá jízdenku IDESKA a na zbytek se zeptá
-  ČD (stejný vlak, jen od té stanice). Součet porovná s jednou jízdenkou;
-* **cesta do IDESKA** obráceně.
+Hack u každého vlaku ČD zjistí skutečnou trasu (zastávky a časy z cd.cz,
+jinak síť z jízdního řádu) a zkusí:
 
-Cestující nikde nepřestupuje – jen má dvě jízdenky. Trasu vlaku i časy
-bere z cd.cz (``cdtrain``), jinak ze sítě sestavené z jízdního řádu
-(``railnet``).
+1. **celou cestu na jízdenku jednoho systému** (IDESKA, PID);
+2. **dva systémy za sebou** – lom ve stanici, která patří do obou
+   (Tábor → Praha: IDESKA do Votic, dál PID);
+3. **systém + ČD** – lom v poslední stanici systému (Třeboň → Havlíčkův
+   Brod: IDESKA do Počátek-Žirovnice, zbytek u ČD), nebo obráceně.
+
+Vybere nejlevnější variantu. Cestující nikde nepřestupuje – jen má víc
+jízdenek. Na ČD se pro lom ptá nejvýš jednou na každou stanici lomu (hledání
+přes prohlížeč je pomalé), výsledek poslouží všem vlakům najednou.
 """
 
 from __future__ import annotations
@@ -23,14 +24,14 @@ import asyncio
 import datetime as dt
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Sequence
 
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, ideska
+from ..ids import IdsFare, ideska, idpk, pid
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import normalize
 from ..registry import HACKS
@@ -38,6 +39,13 @@ from .base import SearchFn, TravelHack
 
 log = logging.getLogger(__name__)
 
+#: Systémy, jejichž tarif umíme spočítat.
+SYSTEMS = {ideska.SYSTEM: ideska, pid.SYSTEM: pid, idpk.SYSTEM: idpk}
+LINKS = {ideska.SYSTEM: ideska.URL, pid.SYSTEM: pid.URL, idpk.SYSTEM: idpk.URL}
+#: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (IDPK –
+#: pásmo nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
+#: jakýchkoli údajů tu trasu systému nepřeruší.
+LENIENT = {idpk.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
@@ -46,14 +54,24 @@ MAX_JOURNEYS = 8
 
 @dataclass
 class RouteStop:
-    name: str
+    name: str                       # jak ho píše ČD (pro dotaz na úsek)
     time: dt.datetime | None
-    zones: tuple[str, ...]          # zóny IDESKA, prázdné = mimo systém
+    systems: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    kraj: str = ""
+    node: str = ""                  # jméno v železniční síti (pro projeté stanice)
 
 
-def _ideska_zones(name: str) -> tuple[str, ...]:
-    place = stations.place(name)
-    return place.systems.get(ideska.SYSTEM, ()) if place else ()
+@dataclass
+class Plan:
+    """Rozpis jízdenek pro jeden vlak."""
+    total: Decimal
+    pieces: list[tuple[str, int, int, IdsFare | Journey]]   # (systém/"ČD", od, do, cena)
+
+
+def _stop(name: str, display: str | None = None, time: dt.datetime | None = None) -> RouteStop:
+    place = stations.rail_place(name)
+    systems = {k: v for k, v in (place.systems if place else {}).items() if k in SYSTEMS}
+    return RouteStop(display or name, time, systems, place.kraj if place else "", name)
 
 
 def eligible(journey: Journey) -> bool:
@@ -74,10 +92,16 @@ def eligible(journey: Journey) -> bool:
     return True
 
 
+def _minutes(a: dt.datetime | None, b: dt.datetime | None, fallback: float) -> float:
+    if a is None or b is None:
+        return fallback          # bez časů počítáme s celou cestou (bezpečně)
+    return max(0.0, (b - a).total_seconds() / 60)
+
+
 @HACKS.register()
 class IdsTicketHack(TravelHack):
     name = "ids_ticket"
-    label = "Jízdenka IDS místo ČD (IDESKA, i lom na hranici systému)"
+    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, lom na hranici systémů)"
     default_min_saving_pct = 3.0
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
@@ -88,153 +112,224 @@ class IdsTicketHack(TravelHack):
         base = base[: int(self.options.get("max_journeys", MAX_JOURNEYS))]
         if not base:
             return []
-        fallback = [RouteStop(n, None, _ideska_zones(n))
-                    for n in railnet.route(query.origin, query.destination)]
+        fallback = [_stop(n) for n in railnet.route(query.origin, query.destination)]
         async with httpx.AsyncClient() as client:
             routes = await asyncio.gather(*(self._route(client, query, j) for j in base))
+        routes = [r or fallback for r in routes]
+
+        # Úseky, na které se musí zeptat ČD – jedna otázka na stanici lomu.
+        tails: dict[str, list[Journey]] = {}
+        heads: dict[str, list[Journey]] = {}
+        for journey, route in zip(base, routes):
+            for system in SYSTEMS:
+                k = self._last_inside(route, system)
+                if k is not None and 0 < k < len(route) - 1:
+                    tails.setdefault(route[k].name, []).append(journey)
+                k = self._first_inside(route, system)
+                if k is not None and 0 < k < len(route) - 1:
+                    heads.setdefault(route[k].name, []).append(journey)
+        earliest = base[0].departure - dt.timedelta(minutes=2)
+        cd_tails = {name: await search(query.leg_query(name, query.destination, earliest),
+                                       allow_browser=True) for name in list(tails)[:2]}
+        cd_heads = {name: await search(query.leg_query(query.origin, name, earliest),
+                                       allow_browser=True) for name in list(heads)[:2]}
 
         found: list[Journey] = []
         for journey, route in zip(base, routes):
-            route = route or fallback
-            if len(route) < 2 or not any(stop.zones for stop in route):
+            if len(route) < 2:
                 continue
             try:
-                hacked = await self._evaluate(query, journey, route, search)
+                plan = self._best_plan(query, journey, route, cd_tails, cd_heads)
             except Exception:
                 log.exception("ids_ticket: vyhodnocení spoje selhalo")
                 continue
-            if hacked is not None:
-                found.append(hacked)
+            if plan is not None and self.is_worth_it(plan.total, journey.price):
+                found.append(self._result(journey, route, plan))
         return found
 
     # ---- trasa vlaku ------------------------------------------------------------
     async def _route(self, client: httpx.AsyncClient, query: SearchQuery,
                      journey: Journey) -> list[RouteStop]:
-        """Zastávky vlaku od nástupu do výstupu se zónami IDESKA (jen přímé vlaky)."""
+        """Zastávky vlaku od nástupu do výstupu se systémy (jen přímé vlaky)."""
         rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
         if len(rides) != 1:
             return []
-        leg = rides[0]
         stops = await cdtrain.train_stops(
-            client, leg.line, journey.departure, journey.arrival,
+            client, rides[0].line, journey.departure, journey.arrival,
             railnet.station_code(query.origin), railnet.station_code(query.destination))
-        if not stops:
-            return []
-        # výřez trasy mezi nástupem a výstupem podle časů
-        start = next((i for i, s in enumerate(stops)
-                      if s.departure and abs((s.departure - journey.departure).total_seconds()) <= 120), None)
-        end = next((i for i, s in enumerate(stops)
-                    if s.arrival and abs((s.arrival - journey.arrival).total_seconds()) <= 120), None)
+        start = next((i for i, s in enumerate(stops) if _close(s.departure, journey.departure, 120)), None)
+        end = next((i for i, s in enumerate(stops) if _close(s.arrival, journey.arrival, 120)), None)
         if start is None or end is None or end <= start:
             return []     # vlak nejede celou cestu (přestup) – použije se síť
         route = []
         for i, s in enumerate(stops[start:end + 1]):
-            name = railnet.name_for_code(s.code) or s.name
-            time = s.departure if i == 0 else s.arrival or s.departure
-            route.append(RouteStop(s.name, time, _ideska_zones(name)))
+            ours = railnet.name_for_code(s.code) or s.name
+            route.append(_stop(ours, s.name, s.departure if i == 0 else s.arrival or s.departure))
         return route
 
-    # ---- vyhodnocení ------------------------------------------------------------
-    async def _evaluate(self, query: SearchQuery, journey: Journey, route: list[RouteStop],
-                        search: SearchFn) -> Journey | None:
-        inside = [bool(stop.zones) for stop in route]
-        passenger = query.lead
-        baseline = journey.price
+    # ---- plánování ----------------------------------------------------------------
+    @staticmethod
+    def _inside(stop: RouteStop, system: str) -> bool:
+        return system in stop.systems or (system in LENIENT and not stop.systems)
 
-        if all(inside):
-            minutes = journey.duration.total_seconds() / 60
-            fare = ideska.best_between(route[0].zones, route[-1].zones, passenger, minutes)
-            if fare is None or not self.is_worth_it(fare.price, baseline):
-                return None
-            segment = _ids_segment(journey, route[0].name, route[-1].name,
-                                   journey.departure, journey.arrival, fare)
-            note = (f"🎫 Na celou cestu stačí jízdenka {fare.system} ({fare.name}, zóny "
-                    f"{_zones(fare)}) za {fare.price:.0f} Kč místo {baseline:.0f} Kč u ČD – "
-                    f"ušetříte {baseline - fare.price:.0f} Kč. Platí v regionálních vlacích "
-                    f"ČD (Os, Sp, R), koupíte ji u průvodčího nebo v aplikaci IDS JK.")
-            return _result(journey, [segment], fare.price, [note], f"{fare.system} místo ČD")
-
-        if inside[0]:
-            k = next(i for i, ok in enumerate(inside) if not ok) - 1
-            if k <= 0:
-                return None
-            split = route[k]
-            rest = await search(query.leg_query(split.name, query.destination,
-                                                (split.time or journey.departure) - dt.timedelta(minutes=2)),
-                                allow_browser=True)
-            other = _same_train_tail(rest, journey, split.time)
-            if other is None:
-                return None
-            minutes = (other.departure - journey.departure).total_seconds() / 60
-            fare = ideska.best_between(route[0].zones, split.zones, passenger, minutes)
-            if fare is None or other.price is None:
-                return None
-            first = _ids_segment(journey, route[0].name, split.name,
-                                 journey.departure, other.departure, fare)
-            return self._split_result(journey, [first, other], fare, other, split.name)
-
-        if inside[-1]:
-            k = max(i for i, ok in enumerate(inside) if not ok) + 1
-            if k >= len(route) - 1:
-                return None
-            split = route[k]
-            head = await search(query.leg_query(query.origin, split.name,
-                                                journey.departure - dt.timedelta(minutes=2)),
-                                allow_browser=True)
-            other = _same_train_head(head, journey, split.time)
-            if other is None:
-                return None
-            minutes = (journey.arrival - other.arrival).total_seconds() / 60
-            fare = ideska.best_between(split.zones, route[-1].zones, passenger, minutes)
-            if fare is None or other.price is None:
-                return None
-            second = _ids_segment(journey, split.name, route[-1].name,
-                                  other.arrival, journey.arrival, fare)
-            return self._split_result(journey, [other, second], fare, other, split.name)
-        return None
-
-    def _split_result(self, journey: Journey, segments: list[Journey], fare: IdsFare,
-                      other: Journey, split: str) -> Journey | None:
-        total = fare.price + other.price
-        baseline = journey.price
-        if not self.is_worth_it(total, baseline):
+    @classmethod
+    def _last_inside(cls, route: list[RouteStop], system: str) -> int | None:
+        if system not in route[0].systems:
             return None
-        parts = " + ".join(
-            f"{s.origin} → {s.destination} ({s.provider}) {s.price:.0f} Kč" for s in segments)
-        note = (f"✂️ Nepřestupujete – stejný vlak, jen dvě jízdenky: {parts}. "
-                f"Celkem {total:.0f} Kč místo {baseline:.0f} Kč u ČD na celou cestu "
-                f"– ušetříte {baseline - total:.0f} Kč. Jízdenka {fare.system} "
-                f"({fare.name}, zóny {_zones(fare)}) platí až do stanice {split}.")
-        return _result(journey, segments, total, [note], f"{fare.system} + {other.provider}")
+        k = 0
+        while k + 1 < len(route) and cls._inside(route[k + 1], system):
+            k += 1
+        while k > 0 and system not in route[k].systems:
+            k -= 1             # lom jen ve stanici se známou zónou
+        return k
+
+    @classmethod
+    def _first_inside(cls, route: list[RouteStop], system: str) -> int | None:
+        if system not in route[-1].systems:
+            return None
+        k = len(route) - 1
+        while k - 1 >= 0 and cls._inside(route[k - 1], system):
+            k -= 1
+        while k < len(route) - 1 and system not in route[k].systems:
+            k += 1
+        return k
+
+    def _ids_fare(self, query: SearchQuery, route: list[RouteStop], system: str,
+                  i: int, j: int, minutes: float) -> IdsFare | None:
+        part = route[i:j + 1]
+        if system not in part[0].systems or system not in part[-1].systems:
+            return None
+        if any(not self._inside(s, system) for s in part):
+            return None
+        if system == pid.SYSTEM and not any(s.kraj in pid.HOME_REGIONS for s in part):
+            return None        # PID neplatí na cesty jen po jiném kraji
+        module = SYSTEMS[system]
+        if hasattr(module, "best_for_route"):        # cena podle všech projetých zón
+            return module.best_for_route(_passed_zones(part, system), query.lead, minutes)
+        return module.best_between(route[i].systems[system], route[j].systems[system],
+                                   query.lead, minutes)
+
+    def _best_plan(self, query: SearchQuery, journey: Journey, route: list[RouteStop],
+                   cd_tails: dict[str, list[Journey]],
+                   cd_heads: dict[str, list[Journey]]) -> Plan | None:
+        n = len(route) - 1
+        whole = journey.duration.total_seconds() / 60
+        plans: list[Plan] = []
+
+        def ids(system: str, i: int, j: int, a=None, b=None) -> IdsFare | None:
+            a = a if a is not None else (journey.departure if i == 0 else route[i].time)
+            b = b if b is not None else (journey.arrival if j == n else route[j].time)
+            return self._ids_fare(query, route, system, i, j, _minutes(a, b, whole))
+
+        # 1) celá cesta v jednom systému
+        for system in SYSTEMS:
+            fare = ids(system, 0, n)
+            if fare is not None:
+                plans.append(Plan(fare.price, [(system, 0, n, fare)]))
+
+        # 2) dva systémy za sebou, lom ve stanici, která patří do obou
+        for first in SYSTEMS:
+            for second in SYSTEMS:
+                if first == second:
+                    continue
+                for k in range(1, n):
+                    if first in route[k].systems and second in route[k].systems:
+                        a, b = ids(first, 0, k), ids(second, k, n)
+                        if a is not None and b is not None:
+                            plans.append(Plan(a.price + b.price, [(first, 0, k, a), (second, k, n, b)]))
+
+        # 3) systém od začátku, zbytek u ČD
+        for system in SYSTEMS:
+            k = self._last_inside(route, system)
+            if k is None or not 0 < k < n:
+                continue
+            other = _same_train_tail(cd_tails.get(route[k].name, ()), journey, route[k].time)
+            if other is None:
+                continue
+            fare = ids(system, 0, k, b=other.departure)
+            if fare is not None:
+                plans.append(Plan(fare.price + other.price, [(system, 0, k, fare), ("ČD", k, n, other)]))
+
+        # 4) začátek u ČD, dál systém
+        for system in SYSTEMS:
+            k = self._first_inside(route, system)
+            if k is None or not 0 < k < n:
+                continue
+            other = _same_train_head(cd_heads.get(route[k].name, ()), journey, route[k].time)
+            if other is None:
+                continue
+            fare = ids(system, k, n, a=other.arrival)
+            if fare is not None:
+                plans.append(Plan(fare.price + other.price, [("ČD", 0, k, other), (system, k, n, fare)]))
+
+        return min(plans, key=lambda p: p.total, default=None)
+
+    # ---- výsledek -------------------------------------------------------------------
+    def _result(self, journey: Journey, route: list[RouteStop], plan: Plan) -> Journey:
+        segments: list[Journey] = []
+        lines: list[str] = []
+        for system, i, j, price in plan.pieces:
+            origin, destination = route[i].name, route[j].name
+            if isinstance(price, Journey):
+                segment = price
+                lines.append(f"{origin} → {destination}: jízdenka ČD {segment.price:.0f} Kč")
+            else:
+                segment = _ids_segment(journey, origin, destination, route[i].time, route[j].time,
+                                       price)
+                lines.append(f"{origin} → {destination}: jízdenka {system} ({price.name}, "
+                             f"zóny {_zones(price)}) {price.price:.0f} Kč")
+            segments.append(segment)
+        saving = journey.price - plan.total
+        if len(segments) == 1:
+            fare = plan.pieces[0][3]
+            note = (f"🎫 Na celou cestu stačí jízdenka {fare.system} ({fare.name}, zóny "
+                    f"{_zones(fare)}) za {plan.total:.0f} Kč místo {journey.price:.0f} Kč u ČD – "
+                    f"ušetříte {saving:.0f} Kč.")
+        else:
+            note = (f"✂️ Nepřestupujete – stejný vlak, jen {len(segments)} jízdenky: "
+                    + "; ".join(lines) + f". Celkem {plan.total:.0f} Kč místo "
+                    f"{journey.price:.0f} Kč za jednu jízdenku ČD – ušetříte {saving:.0f} Kč.")
+        notes = [note, "Jízdenky IDS platí v regionálních vlacích ČD (Os, Sp, R) zařazených do "
+                       "systému; koupíte je v aplikaci systému, v aplikaci ČD Můj vlak nebo u průvodčího."]
+        label = " + ".join(dict.fromkeys(p[0] if p[0] != "ČD" else "ČD" for p in plan.pieces))
+        return Journey(
+            provider=label, legs=list(journey.legs),
+            fares=[Fare(amount=plan.total, currency="CZK", amount_czk=plan.total,
+                        label="součet jízdenek" if len(segments) > 1 else label,
+                        tariff=" + ".join(s.fares[0].tariff or s.provider for s in segments if s.fares))],
+            fare_status=FareStatus.PRICED, notes=notes, segments=segments,
+            deep_link=journey.deep_link,
+        )
 
 
 # ---- pomůcky ---------------------------------------------------------------------
+def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:
+    """Zóny všech stanic, kterými vlak projede – i těch, kde nestaví."""
+    zones: list[tuple[str, ...]] = [part[0].systems.get(system, ())]
+    for a, b in zip(part, part[1:]):
+        between = railnet.physical_route(a.node or a.name, b.node or b.name)[1:-1]
+        for name in between:
+            place = stations.rail_place(name)
+            zones.append(place.systems.get(system, ()) if place else ())
+        zones.append(b.systems.get(system, ()))
+    return zones
+
+
 def _zones(fare: IdsFare) -> str:
     return fare.zone_from if fare.zone_from == fare.zone_to else f"{fare.zone_from}→{fare.zone_to}"
 
 
-def _ids_segment(journey: Journey, origin: str, destination: str, departure: dt.datetime,
-                 arrival: dt.datetime, fare: IdsFare) -> Journey:
+def _ids_segment(journey: Journey, origin: str, destination: str, departure: dt.datetime | None,
+                 arrival: dt.datetime | None, fare: IdsFare) -> Journey:
     first = next((leg for leg in journey.legs if leg.mode is not Mode.WALK), journey.legs[0])
-    leg = Leg(origin=origin, destination=destination, departure=departure, arrival=arrival,
+    leg = Leg(origin=origin, destination=destination,
+              departure=departure or journey.departure, arrival=arrival or journey.arrival,
               mode=first.mode, carrier=first.carrier, line=first.line, stops=[])
     return Journey(
         provider=fare.system, legs=[leg],
         fares=[Fare(amount=fare.price, currency="CZK", amount_czk=fare.price,
                     label=fare.system, tariff=f"{fare.name}, zóny {_zones(fare)}")],
-        fare_status=FareStatus.PRICED, deep_link=ideska.URL,
-    )
-
-
-def _result(journey: Journey, segments: list[Journey], total: Decimal, notes: list[str],
-            label: str) -> Journey:
-    return Journey(
-        provider=label, legs=list(journey.legs),
-        fares=[Fare(amount=total, currency="CZK", amount_czk=total,
-                    label="součet jízdenek" if len(segments) > 1 else segments[0].provider,
-                    tariff=" + ".join(s.fares[0].tariff or s.provider for s in segments if s.fares))],
-        fare_status=FareStatus.PRICED, notes=notes, segments=segments,
-        deep_link=journey.deep_link,
+        fare_status=FareStatus.PRICED, deep_link=LINKS.get(fare.system),
     )
 
 

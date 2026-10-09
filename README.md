@@ -688,28 +688,36 @@ levnější; vystoupíte dřív. Nabízí se jen když vlak ve vašem cíli skut
 staví a nejde o spoj s povinnou místenkou. Výsledek vždy nese varování –
 zbytek jízdenky propadá a někteří dopravci to v podmínkách zakazují.
 
-**`ids_ticket` – jízdenka integrovaného systému místo ČD.** Na regionálních
-vlacích ČD (Os, Sp, R) platí i jízdenky IDS a bývají výrazně levnější. Hack
-u každého vlaku ČD zjistí skutečnou trasu (zastávky a časy z detailu vlaku
-na cd.cz, jinak ze sítě sestavené z celostátního jízdního řádu) a:
+**`ids_ticket` – jízdenky integrovaných systémů místo ČD.** Na regionálních
+vlacích ČD (Os, Sp, R) platí i jízdenky IDS a bývají výrazně levnější. ČD je
+prodávají jen v aplikaci Můj vlak – webový e-shop je nenabízí (ověřeno), proto
+se ceny IDS počítají z tarifů systémů offline. Hack u každého vlaku ČD zjistí
+skutečnou trasu (zastávky a časy z detailu vlaku na cd.cz, jinak ze sítě
+sestavené z celostátního jízdního řádu) a vybere nejlevnější z variant:
 
-- celá cesta v systému → nabídne jízdenku IDS, je-li levnější;
-- cesta ze systému ven nebo dovnitř → rozdělí ji v **poslední stanici, kde
-  systém ještě platí** (přesahy do sousedních krajů jsou v datech: IDESKA
-  třeba do Počátek-Žirovnice, Benešova u Prahy, Nepomuku, Horažďovic),
-  na tu část spočítá jízdenku IDS a na zbytek se zeptá ČD. Vypíše, že se
-  nepřestupuje, jen kupují dvě jízdenky, kolik stojí každá a o kolik je
-  to levnější než jedna jízdenka ČD.
+1. celá cesta na jízdenku jednoho systému;
+2. dva systémy za sebou s lomem ve stanici, která patří do obou
+   (České Budějovice → Plzeň: IDESKA do Horažďovic, dál IDPK);
+3. systém + ČD s lomem v **poslední stanici, kde systém ještě platí**
+   (přesahy jsou v datech: IDESKA do Počátek-Žirovnice, Benešova u Prahy,
+   Nepomuku, Horažďovic…), zbytek ocení ČD; nebo obráceně.
 
-Příklad (12. 10. 2026, R 653 Rožmberk): Třeboň → Havlíčkův Brod u ČD
-269 Kč; Třeboň → Počátky-Žirovnice IDESKA 81 Kč + Počátky-Žirovnice →
-Havlíčkův Brod ČD 166 Kč = **247 Kč**.
+Výsledek vypíše, že se nepřestupuje, jen kupují dvě jízdenky – odkud kam,
+u koho, za kolik, a o kolik je to levnější než jedna jízdenka ČD.
 
-Zatím umí tarif **IDESKA** (Jihočeský kraj) – kalkulačka IDESKA zveřejňuje
-celý tarif i seznam zastávek se zónami, výpočet běží offline. Potřebuje
-zapnutý zdroj ČD (cena k porovnání a cena druhého úseku). Ostatní systémy
-přibudou: PID má ceník podle počtu pásem na webu, kalkulačka IDPK je za
-ochranou Cloudflare, web VDV zatím nebyl dostupný.
+| Systém | Tarif | Zóny stanic |
+|---|---|---|
+| IDESKA (Jihočeský kraj) | celý tarif z [kalkulačky IDESKA](https://kalkulacka.ideska.info/) | seznam zastávek kalkulačky + mapa zón |
+| PID (Praha, Středočeský) | ceník podle počtu pásem z [pid.cz](https://pid.cz/jizdne-a-tarif/) (P, 0, B, 1–13 navazují) | data PID |
+| IDPK (Plzeňský kraj) | vzorec z Tarifu IDPK (příl. 4 Smlouvy PET IDPK, 1. 7. 2026): 14/12/10 Kč za zónu, Plzeň 18 Kč, síťová 84 Kč | pásma linek IDPK z jízdních řádů CIS JŘ; počítají se **všechny projeté** zóny, i kde vlak nestaví |
+
+Příklady (12. 10. 2026, ověřeno proti ČD): Třeboň → Havlíčkův Brod R 653
+ČD 269 Kč, IDESKA do Počátek-Žirovnice 81 Kč + ČD 166 Kč = **247 Kč**;
+České Budějovice → Plzeň R 638 (student s ISIC) ČD 102 Kč, IDESKA do
+Horažďovic 49 Kč + IDPK (6 zón do Plzně) 40 Kč = **89 Kč**.
+
+Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u ČD).
+Ostatní systémy (VDV, IDS JMK, ODIS…) zatím chybí – jejich úseky ocení ČD.
 
 Strategie nabídnou variantu jen při úspoře nad nastavený práh
 (výchozí 3 %, u skrytého města 8 %).

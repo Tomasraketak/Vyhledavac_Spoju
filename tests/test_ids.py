@@ -17,7 +17,7 @@ from vyhledavac.engine import SearchEngine
 from vyhledavac.hacks import ids_ticket
 from vyhledavac.hacks.ids_ticket import IdsTicketHack
 from vyhledavac.ids import ideska
-from vyhledavac.models import Passenger, SearchQuery
+from vyhledavac.models import DiscountCard, Passenger, SearchQuery
 from vyhledavac.providers.base import Provider
 from tests.conftest import at, make_journey
 
@@ -165,3 +165,57 @@ async def test_domestic_trip_skips_international_providers():
     await engine.search(SearchQuery(origin="Praha", destination="Vídeň", departure=at(8)),
                         enable_hacks=False)
     assert obb.asked == 1
+
+
+# ---- PID a IDPK ---------------------------------------------------------------------
+from vyhledavac.ids import idpk, pid  # noqa: E402
+
+
+def test_pid_counts_consecutive_zones():
+    assert pid.zone_count("P", "4") == 7
+    fare = pid.best_fare("P", "4", Passenger(age=30), 40)
+    assert fare.price == Decimal(84) and fare.minutes >= 40
+    assert pid.best_fare("P", "4", Passenger(age=21, cards=(DiscountCard.ISIC,)), 40).price == Decimal(42)
+    city = pid.best_fare("P", "0", Passenger(age=30), 20)            # jen po Praze
+    assert city.price == Decimal(36)
+
+
+def test_idpk_price_formula_from_tariff():
+    zones = ["052", "051", "063", "062", "061", "001"]
+    full = min(idpk.fares_for_path(zones, Passenger(age=30)), key=lambda f: f.price)
+    reduced = min(idpk.fares_for_path(zones, Passenger(age=12)), key=lambda f: f.price)
+    assert full.price == Decimal(14 + 12 + 10 + 10 + 10 + 18) and full.minutes == 180
+    assert reduced.price == Decimal(7 + 6 + 5 + 5 + 5 + 12)
+    seven = ["021", "022", "023", "024", "025", "026", "027"]
+    assert min(f.price for f in idpk.fares_for_path(seven, Passenger(age=30))) == Decimal(84)
+
+
+def test_idpk_path_prefers_fewest_zones_and_plzen():
+    assert idpk.path_zones([("052",), ("052", "051"), ("051",), ("001", "061")]) == ["052", "051", "001"]
+
+
+@pytest.mark.parametrize("station, system, zone", [
+    ("Plzeň hl. n.", "IDPK", "001"), ("Klatovy", "IDPK", "084"),
+    ("Horažďovice předměstí", "IDPK", "052"), ("Beroun", "PID", "4"),
+])
+def test_rail_station_zones(station, system, zone):
+    assert zone in stations.rail_place(station).systems[system]
+
+
+def test_physical_route_includes_stations_express_skips():
+    route = railnet.physical_route("Nepomuk", "Plzeň hl. n.")
+    assert "Blovice" in route and "Starý Plzenec" in route
+
+
+@pytest.mark.asyncio
+async def test_two_systems_in_a_row():
+    query = SearchQuery(origin="České Budějovice", destination="Plzeň", departure=at(5))
+    base = cd_journey("České Budějovice", "Plzeň", at(6), at(8), 300)
+
+    async def search(q, allow_browser=False):
+        return []
+
+    found = await IdsTicketHack().find(query, [base], search)
+    assert len(found) == 1
+    assert [s.provider for s in found[0].segments] == ["IDESKA", "IDPK"]
+    assert found[0].price < Decimal(300)
