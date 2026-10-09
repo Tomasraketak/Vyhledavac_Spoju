@@ -696,8 +696,10 @@ skutečnou trasu (zastávky a časy z detailu vlaku na cd.cz, jinak ze sítě
 sestavené z celostátního jízdního řádu) a vybere nejlevnější z variant:
 
 1. celá cesta na jízdenku jednoho systému;
-2. dva systémy za sebou s lomem ve stanici, která patří do obou
-   (České Budějovice → Plzeň: IDESKA do Horažďovic, dál IDPK);
+2. řetěz systémů s lomem ve stanicích, které patří do dvou systémů
+   (České Budějovice → Plzeň: IDESKA do Horažďovic, dál IDPK; Žďár nad
+   Sázavou → Brno: VDV do Křižanova, dál IDS JMK); nejlevnější řetěz hledá
+   dynamické programování;
 3. systém + ČD s lomem v **poslední stanici, kde systém ještě platí**
    (přesahy jsou v datech: IDESKA do Počátek-Žirovnice, Benešova u Prahy,
    Nepomuku, Horažďovic…), zbytek ocení ČD; nebo obráceně.
@@ -711,6 +713,7 @@ u koho, za kolik, a o kolik je to levnější než jedna jízdenka ČD.
 | PID (Praha, Středočeský) | ceník podle počtu pásem z [pid.cz](https://pid.cz/jizdne-a-tarif/) (P, 0, B, 1–13 navazují) | data PID |
 | VDV (Vysočina) | za běhu z [tarifního počítadla kraje](https://www.kr-vysocina.cz/spocitat-jizdne/ms-122447) (cena podle výchozí a cílové zóny, pamatuje se) | zastávky a nádraží z mapy počítadla, i přesahy (Počátky-Žirovnice) |
 | IREDO (Královéhradecký, Pardubický) | za běhu z [tarifního kalkulátoru IREDO](https://iredo.info/tarifni-kalkulator/) (stejné počítadlo jako VDV) | zastávky a nádraží z mapy kalkulátoru |
+| IDS JMK (Jihomoravský) | [Ceník IDS JMK](https://content.idsjmk.cz/cenik/Cenik.pdf): cena podle počtu projetých zón (2 zóny 25 Kč … všechny 113 Kč), zlevněná A polovina | zóny z GTFS IDS JMK, nádraží podle nejbližší zastávky |
 | IDOL (Liberecký) | za běhu z [tarifního počítadla IDOL](https://www.iidol.cz/jizdne-a-tarify/tarifni-pocitadlo/) (cena při platbě kartou) | seznam zastávek počítadla, nádraží podle obce / názvu zóny |
 | IDPK (Plzeňský kraj) | vzorec z Tarifu IDPK (příl. 4 Smlouvy PET IDPK, 1. 7. 2026): 14/12/10 Kč za zónu, Plzeň 18 Kč, síťová 84 Kč | pásma linek IDPK z jízdních řádů CIS JŘ; počítají se **všechny projeté** zóny, i kde vlak nestaví |
 
@@ -720,8 +723,8 @@ Příklady (12. 10. 2026, ověřeno proti ČD): Třeboň → Havlíčkův Brod R
 Horažďovic 49 Kč + IDPK (6 zón do Plzně) 40 Kč = **89 Kč**.
 
 Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u ČD).
-Ostatní systémy (IDS JMK, ODIS, DÚK, IDSOK, IDZK, IDS KK) zatím chybí – jejich
-úseky ocení ČD. Počítadla VDV, IREDO a IDOL se volají za běhu (z vašeho počítače),
+ODIS, DÚK, IDSOK, IDZK a IDS KK zatím chybí (veřejnou kalkulačku jízdného
+se najít nepodařilo) – jejich úseky ocení ČD. Počítadla VDV, IREDO a IDOL se volají za běhu (z vašeho počítače),
 proto u nich ceny chybí, když je počítadlo nedostupné.
 
 Strategie nabídnou variantu jen při úspoře nad nastavený práh

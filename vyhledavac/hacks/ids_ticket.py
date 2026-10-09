@@ -31,7 +31,7 @@ from typing import Sequence
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, ideska, idpk, pid
+from ..ids import IdsFare, ideska, idpk, jmk, pid
 from ..ids.online import idol, iredo, vdv
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import normalize
@@ -41,13 +41,13 @@ from .base import SearchFn, TravelHack
 log = logging.getLogger(__name__)
 
 #: Systémy, jejichž tarif umíme spočítat.
-SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol)}
+SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk)}
 LINKS = {name: m.URL for name, m in SYSTEMS.items()}
 #: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (pásmo
 #: nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
 #: jakýchkoli údajů tu trasu systému nepřeruší; cenu určují jen zóny konců
 #: (u IDPK i projeté zóny, které známe).
-LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM}
+LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM, jmk.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
@@ -104,7 +104,7 @@ def _minutes(a: dt.datetime | None, b: dt.datetime | None, fallback: float) -> f
 @HACKS.register()
 class IdsTicketHack(TravelHack):
     name = "ids_ticket"
-    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, VDV, IREDO, IDOL, lom na hranici)"
+    label = "Jízdenky IDS místo ČD (IDESKA, PID, IDPK, VDV, IREDO, IDOL, IDS JMK)"
     default_min_saving_pct = 3.0
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
@@ -125,6 +125,8 @@ class IdsTicketHack(TravelHack):
         tails: dict[str, list[Journey]] = {}
         heads: dict[str, list[Journey]] = {}
         for journey, route in zip(base, routes):
+            if len(route) < 2:
+                continue
             for system in SYSTEMS:
                 k = self._last_inside(route, system)
                 if k is not None and 0 < k < len(route) - 1:
@@ -165,7 +167,7 @@ class IdsTicketHack(TravelHack):
                 n = len(route) - 1
                 if n < 1:
                     continue
-                points = {0, n}
+                points = {0, n} | {k for k in range(1, n) if len(route[k].systems) >= 2}
                 for other in SYSTEMS:
                     for k in (self._last_inside(route, other), self._first_inside(route, other)):
                         if k is not None:
@@ -258,22 +260,26 @@ class IdsTicketHack(TravelHack):
                 minutes = min(whole, minutes * 1.15 + 5)     # rezerva u odhadnutého času
             return self._ids_fare(query, route, system, i, j, minutes)
 
-        # 1) celá cesta v jednom systému
-        for system in SYSTEMS:
-            fare = ids(system, 0, n)
-            if fare is not None:
-                plans.append(Plan(fare.price, [(system, 0, n, fare)]))
-
-        # 2) dva systémy za sebou, lom ve stanici, která patří do obou
-        for first in SYSTEMS:
-            for second in SYSTEMS:
-                if first == second:
+        # 1+2) jízdenky IDS za sebou – jeden systém, nebo řetěz několika
+        #      (Praha → Brno: PID, IREDO, IDS JMK). Lom jen ve stanici, která
+        #      patří do více systémů; nejlevnější řetěz hledá dynamické programování.
+        nodes = [0] + [k for k in range(1, n) if len(route[k].systems) >= 2] + [n]
+        best: dict[int, Plan] = {0: Plan(Decimal(0), [])}
+        for b in nodes[1:]:
+            for a in nodes:
+                if a >= b or a not in best:
                     continue
-                for k in range(1, n):
-                    if first in route[k].systems and second in route[k].systems:
-                        a, b = ids(first, 0, k), ids(second, k, n)
-                        if a is not None and b is not None:
-                            plans.append(Plan(a.price + b.price, [(first, 0, k, a), (second, k, n, b)]))
+                for system in SYSTEMS:
+                    if system not in route[a].systems or system not in route[b].systems:
+                        continue
+                    fare = ids(system, a, b)
+                    if fare is None:
+                        continue
+                    total = best[a].total + fare.price
+                    if b not in best or total < best[b].total:
+                        best[b] = Plan(total, best[a].pieces + [(system, a, b, fare)])
+        if n in best and best[n].pieces:
+            plans.append(best[n])
 
         # 3) systém od začátku, zbytek u ČD
         for system in SYSTEMS:

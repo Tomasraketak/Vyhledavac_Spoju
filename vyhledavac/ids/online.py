@@ -136,7 +136,7 @@ class TimTariff(OnlineTariff):
     def parse(html: str) -> list[tuple[str, int | None, Decimal]]:
         """Řádky (název, platnost v min, nejnižší cena ze sloupců hotově/karta/aplikace)."""
         rows = []
-        for m in re.finditer(r"\| ([^|]+?) \| (\d+) (min|d) \|((?: \d+(?:[ ,]\d+)* Kč \|)+)",
+        for m in re.finditer(r"(?<=\| )([^|]+?) \| (\d+) (min|d) \|((?: \d+(?:[ ,]\d+)* Kč \|)+)",
                              page_text(html)):
             prices = [Decimal(p.replace(" ", "").replace(",", "."))
                       for p in re.findall(r"(\d[\d ]*,\d{2}) Kč", m.group(4))]
@@ -192,7 +192,7 @@ class IdolTariff(OnlineTariff):
     def parse(html: str) -> list[tuple[str, int | None, Decimal]]:
         """Jen jednotlivé jízdné; cena = nejnižší ze sloupců (hotově, karta, IDOLKA)."""
         rows = []
-        for m in re.finditer(r"\| ([^|]+?) \| Jednotlivé jízdné \| (\d+) min \|((?: \d[\d ]*,- \|)+)",
+        for m in re.finditer(r"(?<=\| )([^|]+?) \| Jednotlivé jízdné \| (\d+) min \|((?: \d[\d ]*,- \|)+)",
                              page_text(html)):
             prices = [Decimal(p.replace(" ", "")) for p in re.findall(r"(\d[\d ]*),-", m.group(3))]
             if prices:

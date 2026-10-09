@@ -62,9 +62,13 @@ def station_for(name: str) -> int | None:
     town = place.obec or place.name
     db = stations.database()
     best = None
+    town_key = normalize(town)
     for candidate in db.places if db else ():       # seřazeno podle důležitosti
-        if candidate.kind == "t" and (candidate.obec or candidate.name) == town \
-                and normalize(candidate.name) in index:
+        if candidate.kind != "t" or normalize(candidate.name) not in index:
+            continue
+        # obec stanice, nebo plný název z OSM („Žďár n.S.“ = „Žďár nad Sázavou“)
+        if (candidate.obec or candidate.name) == town or any(
+                k == town_key or k.startswith(town_key + " ") for k in candidate.keys):
             best = index[normalize(candidate.name)]
             break
     return best

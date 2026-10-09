@@ -258,3 +258,47 @@ async def test_ideska_then_vdv(monkeypatch):
     assert [s.provider for s in found[0].segments] == ["IDESKA", "VDV"]
     assert found[0].segments[0].destination == "Počátky-Žirovnice"
     assert found[0].price == Decimal(81) + Decimal(88)
+
+
+# ---- IREDO, IDOL, IDS JMK, řetěz systémů --------------------------------------------
+from vyhledavac.ids import jmk, online  # noqa: E402
+
+IREDO_HTML = ("<tr><td>plná</td><td>180 min</td><td>54,00 Kč</td><td>46,00 Kč</td></tr>"
+              "<tr><td>student 18-26 let</td><td>180 min</td><td>27,00 Kč</td><td>23,00 Kč</td></tr>"
+              "<tr><td>7denní plná</td><td>7 d</td><td>368,00 Kč</td><td>368,00 Kč</td></tr>")
+IDOL_HTML = ("<tr><td>dospělý 18+</td><td>Jednotlivé jízdné</td><td>210 min</td><td>106,-</td>"
+             "<td>84,-</td><td>84,-</td><td>84,-</td></tr><tr><td>student -26</td>"
+             "<td>Jednotlivé jízdné</td><td>210 min</td><td>53,-</td><td>42,-</td></tr>")
+
+
+def test_iredo_takes_cheapest_column(monkeypatch):
+    monkeypatch.setitem(online.iredo._prices, ("600", "100"), online.iredo.parse(IREDO_HTML))
+    assert online.iredo.best_fare("600", "100", Passenger(age=30), 60).price == Decimal("46.00")
+    student = Passenger(age=21, cards=(DiscountCard.ISIC,))
+    assert online.iredo.best_fare("600", "100", student, 60).price == Decimal("23.00")
+
+
+def test_idol_parse_single_fares():
+    rows = online.idol.parse(IDOL_HTML)
+    assert ("dospělý 18+", 210, Decimal(84)) in rows and ("student -26", 210, Decimal(42)) in rows
+
+
+def test_jmk_price_by_zone_count():
+    zones = ["100", "101", "310", "320"]
+    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=30), 60).price == Decimal(41)
+    assert jmk.best_for_route([(z,) for z in zones], Passenger(age=12), 60).price == Decimal(20)
+
+
+@pytest.mark.asyncio
+async def test_vdv_then_jmk_chain(monkeypatch):
+    """Žďár nad Sázavou → Brno: VDV do Křižanova, dál IDS JMK."""
+    monkeypatch.setitem(online.vdv._prices, ("400", "347"), online.vdv.parse(VDV_HTML))
+    query = SearchQuery(origin="Žďár nad Sázavou", destination="Brno", departure=at(9))
+    base = cd_journey("Žďár nad Sázavou", "Brno", at(10), at(11, 10), 200)
+
+    async def search(q, allow_browser=False):
+        return []
+
+    found = await IdsTicketHack().find(query, [base], search)
+    assert [s.provider for s in found[0].segments] == ["VDV", "IDS JMK"]
+    assert found[0].segments[0].destination == "Křižanov"
