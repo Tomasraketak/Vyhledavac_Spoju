@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from vyhledavac.models import Mode, ProviderResult, SearchQuery
+from vyhledavac.models import DiscountCard, FareCategory, Mode, ProviderResult, SearchQuery
 from vyhledavac.web import server as web
 from vyhledavac.web.serialize import journey_key, journey_to_dict
 
@@ -118,6 +118,23 @@ def test_parse_query():
                          "age": 22, "isic": True})
     assert q.departure == dt.datetime(2026, 10, 15, 8, 30, tzinfo=q.departure.tzinfo)
     assert q.lead.age == 22 and q.lead.cards
+
+
+def test_parse_query_passenger_cards():
+    base = {"from": "Bratislava", "to": "Košice", "date": "2026-10-15", "time": "08:30"}
+    q = web.parse_query({**base, "age": 21, "isic": True, "skFree": True})
+    assert q.lead.has(DiscountCard.ISIC) and q.lead.has(DiscountCard.SK_FREE)
+    assert q.lead.category is FareCategory.STUDENT
+    plain = web.parse_query({**base, "age": 40})
+    assert plain.lead.cards == () and plain.lead.category is FareCategory.ADULT
+
+
+def test_sk_free_without_zssk_warns():
+    q = web.parse_query({"from": "Bratislava", "to": "Košice", "age": 20, "skFree": True})
+    data = snapshot(web.SearchSession(q, ["RegioJet"], []))
+    assert any(p["provider"] == "ZSSK" for p in data["problems"])
+    with_zssk = snapshot(web.SearchSession(q, ["RegioJet", "ZSSK"], []))
+    assert not any(p["provider"] == "ZSSK" for p in with_zssk["problems"])
 
 
 @pytest.mark.parametrize("body", [{"from": "", "to": "Brno"},

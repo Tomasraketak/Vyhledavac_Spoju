@@ -503,8 +503,13 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   IDS JMK, IDOL, ODIS…) a tarifní zónu. Ovládá se i šipkami a Enterem.
 - **Hledání:** odkud, kam, datum, čas; druhy dopravy (vlak / bus / MHD);
   v *Pokročilých možnostech* počet přestupů, jen přímá spojení, minimální
-  čas na přestup, věk a ISIC, travel hacky, „jen se známou cenou“ a
-  „skrýt dražší i pomalejší“.
+  čas na přestup, travel hacky, „jen se známou cenou“ a „skrýt dražší
+  i pomalejší“.
+- **Cestující** (tlačítko vedle druhů dopravy, např. *21 let · student
+  s ISIC*): věk, ISIC a slovenská bezplatná přeprava (100% zľava).
+  Každý dopravce podle toho zvolí svůj tarif – RegioJet Student 18–25,
+  ČD Junior, FlixBus/OneTicket student, ZSSK kategorii, kartu ISIC
+  i bezplatnou jízdenku. Nastavení si stránka pamatuje.
 - **Zdroje dat** jsou přepínací čipy se živým stavem (hledám / ceny 3/5… /
   N spojů · čas / nejezdí tam / chyba / blokováno). *Rychlé* = jen zdroje
   bez prohlížeče.

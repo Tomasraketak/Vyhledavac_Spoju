@@ -97,6 +97,9 @@ class SearchSession:
         if lead.has(DiscountCard.ISIC) and lead.age >= 26:
             self._problem("ISIC", "studentská sleva platí jen do 26 let – hledám ceny pro "
                                   "dospělého. Jste-li mladší, opravte věk.", "soft")
+        if lead.has(DiscountCard.SK_FREE) and "ZSSK" not in providers:
+            self._problem("ZSSK", "bezplatnou přepravu na Slovensku uplatní jen ZSSK, která "
+                                  "není zapnutá – ceny ostatních dopravců jsou bez ní.", "soft")
         for module, error in LOAD_ERRORS.items():
             self._problem(module.rsplit(".", 1)[-1],
                           f"modul se nenačetl, v nabídce proto chybí ({error})", "soft")
@@ -297,7 +300,8 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
         raise ValueError("Věk musí být číslo.") from exc
     if not 0 <= age <= 120:
         raise ValueError("Věk musí být mezi 0 a 120.")
-    cards = (DiscountCard.ISIC,) if body.get("isic") else ()
+    cards = tuple(card for card, on in ((DiscountCard.ISIC, body.get("isic")),
+                                        (DiscountCard.SK_FREE, body.get("skFree"))) if on)
     return SearchQuery(origin=origin, destination=destination, departure=when,
                        passengers=(Passenger(age=age, cards=cards),))
 

@@ -60,6 +60,8 @@
     hacksOn: new Set(store.get('hacks', ['split_ticket'])),
     age: store.get('age', 26),
     isic: store.get('isic', false),
+    skFree: store.get('skFree', false),
+    pass: false,                  // rozbalený panel Cestující
     modes: [...ALL_GROUPS],
     adv: false,
     maxT: 'any',
@@ -243,7 +245,7 @@
     if (!providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
     const body = {
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
-      age: Number(S.age), isic: S.isic, providers, hacks: [...S.hacksOn],
+      age: Number(S.age), isic: S.isic, skFree: S.skFree, providers, hacks: [...S.hacksOn],
     };
     if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
     closeStream();
@@ -370,6 +372,7 @@
   function render() {
     renderHeader();
     renderModes();
+    renderPass();
     renderAdv();
     renderResultsHead();
     renderProviders();
@@ -403,6 +406,7 @@
       + pill('bus', 'Autobusy', 'bus', !all && S.modes.includes('bus'))
       + pill('city', 'MHD · tram · metro', 'tram-front', !all && S.modes.includes('city'))
       + `<span class="vsep"></span>`
+      + `<button class="btn btn-secondary adv-btn" type="button" data-act="pass" aria-expanded="${S.pass}">${icon('user', 16)}<span>${esc(passengerSummary())}</span>${icon(S.pass ? 'chevron-up' : 'chevron-down', 16)}</button>`
       + `<button class="btn btn-secondary adv-btn" type="button" data-act="adv" aria-expanded="${S.adv}">${icon('sliders-horizontal', 16)}<span>Pokročilé možnosti</span>`
       + (advCount ? `<span class="tag tag-accent">${advCount}</span>` : '') + icon(S.adv ? 'chevron-up' : 'chevron-down', 16) + `</button>`;
   }
@@ -415,6 +419,47 @@
     return `<button type="button" class="switch" role="switch" aria-checked="${on}" data-act="switch" data-key="${key}"><span class="track"><span class="knob"></span></span><span>${label}</span></button>`;
   }
 
+  // Kategorie cestujícího – stejná pravidla jako Passenger.category na serveru.
+  function passengerCategory() {
+    const age = Number(S.age);
+    if (age < 6) return 'dítě do 6 let';
+    if (age < 15) return 'dítě 6–14 let';
+    if (age < 18) return 'mladistvý 15–17 let';
+    if (age >= 65) return 'senior 65+';
+    if (S.isic && age < 26) return 'student s ISIC';
+    return 'dospělý';
+  }
+
+  function passengerSummary() {
+    const parts = [`${S.age} let`, passengerCategory()];
+    if (S.skFree) parts.push('SK zdarma');
+    return parts.join(' · ');
+  }
+
+  function renderPass() {
+    const box = $('#pass');
+    if (!S.pass) { box.innerHTML = ''; return; }
+    const age = Number(S.age);
+    const isicNote = S.isic && age >= 26
+      ? '<span class="adv-hint warn">ISIC dává slevu jen do 26 let – ceny budou pro dospělého.</span>' : '';
+    const skNote = S.skFree && S.providersOn && !S.providersOn.has('ZSSK')
+      ? '<span class="adv-hint warn">Bezplatnou přepravu uplatní jen ZSSK – zapněte ji ve Zdrojích dat.</span>' : '';
+    box.innerHTML = `<div class="adv-grid">
+      <div class="adv-cell"><span class="adv-title">Věk cestujícího</span>
+        <label class="adv-age"><input type="number" min="0" max="120" value="${esc(S.age)}" data-act="age"> let</label>
+        <span class="adv-hint">Podle věku dopravci volí tarif: dítě, mladistvý, junior/student, dospělý, senior.</span></div>
+      <div class="adv-cell"><span class="adv-title">Průkaz studenta</span>
+        ${sw('isic', S.isic, 'Mám ISIC')}
+        <span class="adv-hint">Studentské jízdné do 26 let: RegioJet Student 18–25, ČD Junior se žákovským průkazem, FlixBus a OneTicket student, ZSSK karta ISIC.</span>${isicNote}</div>
+      <div class="adv-cell"><span class="adv-title">Slovensko</span>
+        ${sw('skFree', S.skFree, 'Mám nárok na bezplatnou přepravu (100% zľava)')}
+        <span class="adv-hint">Pro registrované žáky a studenty do 26 let a seniory 62+ ve vlacích ZSSK. Ostatní dopravci ji neznají a účtují běžný tarif.</span>${skNote}</div>
+      <div class="adv-cell"><span class="adv-title">Tarif při hledání</span>
+        <strong>${esc(passengerCategory())}${S.skFree ? ' · ZSSK zdarma' : ''}</strong>
+        <span class="adv-hint">Platí od příštího hledání. ÖBB ukazuje vždy cenu pro dospělého bez slevy.</span></div>
+    </div>`;
+  }
+
   function renderAdv() {
     const box = $('#adv');
     if (!S.adv) { box.innerHTML = ''; return; }
@@ -423,10 +468,6 @@
       <div class="adv-cell"><span class="adv-title">Maximální počet přestupů</span>${seg('maxT', S.maxT, [['any', 'Libovolně'], ['0', '0'], ['1', '1'], ['2', '2']])}</div>
       <div class="adv-cell"><span class="adv-title">Pouze přímá spojení</span>${sw('direct', S.direct, S.direct ? 'Zapnuto' : 'Vypnuto')}</div>
       <div class="adv-cell"><span class="adv-title">Minimální čas na přestup</span>${seg('buffer', S.buffer, [[0, 'Standardní'], [3, '+3 min'], [5, '+5 min'], [10, '+10 min']])}<span class="adv-hint">Skryje spojení s kratším přestupem.</span></div>
-      <div class="adv-cell"><span class="adv-title">Cestující</span>
-        <label class="adv-age">Věk <input type="number" min="0" max="120" value="${esc(S.age)}" data-act="age"></label>
-        ${sw('isic', S.isic, 'Mám ISIC (student do 26 let)')}
-        <span class="adv-hint">Platí od příštího hledání.</span></div>
       <div class="adv-cell"><span class="adv-title">Travel hacky</span>${hacks || '<span class="adv-hint">Žádné nejsou k dispozici.</span>'}
         <span class="adv-hint">Hledají levnější kombinace jízdenek; platí od příštího hledání.</span></div>
       <div class="adv-cell"><span class="adv-title">Zobrazení</span>
@@ -710,6 +751,7 @@
     store.set('hacks', [...S.hacksOn]);
     store.set('age', S.age);
     store.set('isic', S.isic);
+    store.set('skFree', S.skFree);
     store.set('onlyPriced', S.onlyPriced);
     store.set('pareto', S.pareto);
     store.set('sort', S.sort);
@@ -726,7 +768,8 @@
       let m = S.modes.length === ALL_GROUPS.length ? [key] : (S.modes.includes(key) ? S.modes.filter(x => x !== key) : [...S.modes, key]);
       S.modes = m.length ? m : [...ALL_GROUPS];
     },
-    adv() { S.adv = !S.adv; },
+    adv() { S.adv = !S.adv; if (S.adv) S.pass = false; },
+    pass() { S.pass = !S.pass; if (S.pass) S.adv = false; },
     switch(key) {
       if (key.startsWith('hack:')) {
         const name = key.slice(5);
