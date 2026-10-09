@@ -12,3 +12,4 @@ venv/
 border_cache.csv
 lokace_rj.csv
 .cache/
+vyhledavac-web.log

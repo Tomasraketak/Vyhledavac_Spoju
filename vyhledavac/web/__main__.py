@@ -1,3 +1,3 @@
-from .server import main
+from ._launch import run
 
-main()
+run()

@@ -66,9 +66,16 @@ cd Vyhledavac_Spoju
 .venv\Scripts\pythonw -m vyhledavac.web
 ```
 
-(`pythonw` neotevře černou konzoli. Pokud se stránka neotevře, spusťte
-místo něj `.venv\Scripts\python -m vyhledavac.web` – uvidíte chybu.
-Starší okenní rozhraní: `.venv\Scripts\pythonw -m vyhledavac.gui`.)
+(`pythonw` neotevře černou konzoli a příkazový řádek se hned vrátí –
+program běží na pozadí a za chvíli otevře prohlížeč. Když se spuštění
+nepovede, ukáže okno s chybou a celý výpis zapíše do
+`vyhledavac-web.log` ve složce programu. Starší okenní rozhraní:
+`.venv\Scripts\pythonw -m vyhledavac.gui`.)
+
+Neděje se vůbec nic, ani okno s chybou? Pak Python nenašel modul
+`vyhledavac.web` – máte starou verzi programu. Aktualizujte ji (níže)
+a pro kontrolu spusťte `.venv\Scripts\python -m vyhledavac.web`
+(s konzolí, chybu uvidíte rovnou).
 
 **Aktualizace** na nejnovější verzi:
 
