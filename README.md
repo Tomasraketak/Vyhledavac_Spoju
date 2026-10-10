@@ -479,7 +479,8 @@ arriva.cz) volá `api.arriva.cz/v1`: anonymní token z cookie
 
 Obec Arriva nezná jako celek, proto se hledá nádraží i hlavní autobusová
 zastávka obce (Praha hl. n. + Praha, Nádraží Holešovice) a výsledky se
-sloučí. Vlak, který jen mění číslo (R 653 → R 96653), je jeden úsek.
+sloučí. Změna čísla vlaku (R 653 → R 96653) se ukazuje jako přestup –
+bývá to náhradní doprava.
 
 **Kombinace:** travel hacky (*lomená jízdenka*, *jízdenky IDS*) se na dílčí
 úseky ptají všech zapnutých dopravců, takže Bileto i Arriva se do kombinací

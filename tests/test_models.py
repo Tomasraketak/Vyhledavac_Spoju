@@ -110,18 +110,3 @@ def test_zero_price_is_a_real_price_not_missing():
     assert free.price == Decimal("0")
     assert _result([free]).price_coverage == 1.0
 
-
-def test_merge_through_trains_joins_renumbered_train_only():
-    from vyhledavac.models import Leg, Mode, merge_through_trains
-    from conftest import at
-
-    def leg(line, a, b, dep, arr):
-        return Leg(origin=a, destination=b, departure=dep, arrival=arr, mode=Mode.TRAIN, line=line)
-
-    legs = [leg("Os 8714", "Třeboň", "Veselí n.Lužnicí", at(13, 52), at(14, 10)),
-            leg("R 661 Rožmberk", "Veselí n.Lužnicí", "Horní Cerekev", at(14, 21), at(15, 30)),
-            leg("R 96661", "Horní Cerekev", "Náměšť n.Oslavou", at(15, 36), at(17, 20)),
-            leg("R 661 Rožmberk", "Náměšť n.Oslavou", "Brno hl.n.", at(17, 28), at(18, 14))]
-    merged = merge_through_trains(legs)
-    assert [l.line for l in merged] == ["Os 8714", "R 661 Rožmberk"]      # přestup ve Veselí zůstal
-    assert merged[1].destination == "Brno hl.n." and merged[1].arrival == at(18, 14)

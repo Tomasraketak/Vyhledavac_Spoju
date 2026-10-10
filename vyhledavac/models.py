@@ -9,7 +9,6 @@ Ceny jsou ``Decimal`` – u peněz se float nepoužívá.
 from __future__ import annotations
 
 import datetime as dt
-import re
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -236,44 +235,6 @@ class Leg:
         from .normalize import matches_station
 
         return any(matches_station(station, name) for name in self.stop_names())
-
-
-def _train_number(line: str) -> str:
-    match = re.search(r"\b(\d{2,6})\b", line or "")
-    return match.group(1) if match else ""
-
-
-def merge_through_trains(legs: list[Leg]) -> list[Leg]:
-    """Sloučí úseky, kde tentýž vlak jen změní číslo (R 661 -> R 96661 -> R 661).
-
-    Jízdní řády (ČD, Arriva) takový vlak rozdělí na víc úseků, jako by se
-    přestupovalo. Za tentýž vlak se považuje: oba úseky jsou vlak, druhý
-    navazuje ve stejné stanici do 20 minut a čísla se liší jen předčíslím
-    (661 / 96661) nebo jsou stejná. Skutečný přestup na jiný vlak zůstane.
-    """
-    from .normalize import normalize
-
-    out: list[Leg] = []
-    for leg in legs:
-        prev = out[-1] if out else None
-        a, b = (_train_number(prev.line) if prev else ""), _train_number(leg.line)
-        if (prev is not None and prev.mode is Mode.TRAIN and leg.mode is Mode.TRAIN
-                and a and b and (a.endswith(b) or b.endswith(a))
-                and normalize(prev.destination) == normalize(leg.origin)
-                and dt.timedelta(0) <= leg.departure - prev.arrival <= dt.timedelta(minutes=20)):
-            stops = list(prev.stops)
-            if stops and leg.stops:
-                stops[-1] = Stop(name=stops[-1].name, arrival=stops[-1].arrival,
-                                 departure=leg.stops[0].departure or leg.departure,
-                                 platform=stops[-1].platform, lat=stops[-1].lat, lon=stops[-1].lon)
-                stops.extend(leg.stops[1:])
-            out[-1] = Leg(origin=prev.origin, destination=leg.destination, departure=prev.departure,
-                          arrival=leg.arrival, mode=prev.mode, carrier=prev.carrier or leg.carrier,
-                          line=prev.line, stops=stops,
-                          reservation_required=prev.reservation_required or leg.reservation_required)
-            continue
-        out.append(leg)
-    return out
 
 
 @dataclass(slots=True)

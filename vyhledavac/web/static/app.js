@@ -689,12 +689,12 @@
     if (j.hack) parts.push(`<span class="badge tag-accent">${icon('lightbulb', 14)}Travel hack</span>`);
     j.vehicles.forEach((v, i) => {
       const m = modeOf(v);
-      if (i > 0) {
-        const w = j.waits[i - 1];
-        const risk = w.gap < RISKY_TRANSFER;
-        parts.push(`<span class="strip-x ${risk ? 'risk' : ''}" title="Přestup ${w.gap} min v ${esc(w.at)}${risk ? ' – riziko' : ''}">${icon('arrow-right', 13)}<span>${esc(shortStation(w.at))} · ${w.gap} min</span></span>`);
-      }
-      parts.push(`<span class="badge" style="background:${m.bg};color:${m.fg}" title="${esc(legLabel(v))}: ${esc(v.from)} → ${esc(v.to)}">${icon(m.icon, 14)}${esc(legLabel(v))}</span>`);
+      const badge = `<span class="badge" style="background:${m.bg};color:${m.fg}" title="${esc(legLabel(v))}: ${esc(v.from)} → ${esc(v.to)}">${icon(m.icon, 14)}${esc(legLabel(v))}</span>`;
+      if (i === 0) { parts.push(badge); return; }
+      const w = j.waits[i - 1];
+      const risk = w.gap < RISKY_TRANSFER;
+      // přestup a další spoj drží pohromadě – při zalomení řádku se nerozdělí
+      parts.push(`<span class="strip-step"><span class="strip-x ${risk ? 'risk' : ''}" title="Přestup ${w.gap} min v ${esc(w.at)}${risk ? ' – riziko' : ''}">${icon('arrow-right', 13)}<span>${esc(shortStation(w.at))} · ${w.gap} min</span>${icon('arrow-right', 13)}</span>${badge}</span>`);
     });
     return `<div class="strip">${parts.join('')}</div>`;
   }

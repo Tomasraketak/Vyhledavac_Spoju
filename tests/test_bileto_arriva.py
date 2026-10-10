@@ -142,23 +142,8 @@ def test_arriva_search_tries_station_and_stop_pairs_and_dedupes(monkeypatch):
     assert journeys[0].price == 119 and journeys[0].fare_status is FareStatus.PRICED
 
 
-def test_arriva_merges_renumbered_train():
-    def part(number, a, b, t1, t2):
-        return {"sourceStationDepartureTime": t1, "targetStationArrivalTime": t2,
-                "line": {"prefix": "R", "number": number, "carrierId": 0},
-                "stations": [station(1, a, t1, t1), station(2, b, t2, t2)]}
-    raw = {"searchId": "s", "routes": [
-        part(653, "Veselí n.Lužnicí", "Horní Cerekev", "2026-10-13T05:00:00Z", "2026-10-13T06:00:00Z"),
-        part(96653, "Horní Cerekev", "Náměšť n.Oslavou", "2026-10-13T06:06:00Z", "2026-10-13T07:00:00Z"),
-        part(653, "Náměšť n.Oslavou", "Brno hl.n.", "2026-10-13T07:00:00Z", "2026-10-13T07:30:00Z")]}
-    from vyhledavac.models import merge_through_trains
-    journey = arriva.to_journey(raw, "")
-    journey.legs = merge_through_trains(journey.legs)
-    assert len(journey.legs) == 1 and journey.legs[0].destination == "Brno hl.n."
-    assert [s.name for s in journey.legs[0].stops][1] == "Horní Cerekev"
-
-
-def test_arriva_keeps_real_transfer():
+def test_arriva_keeps_each_train_number_as_leg():
+    """R 653 -> R 96653 bývá náhradní doprava – přestup se musí ukázat."""
     def part(number, a, b, t1, t2):
         return {"sourceStationDepartureTime": t1, "targetStationArrivalTime": t2,
                 "line": {"prefix": "R", "number": number, "carrierId": 0},
@@ -166,5 +151,4 @@ def test_arriva_keeps_real_transfer():
     raw = {"searchId": "s", "routes": [
         part(730, "Třeboň", "Veselí n.Lužnicí", "2026-10-13T04:00:00Z", "2026-10-13T04:30:00Z"),
         part(653, "Veselí n.Lužnicí", "Brno hl.n.", "2026-10-13T04:42:00Z", "2026-10-13T07:00:00Z")]}
-    from vyhledavac.models import merge_through_trains
-    assert len(merge_through_trains(arriva.to_journey(raw, "").legs)) == 2
+    assert len(arriva.to_journey(raw, "").legs) == 2

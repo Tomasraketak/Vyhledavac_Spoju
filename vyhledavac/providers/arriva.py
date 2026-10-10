@@ -14,8 +14,8 @@ jízdenky **SJT** (Systém jednotného tarifu) – ty platí i ve vlacích jiný
 dopravců (ČD) a bývají levnější než jízdenka ČD. U takových spojů je jako
 dopravce uvedeno „jiný dopravce (SJT)“.
 
-Vlak, který cestou jen mění číslo, slučuje do jednoho úseku společný
-``merge_through_trains`` (pro všechny dopravce).
+Úseky se neslučují: změna čísla vlaku (R 653 -> R 96653) bývá náhradní
+doprava, tedy skutečný přestup.
 
 Obec se hledá dvakrát: jednou mezi nádražími a jednou mezi autobusovými
 zastávkami (Arriva nemá „celé město“ jako jedno místo).
