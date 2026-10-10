@@ -36,6 +36,11 @@ log = logging.getLogger(__name__)
 PartialCallback = Callable[[ProviderResult], None]
 
 
+#: Pořadí, ve kterém hacky běží (viz ``SearchEngine.build``).
+HACK_ORDER = ("ids_ticket", "split_ticket", "hub_transfer", "hidden_city",
+              "cd_europe_beyond", "cd_europe_border", "regional_pass")
+
+
 class SearchEngine:
     """Spojuje dopravce, filtry a hacky do jednoho hledání."""
 
@@ -88,6 +93,10 @@ class SearchEngine:
         )
         pipeline = FilterPipeline.from_spec(list(filter_spec))
         hacks: list[TravelHack] = []
+        # Levné hacky dřív, ty s dotazy přes prohlížeč (ČD, ZSSK) až nakonec –
+        # dílčí výsledky se sdílí přes cache, takže se pozdější hacky doptávají méně.
+        hack_names = sorted(dict.fromkeys(hack_names),
+                            key=lambda n: HACK_ORDER.index(n) if n in HACK_ORDER else len(HACK_ORDER))
         for name in hack_names:
             hack_cls = HACKS.try_get(name)
             if hack_cls is None:
@@ -230,10 +239,15 @@ class SearchEngine:
                 found.extend(produced)
         return found
 
-    async def _leg_search(self, query: SearchQuery, *, allow_browser: bool = False) -> list[Journey]:
-        """Hledání dílčího úseku pro hacky – s deduplikací souběžných dotazů."""
+    async def _leg_search(self, query: SearchQuery, *, allow_browser: bool = False,
+                          only: Sequence[str] | None = None) -> list[Journey]:
+        """Hledání dílčího úseku pro hacky – s deduplikací souběžných dotazů.
+
+        ``only`` omezí dotaz na vybrané dopravce (např. jen ČD kvůli Včasné
+        jízdence Evropa) – šetří dotazy a riziko zablokování.
+        """
         key = (query.origin.lower(), query.destination.lower(),
-               query.departure.isoformat(), allow_browser)
+               query.departure.isoformat(), allow_browser, tuple(sorted(only or ())))
         if key in self._leg_cache:
             return self._leg_cache[key]
 
@@ -250,7 +264,11 @@ class SearchEngine:
                 p for p in self.providers
                 if p.provides_prices and p.name not in skipped
                 and (allow_browser or not (p.needs_browser and self.skip_browser_in_hacks))
+                and (not only or p.name in only)
             ]
+            if not sellers:
+                self._leg_cache[key] = []
+                return []
             results = await self._run_providers(query, providers=sellers)
             journeys = [j for r in results for j in r.journeys]
             self._leg_cache[key] = journeys

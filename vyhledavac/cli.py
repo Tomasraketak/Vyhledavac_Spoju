@@ -17,7 +17,7 @@ from .engine import SearchEngine
 from .models import DEFAULT_TZ, DiscountCard, Passenger, SearchQuery, SearchResult
 from .registry import FILTERS, HACKS, PROVIDERS, load_plugins
 
-DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva"]
+DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva", "PKP"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,7 +42,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="další slevová karta (lze opakovat)")
     parser.add_argument("--providers", nargs="+", default=DEFAULT_PROVIDERS,
                         help=f"dopravci (výchozí: {' '.join(DEFAULT_PROVIDERS)})")
-    parser.add_argument("--hacks", nargs="*", default=["split_ticket", "ids_ticket"],
+    parser.add_argument("--hacks", nargs="*", default=["split_ticket", "ids_ticket", "hub_transfer",
+                                                        "cd_europe_border", "cd_europe_beyond",
+                                                        "regional_pass"],
                         help="travel hacky; prázdné = vypnuto")
     parser.add_argument("--sort", choices=["departure", "price", "duration"],
                         default="departure", help="řazení výsledků")

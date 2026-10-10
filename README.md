@@ -201,12 +201,16 @@ asyncio.run(main())
 | **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ | ne | ~20 s | ověřeno živě, vč. slev |
 | **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ | ne | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ | ✅ | ~3 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
+| **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅² | ✅ | ~5 s | ověřeno živě (říjen 2026) |
+
+² Cena za jednoho dospělého (normální jízdné); ptá se jen, když cesta začíná
+nebo končí v Polsku.
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
 fungovat – viz [ÖBB](#öbb).
 
-Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto a Arriva – jsou rychlé
+Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto, Arriva a PKP – jsou rychlé
 a nepotřebují prohlížeč. Ostatní zapnete v GUI v panelu *Zdroje dat*
 nebo přes `--providers`.
 
@@ -799,6 +803,54 @@ proto u nich ceny chybí, když je počítadlo nedostupné.
 
 Strategie nabídnou variantu jen při úspoře nad nastavený práh
 (výchozí 3 %, u skrytého města 8 %).
+
+### Přestup v Praze / Brně mezi dopravci (`hub_transfer`)
+
+Vede-li spoj přes Prahu nebo Brno, zkusí hack úseky *odkud → město*
+a *město → kam* u všech dopravců a spáruje je přes přejezd po městě
+(`citytransfer.py`): Plzeň → Liberec = FlixBus/ČD do Prahy, metro na Černý
+Most, RegioJet do Liberce. Přejezdy (odhad ode dveří ke dveřím + 5 min
+rezerva): Praha – metro B a C podle jízdních dob (Zličín, Černý Most,
+Florenc, Ládví, Kobylisy, Roztyly, hl. n., Holešovice, Smíchov, Masarykovo;
+Libeň a Zahradní Město bez metra), jízdenka PID 30/90 min (děti a senioři
+v Praze zdarma), hl. n. – Florenc pěšky. Brno – Grand – hl. n. – Dolní
+nádraží pěšky, Zvonařka, Židenice, Královo Pole tramvají (IDS JMK).
+Nabídne se jen kombinace dvou různých dopravců, která je levnější než
+nejlevnější přímý spoj, nebo rychlejší než nejrychlejší a ne dražší.
+
+### Včasná jízdenka Evropa ČD (`cd_europe_border`, `cd_europe_beyond`)
+
+Akční jízdenka ČD je levná jen z Česka do jedné (akční) země. Proto:
+
+* **cesta do třetí země** (Třeboň → Bratislava přes Vídeň): jízdenka ČD
+  jen na poslední stanici tranzitní země (Marchegg/Kittsee, Nickelsdorf,
+  Štúrovo …), dál ÖBB; případně ještě lom na první stanici cílové země (ÖBB
+  přes hranici, ZSSK po Slovensku). Ověřeno: Třeboň → Marchegg 349 Kč +
+  Marchegg → Bratislava 109 Kč.
+* **trať Salzburg – Linz – Wien**: jízdenka ČD až do Horního Dvořiště (přes
+  Linz) nebo Břeclavi (přes Vídeň), vystoupíte dřív. Ověřeno: Wien → Linz
+  s jízdenkou do Horního Dvořiště 411 Kč.
+
+Podmínky ČD: jízdenka je vázaná na vytištěný vlak mezi ČR a sousední zemí
+(musí se použít v celé jeho trase), platí 2 dny, kontingent je omezený –
+hack na to upozorní; vystoupení dřív je na riziko cestujícího.
+
+### Regionální síťové jízdenky (`regional_pass`)
+
+Jízdenka ČD na první stanici za hranicí a dál **Einfach-Raus-Ticket**
+(Rakousko, 46 € pro 2–5 osob, jen R/REX/S/CJX) nebo **Bayern-Ticket**
+(34 € + 10 € za další osobu, RB/RE/S/ALX…), obojí ve všední dny od 9:00.
+Nabídne se jen, když zbytek nalezeného spoje jede výhradně vlaky, ve kterých
+síťová jízdenka platí (ne RJ/IC/EC/ICE – např. EC Praha – Mnichov ne).
+
+### Šetrnost k dopravcům
+
+Hacky běží v pořadí od levných po ty s prohlížečem (IDS, lomená jízdenka,
+přestup v Praze/Brně, skryté město, Včasná Evropa, síťové jízdenky). Každý
+se ptá jen tehdy, když trasa podmínky splňuje (zastávka na trase, země,
+kategorie vlaků), dílčí dotazy se sdílí přes cache a dotaz na úsek jde jen
+na dopravce, kteří ho můžou prodat (`only=["ČD"]` …). Na ČD se každý hack
+ptá nejvýš jednou až dvakrát.
 
 **Cesty jen po Česku** se neposílají na ÖBB a ZSSK (jen zdržují; vnitrostátní
 spoje a ceny mají čeští dopravci). V přehledu zdrojů u nich stojí „jen zahraničí“.
