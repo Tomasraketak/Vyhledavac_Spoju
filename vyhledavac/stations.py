@@ -71,9 +71,14 @@ class StationDB:
     def __init__(self, places: list[Place]):
         self.places = places
         self.exact: dict[str, list[Place]] = {}
+        #: první slovo klíče -> (slova klíče, místo); pro zkratky „n.“ = „nad“
+        self.by_first: dict[str, list[tuple[list[str], Place]]] = {}
         for place in places:
             for key in place.keys:
                 self.exact.setdefault(key, []).append(place)
+                parts = key.split()
+                if parts:
+                    self.by_first.setdefault(parts[0], []).append((parts, place))
 
     # ---- načtení ---------------------------------------------------------------
     @classmethod
@@ -147,10 +152,23 @@ class StationDB:
         """
         words = [_alias(w) for w in normalize(name).split()]
         for end in range(len(words), 0, -1):
-            hits = self.exact.get(" ".join(words[:end]))
+            hits = self.exact.get(" ".join(words[:end])) or self._abbreviated(words[:end])
             if hits:
                 return max(hits, key=lambda p: (p.kind != "b", p.score))
         return None
+
+    def _abbreviated(self, words: list[str]) -> list[Place]:
+        """Shoda se zkratkami, jak je píše jízdní řád: „Veselí n.Lužnicí“ =
+        „Veselí nad Lužnicí“, „Ústí n.L.“, „Lázně Bohdaneč“ … Každé slovo musí
+        sedět celé, nebo být krátkým začátkem (nejvýš 4 písmena) slova názvu."""
+        if len(words) < 2:
+            return []
+        out = []
+        for parts, place in self.by_first.get(words[0], ()):
+            if len(parts) == len(words) and all(
+                    w == p or (len(w) <= 4 and p.startswith(w)) for w, p in zip(words[1:], parts[1:])):
+                out.append(place)
+        return out
 
 
 def _all_words(words: list[str], key: str) -> bool:

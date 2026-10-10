@@ -112,3 +112,14 @@ def test_from_json_minimal():
     hit = small.suggest("vel", 5)[0]
     assert hit.name == "Velká" and hit.zones == ("1", "2") and hit.ids_name == "Systém A"
     assert small.info("velka obec").name == "Velká"
+
+
+@pytest.mark.parametrize("name, expected, kraj", [
+    ("Veselí n.Lužnicí", "Veselí nad Lužnicí", "Jihočeský kraj"),     # dřív „Veselí“ v Pardubickém
+    ("Náměšť n.Oslavou", "Náměšť nad Oslavou", "Kraj Vysočina"),
+    ("Kostelec n.Orl.", "Kostelec nad Orlicí", "Královéhradecký kraj"),
+    ("Týn n.Vlt.", "Týn nad Vltavou", "Jihočeský kraj"),
+])
+def test_info_understands_timetable_abbreviations(name, expected, kraj):
+    place = stations.place(name)
+    assert place.name == expected and place.kraj == kraj
