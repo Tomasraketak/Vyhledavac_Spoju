@@ -41,6 +41,7 @@ def _graph() -> tuple[list[str], dict[int, list[tuple[int, int]]], dict[str, int
     return names, adjacent, index, data.get("codes", [])
 
 
+@lru_cache(maxsize=8192)
 def station_for(name: str) -> int | None:
     """Uzel sítě pro jméno zadané uživatelem nebo dopravcem.
 

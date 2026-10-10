@@ -130,18 +130,31 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
     return out
 
 
-def parse_route(page: str) -> list[str]:
-    """Zastávky projetého úseku z detailu spoje (``li.item`` bez ``inactive``)."""
-    names = []
+def parse_stops(page: str) -> list[tuple[str, str, str]]:
+    """Zastávky projetého úseku z detailu spoje (``li.item`` bez ``inactive``)
+    jako ``(jméno, příjezd, odjezd)``; časy „H:MM“ nebo ``""``. Detail ukazuje
+    jen zastávky, kde spoj staví – průjezdy v něm nejsou."""
+    stops = []
     for cls, body in re.findall(r'<li class="(item[^"]*)"[^>]*>(.*?)</li>', page, re.S):
         if "inactive" in cls:
             continue
         name = re.search(r'<strong class="name[^"]*">(.*?)</strong>', body, re.S)
         if name is None:
             name = re.search(r'class="station"[^>]*>(.*?)</', body, re.S)
-        if name:
-            names.append(_text(name.group(1)))
-    return names
+        if not name:
+            continue
+        times = []
+        for part, end in (("arrival", r'<span class="departure">|<strong'), ("departure", r"<strong")):
+            m = re.search(rf'<span class="{part}">(.*?)(?:{end})', body, re.S)
+            hhmm = re.search(r"\d{1,2}:\d{2}", _text(m.group(1)) if m else "")
+            times.append(hhmm.group(0) if hhmm else "")
+        stops.append((_text(name.group(1)), times[0], times[1]))
+    return stops
+
+
+def parse_route(page: str) -> list[str]:
+    """Jména zastávek projetého úseku z detailu spoje."""
+    return [name for name, _, _ in parse_stops(page)]
 
 
 IDS_TAGS = ("IDESKA", "PID", "IDS JMK", "IDOL", "IREDO", "DÚK", "ODIS", "IDZK", "IDSOK", "IDPK",

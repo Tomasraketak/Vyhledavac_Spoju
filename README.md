@@ -226,7 +226,20 @@ nádraží (Domanín, Vrchy → Praha) – takové místo ostatní dopravci nezn
 Spoj se ocení po úsecích: co pokryje IDS, spočítá tarif; úseky mimo IDS
 (dálkový autobus, rychlík do Prahy, RETROBUS do Brna) dopočítá hack
 `idos_complete` u dopravců (Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
-Express) – jízdenka na tentýž spoj. Když se to nepodaří, spoj zůstane vidět
+Express a – jsou-li zapnuté – ČD a OneTicket přes prohlížeč) – jízdenka na
+tentýž spoj.
+
+Vlak se smí rozdělit jen v zastávce, kde staví (zastávky z detailu spoje
+v IDOS). Program porovná několik rozpisů a nabídne nejlevnější:
+- IDS po celých úsecích;
+- nejlevnější pokrytí IDS s lomem ve stanici vlaku, třeba IDESKA do Benešova
+  a PID dál (systémy se na trati 220 překrývají);
+- IDS co nejdál, zbytek vlaku jednou jízdenkou dopravce;
+- vlak celý u dopravce, IDS jen autobus.
+
+Poslední rozpis se zkouší i u spoje, který IDS ocení celý (od 80 Kč na
+cestujícího). Jízdenka ČD se slevou totiž může vyjít levněji; levnější
+výsledek pak spoj z IDS nahradí. Když se cenu dopočítat nepodaří, spoj zůstane vidět
 s jízdním řádem a „cena neznámá“. Stejnojmenné obce (Domanín u Třeboně ×
 Domanín na Moravě) se rozliší podle systému sousedních zastávek. Na dílčí úseky
 jiných hacků se IDOS neptá (desítky dotazů by vedly k blokaci).

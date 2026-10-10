@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from decimal import Decimal
 from typing import Any, Awaitable, Callable, Iterable, Sequence
 
 from .cache import Cache, get_cache
@@ -288,13 +289,18 @@ class SearchEngine:
 
 
 def drop_priced_duplicates(journeys: list[Journey]) -> list[Journey]:
-    """Spoj z IDOS bez ceny schová, když ho hack ocenil (stejné časy i úseky)."""
+    """Spoj z IDOS schová, když ho hack ocenil (stejné časy i úseky) – bez ceny
+    vždy, s cenou IDS jen tehdy, když hack našel levnější jízdenky."""
     def key(j: Journey) -> tuple:
         return (j.departure, j.arrival, tuple(leg.line for leg in j.legs))
 
-    priced = {key(j) for j in journeys if j.is_hack and j.price is not None}
+    priced: dict[tuple, Decimal] = {}
+    for j in journeys:
+        if j.is_hack and j.price is not None:
+            priced[key(j)] = min(j.price, priced.get(key(j), j.price))
     return [j for j in journeys
-            if not (j.provider == "IDS" and j.price is None and key(j) in priced)]
+            if not (j.provider == "IDS" and key(j) in priced
+                    and (j.price is None or priced[key(j)] < j.price))]
 
 
 def available_providers() -> list[str]:
