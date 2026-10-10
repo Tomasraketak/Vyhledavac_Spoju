@@ -8,7 +8,7 @@ autobusů a MHD. Tenhle „dopravce“ tedy:
    který umíme spočítat (zóny míst z databáze zastávek).
 2. Načte z IDOS spojení (``vyhledavac.idos``, nejvýš 2 stránky po 3).
 3. U každého úseku ověří, že platí jízdenka IDS: vlak ČD kategorie Os/Sp/R
-   (ne EC/IC/Ex…), autobus/MHD jen linka zařazená do systému – podle
+   (Ex/IC jen IDESKA na vybraných tratích, EC/railjet ne), autobus/MHD jen linka zařazená do systému – podle
    detailu spoje v IDOS („linka 300 [IDESKA]“) nebo seznamu linek z JDF
    (``data/ids_lines.json.gz``). Dálkové autobusy (UNITED BUSES…) ne.
 4. Cenu spočítá tarif systému (``vyhledavac.ids``) podle zón – u tarifů
@@ -160,13 +160,13 @@ class IdsIdosProvider(HttpProvider):
     async def _priced(self, query: SearchQuery, conn: idos.IdosConnection) -> Journey | None:
         """Ocení spoj jízdenkami IDS – celý, nebo po úsecích; zbytek bez ceny.
 
-        Úseky, kde IDS neplatí (dálkový autobus, EC/IC, RegioJet…), zůstanou
+        Úseky, kde IDS neplatí (dálkový autobus, EC, RegioJet…), zůstanou
         bez ceny. Spoj pak nese v ``raw["plans"]`` několik rozpisů jízdenek
         (IDS po celých úsecích / IDS co nejdál, i uprostřed vlaku v zastávce,
         kde staví) a hack ``idos_complete`` dokoupí zbytek u dopravců a vybere
         nejlevnější rozpis.
         """
-        from ..hacks.ids_ticket import NOT_IDS, SYSTEMS, RouteStop
+        from ..hacks.ids_ticket import SYSTEMS, RouteStop, train_systems
 
         infos = []          # pro každý úsek: (stops, povolené systémy | None = podle zón, IDS platí?)
         route_systems: list[dict] = []
@@ -185,8 +185,8 @@ class IdsIdosProvider(HttpProvider):
                 ok = systems is None or bool(systems)
                 rail = False
             else:
-                ok = not NOT_IDS.match(leg.train_label) and "České dráhy" in leg.carrier
-                systems = None
+                systems = train_systems(leg.train_label)       # IC/Ex jen IDESKA
+                ok = systems != set() and "České dráhy" in leg.carrier
                 rail = True
                 if ok and leg.detail_url:       # zastávky vlaku – jen v nich smí být lom jízdenky
                     try:

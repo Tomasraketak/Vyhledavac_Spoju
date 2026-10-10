@@ -59,6 +59,23 @@ LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM, jmk.SYSTEM, duk.S
            idsok.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
+#: Dálkové vlaky ČD, na které platí jízdenka jen některých IDS. IDESKA platí
+#: ve 2. třídě vybraných dálkových vlaků ČD na tratích 190/191, 194, 196, 220
+#: (až do Benešova u Prahy), 225 a 226 – tedy i na Ex/IC (Jižní expres) uvnitř
+#: zón IDESKA; EC a railjety ne. Zdroj: cd.cz, IDESKA (2026).
+LONG_DISTANCE = re.compile(r"^\s*(Ex|IC)\b")
+LONG_DISTANCE_SYSTEMS = frozenset({"IDESKA"})
+
+
+def train_systems(label: str) -> set[str] | None:
+    """Systémy, ve kterých platí jízdenka IDS na vlak ČD; ``None`` = ve všech."""
+    if LONG_DISTANCE.match(label or ""):
+        return set(LONG_DISTANCE_SYSTEMS)
+    if NOT_IDS.match(label or ""):
+        return set()
+    return None
+
+
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
 MAX_JOURNEYS = 8
 
@@ -101,9 +118,19 @@ def eligible(journey: Journey) -> bool:
         carrier = normalize(leg.carrier or journey.provider)
         if "cd" not in carrier.split() and "ceske drahy" not in carrier:
             return False
-        if NOT_IDS.match(leg.line or ""):
+        if train_systems(leg.line or "") == set():
             return False
     return True
+
+
+def allowed_systems(journey: Journey) -> set[str] | None:
+    """Systémy, které smějí platit na všech vlacích spoje (``None`` = bez omezení)."""
+    allowed = None
+    for leg in journey.legs:
+        only = train_systems(leg.line or "") if leg.mode is Mode.TRAIN else None
+        if only is not None:
+            allowed = only if allowed is None else allowed & only
+    return allowed
 
 
 def _minutes(a: dt.datetime | None, b: dt.datetime | None, fallback: float) -> float:
@@ -161,6 +188,7 @@ class IdsTicketHack(TravelHack):
             if len(route) < 2:
                 continue
             try:
+                self._allowed = allowed_systems(journey)
                 plan = self._best_plan(query, journey, route, cd_tails, cd_heads)
             except Exception:
                 log.exception("ids_ticket: vyhodnocení spoje selhalo")
@@ -288,6 +316,8 @@ class IdsTicketHack(TravelHack):
     def _ids_fare(self, query: SearchQuery, route: list[RouteStop], system: str,
                   i: int, j: int, minutes: float) -> IdsFare | None:
         part = route[i:j + 1]
+        if getattr(self, "_allowed", None) is not None and system not in self._allowed:
+            return None
         if system not in part[0].systems or system not in part[-1].systems:
             return None
         if any(not self._inside(s, system) for s in part):

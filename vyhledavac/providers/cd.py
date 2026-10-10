@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import html
 import logging
 import re
 import time
@@ -453,21 +454,24 @@ class CdProvider(BrowserProvider):
         train_names = [t.strip() for t in train_names if t.strip()]
         line = train_names[1] if len(train_names) > 1 else (train_names[0] if train_names else "ČD vlak")
 
-        leg = Leg(
-            origin=query.origin,
-            destination=query.destination,
-            departure=departure,
-            arrival=arrival,
-            mode=Mode.TRAIN,
-            carrier="ČD",
-            line=line,
-            stops=[Stop(name=query.origin, departure=departure),
-                   Stop(name=query.destination, arrival=arrival)],
-        )
+        legs = parse_card_legs(await card.inner_html(), departure)
+        if not legs or legs[0].departure != departure or legs[-1].arrival != arrival:
+            # bez rozpisu vlaků (změna stránky): aspoň celý spoj jedním úsekem
+            legs = [Leg(
+                origin=query.origin,
+                destination=query.destination,
+                departure=departure,
+                arrival=arrival,
+                mode=Mode.TRAIN,
+                carrier="ČD",
+                line=line,
+                stops=[Stop(name=query.origin, departure=departure),
+                       Stop(name=query.destination, arrival=arrival)],
+            )]
 
         return Journey(
             provider=self.name,
-            legs=[leg],
+            legs=legs,
             fares=fares,
             fare_status=status,
             deep_link=SEARCH_URL,
@@ -475,6 +479,50 @@ class CdProvider(BrowserProvider):
 
 
 _TIME_RE = re.compile(r"(\d{1,2}):(\d{2})")
+_DETAIL_ITEM = '<li class="detailed-schedule__item schedule__item">'
+
+
+def _clean(fragment: str) -> str:
+    text = re.sub(r"<!--.*?-->|<[^>]+>", " ", fragment, flags=re.S)
+    return re.sub(r"\s+", " ", html.unescape(text)).strip()
+
+
+def parse_card_legs(card_html: str, start: dt.datetime) -> list[Leg]:
+    """Vlaky spoje z rozpisu v kartě (``li.detailed-schedule__item``).
+
+    Položky jdou po dvojicích: nástupní stanice s odjezdem, výstupní stanice
+    s příjezdem a názvem vlaku („Sp 2125“). Ikona ``icon-bus`` = autobus
+    (i náhradní doprava). Bez toho by spoj Třeboň → Marchegg se čtyřmi vlaky
+    a přestupy ve Vídni vypadal jako jeden vlak.
+    """
+    items = card_html.split(_DETAIL_ITEM)[1:]
+    points = []
+    for item in items:
+        station = re.search(r'schedule__text--primary">(.*?)</p>', item, re.S)
+        time = re.search(r'schedule__text--time">(.*?)</p>', item, re.S)
+        train = re.search(r"trainTypeAndNum -->(.*?)<", item)
+        carrier = re.search(r'model\.carrier">(.*?)<', item)
+        vehicle = re.search(r'class="icon (icon-[a-z-]+)" data-bind="css: vehicleIcon', item)
+        points.append((_clean(station.group(1)) if station else "", _clean(time.group(1)) if time else "",
+                       _clean(train.group(1)) if train else "", _clean(carrier.group(1)) if carrier else "",
+                       vehicle.group(1) if vehicle else ""))
+    legs: list[Leg] = []
+    last = start
+    for (origin, dep_text, _, _, _), (destination, arr_text, train, carrier, vehicle) in zip(points[::2], points[1::2]):
+        if not origin or not destination or not _TIME_RE.search(dep_text) or not _TIME_RE.search(arr_text):
+            return []
+        dep = _combine(last, dep_text)
+        while dep < last - dt.timedelta(minutes=1):
+            dep += dt.timedelta(days=1)
+        arr = _combine(dep, arr_text)
+        while arr < dep:
+            arr += dt.timedelta(days=1)
+        last = arr
+        legs.append(Leg(origin=origin, destination=destination, departure=dep, arrival=arr,
+                        mode=Mode.BUS if vehicle == "icon-bus" else Mode.TRAIN,
+                        carrier=carrier or "ČD", line=train or "vlak",
+                        stops=[Stop(name=origin, departure=dep), Stop(name=destination, arrival=arr)]))
+    return legs
 
 
 def _combine(base: dt.datetime, time_text: str) -> dt.datetime:

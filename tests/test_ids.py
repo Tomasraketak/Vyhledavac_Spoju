@@ -148,8 +148,24 @@ async def test_not_offered_when_not_cheaper_or_express():
         return []
 
     cheap = cd_journey("České Budějovice", "Tábor", at(10), at(11), 20)
-    express = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="IC 520")
+    express = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="EC 335")
     assert await IdsTicketHack().find(query, [cheap, express], search) == []
+
+
+@pytest.mark.asyncio
+async def test_ideska_valid_on_intercity_but_pid_is_not():
+    # IDESKA platí i ve vybraných dálkových vlacích ČD (trať 220 až do Benešova)
+    query = SearchQuery(origin="České Budějovice", destination="Tábor", departure=at(9))
+
+    async def search(q, allow_browser=False):
+        return []
+
+    ic = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="IC 536")
+    (found,) = await IdsTicketHack().find(query, [ic], search)
+    assert found.provider == "IDESKA" and found.price < Decimal(300)
+    from vyhledavac.hacks.ids_ticket import train_systems
+    assert train_systems("IC 536") == {"IDESKA"} and train_systems("EC 335") == set()
+    assert train_systems("R 722") is None
 
 
 # ---- engine: vnitrostátní cesta bez ÖBB a ZSSK -------------------------------------

@@ -229,3 +229,16 @@ def test_slice_cuts_a_train_at_a_stop():
                        Stop("Praha hl.n.", arrival=at(12, 10))])
     (part,) = _slice([train], [0, 1], [0, 2])
     assert (part.origin, part.departure, part.arrival) == ("Tábor", at(10, 52), at(12, 10))
+
+
+def test_cd_card_lists_every_train_and_transfer():
+    from vyhledavac.providers.cd import parse_card_legs
+
+    legs = parse_card_legs(_page("cd_card_transfers.html.gz"), at(14, 19))
+    assert [(l.line, l.origin, l.destination) for l in legs] == [
+        ("Os 8715", "Třeboň", "České Velenice"),
+        ("Sp 2125", "České Velenice", "Wien Heiligenstadt"),
+        ("S 20651", "Wien Heiligenstadt", "Wien Handelskai (Bahnsteige 1-2)"),
+        ("S 23890", "Wien Handelskai (Bahnsteige 11-12)", "Marchegg")]
+    assert legs[0].mode is Mode.BUS                  # náhradní autobusová doprava
+    assert legs[-1].arrival == at(18, 45) and legs[1].departure == at(15, 7)

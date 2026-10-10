@@ -791,7 +791,10 @@ staví a nejde o spoj s povinnou místenkou. Výsledek vždy nese varování –
 zbytek jízdenky propadá a někteří dopravci to v podmínkách zakazují.
 
 **`ids_ticket` – jízdenky integrovaných systémů místo ČD.** Na regionálních
-vlacích ČD (Os, Sp, R) platí i jízdenky IDS a bývají výrazně levnější. ČD je
+vlacích ČD (Os, Sp, R) platí i jízdenky IDS a bývají výrazně levnější. Jízdenka
+IDESKA platí ve 2. třídě i na dálkových vlacích ČD Ex/IC (Jižní expres) na
+tratích 190/191, 194, 196, 220 (až do Benešova u Prahy), 225 a 226. Na EC
+a railjety jízdenky IDS neplatí. ČD je
 prodávají jen v aplikaci Můj vlak – webový e-shop je nenabízí (ověřeno), proto
 se ceny IDS počítají z tarifů systémů offline. Hack u každého vlaku ČD zjistí
 skutečnou trasu (zastávky a časy z detailu vlaku na cd.cz, jinak ze sítě
