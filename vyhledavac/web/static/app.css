@@ -260,3 +260,8 @@ svg.i { display: block; flex: none; }
   .vsep { display: none; }
   .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
 }
+
+/* Diagnostika */
+.diag { margin-top: 32px; color: var(--color-neutral-700); font-size: 13px; }
+.diag summary { cursor: pointer; letter-spacing: .1em; text-transform: uppercase; font-weight: 600; }
+.diag pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--color-surface); border: 2px solid var(--color-divider); padding: 12px 14px; margin: 10px 0 6px; font-size: 12px; color: var(--color-text); }

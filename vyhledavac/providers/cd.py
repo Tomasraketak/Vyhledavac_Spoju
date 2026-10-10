@@ -30,7 +30,8 @@ import time
 from decimal import Decimal
 from typing import Any
 
-from ..errors import BlockedError, ProviderError, TransientProviderError
+from .. import railnet, stations
+from ..errors import BlockedError, ProviderError, StationNotFoundError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
     FareCategory,
@@ -98,6 +99,14 @@ COOKIE_BUTTONS = [
 ]
 
 
+def without_rail(name: str) -> bool:
+    """Známé místo v Česku, kde žádný vlak nestaví (zastávka nebo obec bez nádraží)?"""
+    place = stations.place(name)
+    if place is None or place.country or "t" in place.kind or railnet._graph() is None:
+        return False
+    return railnet.station_for(name) is None
+
+
 @PROVIDERS.register()
 class CdProvider(BrowserProvider):
     name = "ČD"
@@ -109,6 +118,12 @@ class CdProvider(BrowserProvider):
     countries = ("CZ",)
 
     async def search(self, query: SearchQuery) -> list[Journey]:
+        for name in (query.origin, query.destination):
+            if without_rail(name):
+                # Web ČD hledá jen vlaky: autobusovou zastávku nenabídne a hledání
+                # by jen 90 s čekalo na výsledky, které nepřijdou.
+                raise StationNotFoundError(self.name, f"'{name}' nemá nádraží – ČD hledá jen vlaky "
+                                                      "(autobusy IDS najde zdroj IDS)")
         session = await self.browser()
         page = await session.new_page()
         try:

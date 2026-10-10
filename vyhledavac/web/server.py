@@ -53,7 +53,9 @@ from ..models import (
 from ..money import get_converter
 from ..registry import HACKS, LOAD_ERRORS, PROVIDERS, load_plugins
 from ..runtime import AsyncRunner, explain, short_label
+from .. import version
 from .serialize import journey_key, journey_to_dict
+from ._launch import log_path
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +84,8 @@ SERVER_FILTERS: list[Any] = [
 class SearchSession:
     """Stav jednoho hledání. Mění ho asyncio vlákno, čte HTTP vlákno."""
 
-    def __init__(self, query: SearchQuery, providers: list[str], hacks: list[str]) -> None:
+    def __init__(self, query: SearchQuery, providers: list[str], hacks: list[str],
+                 unknown: list[str] | None = None) -> None:
         self.id = uuid.uuid4().hex[:12]
         self.query = query
         self.providers = providers
@@ -110,9 +113,12 @@ class SearchSession:
                 self._problem(", ".join(single),
                               "umí cenu jen pro jednoho cestujícího – ukazuje cenu za prvního "
                               "z nich, ne za celou skupinu.", "soft")
+        for name in unknown or ():
+            self._problem(name, "tento server dopravce nezná – nejspíš běží starší verze "
+                                "programu. Zavřete všechna okna aplikace a spusťte ji znovu.", "error")
         if "ids_ticket" in hacks and "ČD" not in providers:
-            self._problem("IDS", "jízdenky integrovaných systémů (IDESKA) porovnávám s cenou "
-                                 "Českých drah – zapněte zdroj ČD.", "soft")
+            self._problem("Jízdenky IDS", "hack porovnává jízdenky IDS na vlaky s cenou Českých drah – "
+                                          "bez zdroje ČD je ukáže jen u spojů z IDOS (zdroj IDS).", "soft")
         if any(p.has(DiscountCard.SK_FREE) for p in query.passengers) and "ZSSK" not in providers:
             self._problem("ZSSK", "bezplatnou přepravu na Slovensku uplatní jen ZSSK, která "
                                   "není zapnutá – ceny ostatních dopravců jsou bez ní.", "soft")
@@ -234,6 +240,8 @@ class WebApp:
         self.lock = threading.Lock()
         self.last_seen = time.monotonic()
         self.converter = get_converter()
+        self.shutdown: Any = lambda: None     # nastaví ``main``
+        version.fingerprint()                 # otisk kódu, se kterým server startuje
         try:
             self.runner.submit(self.converter.load()).result(timeout=15)
         except Exception:
@@ -260,11 +268,18 @@ class WebApp:
             "playwright": playwright_available(),
             "eurRate": float(rate) if rate else 25.0,
             "loadErrors": {k: str(v) for k, v in LOAD_ERRORS.items()},
+            "version": {**version.describe(), "log": str(log_path())},
         }
 
     def start_search(self, body: dict[str, Any]) -> SearchSession:
         query = parse_query(body)
-        providers = [p for p in body.get("providers") or [] if p in PROVIDERS.names()]
+        requested = [str(p) for p in body.get("providers") or []]
+        providers = [p for p in requested if p in PROVIDERS.names()]
+        unknown = [p for p in requested if p not in PROVIDERS.names()]
+        log.info("hledání %s → %s, %s, dopravci %s, hacky %s%s", query.origin, query.destination,
+                 query.departure.isoformat(timespec="minutes"), ", ".join(providers),
+                 ", ".join(map(str, body.get("hacks") or [])) or "–",
+                 f", NEZNÁMÍ dopravci {', '.join(unknown)}" if unknown else "")
         if not providers:
             raise ValueError("Vyberte alespoň jeden zdroj dat.")
         hacks = [h for h in body.get("hacks") or [] if h in HACKS.names()]
@@ -275,7 +290,7 @@ class WebApp:
             for old in list(self.sessions.values()):
                 if not old.done:
                     self.cancel(old)
-            session = SearchSession(query, providers, hacks)
+            session = SearchSession(query, providers, hacks, unknown)
             self.sessions[session.id] = session
             for stale in list(self.sessions)[:-6]:
                 self.sessions.pop(stale, None)
@@ -396,7 +411,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/meta":
             return self._json(self.app.meta())
         if path == "/api/ping":
-            return self._json({"ok": True})
+            return self._json({"ok": True, "version": version.fingerprint()})
         if path == "/api/stations":
             params = urllib.parse.parse_qs(self.path.partition("?")[2])
             q = (params.get("q") or [""])[0][:80]
@@ -470,6 +485,12 @@ class Handler(BaseHTTPRequestHandler):
             if session is not None:
                 self.app.cancel(session)
             return self._json({"ok": True})
+        if path == "/api/shutdown" and self.headers.get("X-Vyhledavac") == "restart":
+            # Spouštěč nové verze žádá starý server, ať uvolní port.
+            log.info("ukončuji se kvůli nové verzi programu")
+            self._json({"ok": True})
+            threading.Thread(target=self.app.shutdown, daemon=True).start()
+            return None
         return self._json({"error": "nenalezeno"}, HTTPStatus.NOT_FOUND)
 
 
@@ -483,15 +504,36 @@ def make_server(app: WebApp, port: int = DEFAULT_PORT) -> ThreadingHTTPServer:
     return server
 
 
-def _already_running(port: int) -> bool:
-    """Běží už na portu náš server (druhé dvojkliknutí na spouštěč)?"""
+def _running_version(port: int) -> str | None:
+    """Otisk kódu serveru, který už běží na portu (druhé spuštění); ``None`` = neběží.
+
+    Starší server bez otisku vrací ``""``.
+    """
     import urllib.request
 
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/ping", timeout=1.5) as r:
-            return json.loads(r.read()).get("ok") is True
+            data = json.loads(r.read())
     except Exception:
-        return False
+        return None
+    return str(data.get("version") or "") if data.get("ok") is True else None
+
+
+def _stop_old(port: int) -> bool:
+    """Požádá starý server o ukončení a počká, až uvolní port."""
+    import urllib.request
+
+    request = urllib.request.Request(f"http://127.0.0.1:{port}/api/shutdown", data=b"{}", method="POST",
+                                     headers={"X-Vyhledavac": "restart", "Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(request, timeout=3).close()
+    except Exception:
+        pass
+    for _ in range(40):
+        if _running_version(port) is None:
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def _watchdog(app: WebApp, server: ThreadingHTTPServer, idle: float) -> None:
@@ -518,17 +560,28 @@ def main(argv: list[str] | None = None) -> None:
                         format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    if _already_running(args.port):
+    running = _running_version(args.port)
+    if running is not None:
         url = f"http://127.0.0.1:{args.port}/"
-        log.info("server už běží – otevírám %s", url)
-        if not args.no_browser:
-            webbrowser.open(url)
-        return
+        if running == version.fingerprint():
+            log.info("server už běží – otevírám %s", url)
+            if not args.no_browser:
+                webbrowser.open(url)
+            return
+        # Na portu běží server se starým kódem (třeba z doby před ``git pull``)
+        # – ukončit ho, jinak by prohlížeč dál ukazoval starou verzi.
+        log.info("na portu běží starší verze programu – vyměňuji ji za novou")
+        if not _stop_old(args.port):
+            log.warning("starý server se neukončil, nová verze poběží na jiném portu")
 
     # Databázi zastávek načíst hned – první písmeno v našeptávači pak nečeká.
     threading.Thread(target=stations.database, daemon=True).start()
     app = WebApp()
     server = make_server(app, args.port)
+    app.shutdown = server.shutdown
+    info = version.describe()
+    log.info("verze: větev %s, commit %s, otisk %s", info.get("branch", "?"), info.get("commit", "?"),
+             info["fingerprint"])
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     log.info("Vyhledávač spojů běží na %s", url)
     if args.idle > 0:

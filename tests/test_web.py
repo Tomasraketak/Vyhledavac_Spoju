@@ -258,3 +258,27 @@ def test_parse_query_season_passes():
     assert q.passengers[0].pass_zones("PID") == frozenset({"P", "0", "B"})
     assert q.passengers[0].pass_zones("IDS JMK") == frozenset({"*"})
     assert q.passengers[1].pass_zones("PID") is None
+
+
+def test_ping_reports_code_version_and_old_server_is_replaced(http):
+    from vyhledavac import version
+
+    port = int(http.rsplit(":", 1)[1])
+    assert json.loads(_get(http + "/api/ping")[2])["version"] == version.fingerprint()
+    assert web._running_version(port) == version.fingerprint()
+    # bez hlavičky spouštěče se server nevypne (jiná stránka v prohlížeči to neumí)
+    assert _post(http + "/api/shutdown", {})[0] == 404
+
+
+def test_unknown_provider_is_reported_not_silently_dropped():
+    q = web.parse_query({"from": "Třeboň", "to": "Domanín, Vrchy", "date": "2026-10-10", "time": "15:12"})
+    s = web.SearchSession(q, ["RegioJet"], [], unknown=["IDSX"])
+    problem = next(p for p in s.problems if p["provider"] == "IDSX")
+    assert problem["kind"] == "error" and "starší verze" in problem["message"]
+
+
+def test_cd_skips_places_without_railway():
+    from vyhledavac.providers.cd import without_rail
+
+    assert without_rail("Domanín, Vrchy")
+    assert not without_rail("Třeboň") and not without_rail("Praha") and not without_rail("Wien")

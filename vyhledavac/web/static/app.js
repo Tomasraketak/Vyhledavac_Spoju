@@ -449,6 +449,7 @@
     renderChips();
     renderList(list);
     renderEmpty(list);
+    renderDiag();
     $('#loader').hidden = !S.searching;
     $('#submit-btn').disabled = S.searching;
     $('#submit-btn span').textContent = S.searching ? 'Hledám…' : 'Hledat spojení';
@@ -634,6 +635,46 @@
       return `<button type="button" class="prov" data-act="provider" data-key="${esc(p.name)}" aria-pressed="${on}" title="${esc(p.label)}">${symbol}<strong>${esc(p.name)}</strong>${esc(detail)}${notes.length ? `<span class="note">· ${notes.join(' · ')}</span>` : ''}</button>`;
     }).join('');
     $('#providers').innerHTML = `<span class="row-label">Zdroje dat</span>${chips}<span class="prov-links"><button class="btn btn-ghost" type="button" data-act="prov-fast">rychlé</button><button class="btn btn-ghost" type="button" data-act="prov-all">vše</button></span>`;
+  }
+
+  // Diagnostika: jaká verze serveru běží, které zdroje zná a jak dopadlo hledání.
+  function diagText() {
+    const lines = [];
+    const m = S.meta;
+    if (!m) return 'Nastavení ze serveru se nenačetlo – server neběží nebo neodpovídá.';
+    const v = m.version || {};
+    lines.push(v.fingerprint
+      ? `Verze serveru: větev ${v.branch || '?'}, commit ${v.commit || '?'}, otisk ${v.fingerprint}, spuštěn ${v.started || '?'}`
+      : 'Verze serveru: neznámá – běží starší verze programu (před přidáním diagnostiky). Zavřete všechna okna aplikace a spusťte ji znovu.');
+    if (S.staleServer) lines.push('POZOR: server byl mezitím vyměněn za jinou verzi – obnovte stránku (F5).');
+    if (v.log) lines.push(`Záznam serveru: ${v.log}`);
+    const names = m.providers.map(p => p.name);
+    lines.push(`Zdroje, které server zná: ${names.join(', ')}`);
+    const on = S.providersOn ? [...S.providersOn] : [];
+    lines.push(`Zapnuté zdroje: ${on.join(', ') || '–'}`);
+    const off = names.filter(n => !on.includes(n));
+    if (off.length) lines.push(`Vypnuté zdroje: ${off.join(', ')} (zapnete kliknutím na čip v řádku „Zdroje dat“)`);
+    lines.push(`Zapnuté hacky: ${S.hacksOn ? [...S.hacksOn].join(', ') || '–' : '–'}`);
+    const errors = Object.entries(m.loadErrors || {});
+    lines.push(errors.length ? `Moduly, které se nenačetly:\n${errors.map(([k, e]) => `  ${k}: ${e}`).join('\n')}` : 'Všechny moduly se načetly.');
+    lines.push(`Prohlížeč pro ČD/ZSSK (Playwright): ${m.playwright ? 'ano' : 'ne'}`);
+    if (S.data) {
+      const q = S.data.query || {};
+      lines.push('', `Poslední hledání: ${q.from} → ${q.to}, ${q.departure}${S.data.done ? '' : ' (běží)'}`);
+      for (const p of S.data.providers || []) {
+        lines.push(`  ${p.name}: ${p.status}${p.detail ? ` – ${p.detail}` : ''}${p.elapsed != null ? ` (${p.elapsed} s)` : ''}`);
+      }
+      for (const p of S.data.problems || []) lines.push(`  ! ${p.provider}: ${p.message}${p.raw ? ` [${p.raw}]` : ''}`);
+      lines.push(`  Spojení ze serveru: ${(S.data.journeys || []).length}`);
+    }
+    if (S.clientError) lines.push(`Chyba v prohlížeči: ${S.clientError}`);
+    return lines.join('\n');
+  }
+
+  function renderDiag() {
+    const body = $('#diag-body');
+    if (!body || !$('#diag').open) return;
+    body.innerHTML = `<pre>${esc(diagText())}</pre><button class="btn btn-ghost" type="button" data-act="diag-copy">kopírovat</button>`;
   }
 
   function renderProblems() {
@@ -917,6 +958,9 @@
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },
     disable(key) { S.providersOn.delete(key); toast(`${key} je vypnutý pro další hledání.`); },
     toggle(key) { S.open = S.open === key ? null : key; },
+    'diag-copy'() {
+      navigator.clipboard.writeText(diagText()).then(() => toast('Diagnostika je ve schránce.'), () => toast('Kopírování se nepovedlo – označte text ručně.'));
+    },
     stops(key) { S.stopsOpen.has(key) ? S.stopsOpen.delete(key) : S.stopsOpen.add(key); },
     buy(key) {
       const j = findJourney(key);
@@ -976,7 +1020,17 @@
   });
 
   // Server se sám ukončí, když se prohlížeč delší dobu neozve.
-  setInterval(() => { fetch('/api/ping').catch(() => {}); }, 20000);
+  // Ping zároveň hlídá verzi: když spouštěč vymění server za novější (po
+  // aktualizaci), stránka se sama obnoví, ať nezůstane u starého kódu.
+  setInterval(() => {
+    fetch('/api/ping').then(r => r.json()).then(r => {
+      const mine = S.meta && S.meta.version && S.meta.version.fingerprint;
+      if (!mine || !r.version || r.version === mine) return;
+      if (!S.searching) location.reload();
+      else if (!S.staleServer) { S.staleServer = true; toast('Program byl aktualizován – po hledání obnovte stránku (F5).'); render(); }
+    }).catch(() => {});
+  }, 20000);
+  $('#diag').addEventListener('toggle', renderDiag);
 
   // ---- start ---------------------------------------------------------------
   initForm();

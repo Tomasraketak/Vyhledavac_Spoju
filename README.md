@@ -607,10 +607,16 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   jízdenky lomené jízdenky; *Koupit* otevře web dopravce.
 - **Co se nepovedlo:** panel s vysvětlením a tlačítkem *vypnout*. Nic
   nevyskakuje.
+- **Diagnostika** (rozbalovací pole pod výsledky): běžící verze (větev,
+  commit), cesta k záznamu serveru, které zdroje server zná a které jsou
+  zapnuté, moduly, které se nenačetly, a jak dopadl každý zdroj při
+  posledním hledání. Tlačítko *kopírovat* ho dá do schránky.
 - CZK / EUR, světlý / tmavý motiv, funguje i na mobilu.
 
-Server se sám ukončí, když se stránka 2 minuty neozve (`--idle 0` vypne),
-a druhé spuštění jen otevře už běžící instanci.
+Server se sám ukončí, když se stránka 2 minuty neozve (`--idle 0` vypne).
+Druhé spuštění otevře už běžící instanci – pokud ta ale běží se starším
+kódem (třeba z doby před `git pull`), spouštěč ji ukončí a pustí novou;
+otevřená stránka se pak sama obnoví.
 
 ### Databáze zastávek
 
