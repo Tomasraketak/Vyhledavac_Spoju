@@ -37,7 +37,7 @@ PartialCallback = Callable[[ProviderResult], None]
 
 
 #: Pořadí, ve kterém hacky běží (viz ``SearchEngine.build``).
-HACK_ORDER = ("ids_ticket", "obb_partial", "split_ticket", "hub_transfer", "hidden_city",
+HACK_ORDER = ("idos_complete", "ids_ticket", "obb_partial", "split_ticket", "hub_transfer", "hidden_city",
               "cd_europe_beyond", "cd_europe_border", "regional_pass")
 
 
@@ -139,6 +139,7 @@ class SearchEngine:
             hacked = await self._run_hacks(query, base)
             if hacked:
                 result.journeys.extend(hacked)
+                result.journeys = drop_priced_duplicates(result.journeys)
 
         # Řadíme *před* filtry: jinak by filtr ``limit`` uřízl náhodnou
         # pětici a teprve ji seřadil – "5 nejlevnějších" by nebylo nejlevnějších.
@@ -264,7 +265,7 @@ class SearchEngine:
                 p for p in self.providers
                 if p.provides_prices and p.name not in skipped
                 and (allow_browser or not (p.needs_browser and self.skip_browser_in_hacks))
-                and (not only or p.name in only)
+                and (p.name in (only or ()) or (not only and getattr(p, "hack_legs", True)))
             ]
             if not sellers:
                 self._leg_cache[key] = []
@@ -284,6 +285,16 @@ class SearchEngine:
 
     async def __aexit__(self, *exc: Any) -> None:
         await self.aclose()
+
+
+def drop_priced_duplicates(journeys: list[Journey]) -> list[Journey]:
+    """Spoj z IDOS bez ceny schová, když ho hack ocenil (stejné časy i úseky)."""
+    def key(j: Journey) -> tuple:
+        return (j.departure, j.arrival, tuple(leg.line for leg in j.legs))
+
+    priced = {key(j) for j in journeys if j.is_hack and j.price is not None}
+    return [j for j in journeys
+            if not (j.provider == "IDS" and j.price is None and key(j) in priced)]
 
 
 def available_providers() -> list[str]:

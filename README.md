@@ -219,8 +219,17 @@ leží ve stejném IDS, program načte spojení z idos.cz (vlaky, autobusy, MHD;
 nejvýš 2 stránky), u autobusu ověří v detailu spoje, že linka je v IDS
 („linka 300 [IDESKA]“, jinak seznam linek z JDF `data/ids_lines.json.gz`,
 obnova `python tools/build_ids_lines.py --jdf JDF.zip`), a cenu spočítá tarif
-systému – i podle projetých zón, se slevami, skupinou a předplatným. Dálkové
-autobusy a vlaky EC/IC/RJ se vynechají.
+systému – i podle projetých zón, se slevami, skupinou a předplatným.
+
+IDOS se ptá i tehdy, když je jeden konec cesty obyčejná zastávka nebo obec bez
+nádraží (Domanín, Vrchy → Praha) – takové místo ostatní dopravci neznají.
+Spoj se ocení po úsecích: co pokryje IDS, spočítá tarif; úseky mimo IDS
+(dálkový autobus, rychlík do Prahy, RETROBUS do Brna) dopočítá hack
+`idos_complete` u dopravců (Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
+Express) – jízdenka na tentýž spoj. Když se to nepodaří, spoj zůstane vidět
+s jízdním řádem a „cena neznámá“. Stejnojmenné obce (Domanín u Třeboně ×
+Domanín na Moravě) se rozliší podle systému sousedních zastávek. Na dílčí úseky
+jiných hacků se IDOS neptá (desítky dotazů by vedly k blokaci).
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly

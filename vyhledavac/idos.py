@@ -103,7 +103,7 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
         share = re.search(r'data-share-url="([^"]+)"', box)
         legs: list[IdosLeg] = []
         last: dt.datetime | None = None
-        for item in box.split('<div class="outside-of-popup">')[1:]:
+        for item in re.split(r'<div class="outside-of-popup[^"]*">', box)[1:]:
             title = re.search(r'<h3 title="([^"]*)"[^>]*>(.*?)</h3>', item, re.S)
             if not title:
                 continue

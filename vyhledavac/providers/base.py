@@ -62,6 +62,8 @@ class Provider(abc.ABC):
     international_only: ClassVar[bool] = False
     #: Umí cenu pro skupinu různých cestujících (jinak se ptá za prvního).
     multi_passenger: ClassVar[bool] = False
+    #: Smí se ho ptát travel hacky na dílčí úseky? (IDS z IDOS ne – drahé dotazy.)
+    hack_legs: ClassVar[bool] = True
 
     def __init__(
         self,

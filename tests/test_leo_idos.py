@@ -104,6 +104,65 @@ async def test_ids_provider_prices_ideska_bus(monkeypatch):
     query = SearchQuery(origin="Třeboň", destination="Jindřichův Hradec",
                         departure=dt.datetime(2026, 10, 20, 6, 0, tzinfo=at(6).tzinfo))
     journeys = await provider.search(query)
-    buses = [j for j in journeys if j.legs[0].mode is Mode.BUS]
-    assert buses and all(j.legs[0].line == "Bus 300" for j in buses)      # dálkový bus vyřazen
-    assert buses[0].price > 0 and "IDESKA" in buses[0].fares[0].tariff
+    buses = {j.legs[0].line: j for j in journeys if j.legs[0].mode is Mode.BUS}
+    assert buses["Bus 300"].price > 0 and "IDESKA" in buses["Bus 300"].fares[0].tariff
+    # dálkový autobus IDS neplatí: spoj zůstane bez ceny, úsek čeká na hack idos_complete
+    assert buses["Bus 320927 101"].price is None
+    assert buses["Bus 320927 101"].raw["unpriced"] == [0]
+
+
+def test_idos_leg_after_walk_is_separate():
+    page = '''<div class="box connection detail-box">
+    <div class="outside-of-popup"><h3 title="místní autobus (x)"><span>Bus 350</span></h3>
+      <p class="reset time" >6:05</p><p class="station"><strong class="name ">Domanín,,Vrchy</strong></p>
+      <p class="reset time" >6:38</p><p class="station"><strong class="name ">Borovany,,žel.st.</strong></p></div>
+    <div class="outside-of-popup outside-of-popup--with-link-dist"><div class="walk walk--detail"></div>
+      <h3 title="osobní vlak (x)"><span>Os 2146</span></h3>
+      <p class="reset time" >6:44</p><p class="station"><strong class="name ">Borovany</strong></p>
+      <p class="reset time" >7:03</p><p class="station"><strong class="name ">České Budějovice</strong></p></div>
+    </div>'''
+    (conn,) = idos.parse_results(page, dt.date(2026, 10, 20))
+    assert [l.line for l in conn.legs] == ["Bus 350", "Os 2146"]
+    assert conn.legs[0].destination == "Borovany,,žel.st."
+
+
+def test_same_named_stop_prefers_neighbouring_system():
+    # „Domanín“ je obec u Třeboně (IDESKA) i na jižní Moravě (IDS JMK)
+    place = ids_idos._place("Domanín", False, {"IDESKA"})
+    assert "IDESKA" in place.systems
+
+
+def test_drop_unpriced_idos_when_hack_priced_it():
+    from vyhledavac.engine import drop_priced_duplicates
+    from vyhledavac.models import Journey, Leg
+
+    leg = Leg("A", "B", at(6), at(7), Mode.BUS, "x", "Bus 350")
+    raw = Journey(provider="IDS", legs=[leg])
+    priced = Journey(provider="IDESKA + Arriva", legs=[leg], segments=[raw])
+    priced.fares = [__import__("vyhledavac.models", fromlist=["Fare"]).Fare(
+        amount=Decimal(10), currency="CZK", amount_czk=Decimal(10))]
+    assert drop_priced_duplicates([raw, priced]) == [priced]
+
+
+@pytest.mark.asyncio
+async def test_idos_complete_prices_rest_with_same_train():
+    from vyhledavac.hacks.idos_complete import IdosCompleteHack
+    from vyhledavac.models import Journey, Leg
+
+    bus = Leg("Domanín, Vrchy", "České Budějovice", at(6, 5), at(7, 3), Mode.BUS, "ČSAD", "Bus 350")
+    train = Leg("České Budějovice", "Praha hl.n.", at(7, 10), at(9, 10), Mode.TRAIN, "ČD", "R 728")
+    journey = Journey(provider="IDS", legs=[bus, train],
+                      raw={"ids_pieces": [(0, 0, "49", "IDESKA", "Plné jízdné")], "unpriced": [1]})
+    from conftest import make_journey
+    sjt = make_journey(provider="Arriva", origin="České Budějovice", destination="Praha hl.n.",
+                       dep=at(7, 10), arr=at(9, 10), price=352, line="R 728")
+    other = make_journey(provider="Arriva", origin="České Budějovice", destination="Praha hl.n.",
+                         dep=at(7, 58), arr=at(9, 39), price=300, line="IC 538")
+
+    async def search(q, allow_browser=False, only=None):
+        assert "IDS" not in (only or [])
+        return [sjt, other]
+
+    (done,) = await IdosCompleteHack().find(SearchQuery(origin="Domanín vrchy", destination="Praha",
+                                                        departure=at(6)), [journey], search)
+    assert done.price == Decimal(401) and [s.provider for s in done.segments] == ["IDESKA", "Arriva"]

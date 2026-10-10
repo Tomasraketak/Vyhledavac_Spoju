@@ -260,7 +260,8 @@ class IdsTicketHack(TravelHack):
 
     @staticmethod
     def _inside(stop: RouteStop, system: str) -> bool:
-        return system in stop.systems or (system in LENIENT and not stop.systems)
+        # autobusová zastávka bez známé zóny (malá obec) trasu systému nepřeruší
+        return system in stop.systems or (not stop.systems and (system in LENIENT or not stop.rail))
 
     @classmethod
     def _last_inside(cls, route: list[RouteStop], system: str) -> int | None:

@@ -77,7 +77,7 @@
   const S = {
     meta: null,
     providersOn: null,            // Set jmen – nastaví se po načtení meta
-    hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket', 'obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass'])),
+    hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket', 'idos_complete', 'obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass'])),
     // Cestující: [{age, isic, skFree}] – starší verze ukládala jednoho do kořene.
     pax: loadPax(),
     passes: loadPasses(),
@@ -110,9 +110,9 @@
     store.set('hacks', [...S.hacksOn]);
   }
   // Přestupy v Praze/Brně, Včasná Evropa a regionální jízdenky – také jednou zapnout.
-  if (!store.get('euroHacksOffered2', false)) {
-    ['obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass'].forEach(h => S.hacksOn.add(h));
-    store.set('euroHacksOffered2', true);
+  if (!store.get('euroHacksOffered3', false)) {
+    ['idos_complete', 'obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass'].forEach(h => S.hacksOn.add(h));
+    store.set('euroHacksOffered3', true);
     store.set('hacks', [...S.hacksOn]);
   }
 
