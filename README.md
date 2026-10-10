@@ -202,12 +202,23 @@ asyncio.run(main())
 | **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ | ne | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ | ✅ | ~3 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅² | ✅ | ~5 s | ověřeno živě (říjen 2026) |
+| **MÁV** | `providers/mav.py` | JSON API e-shopu jegy.mav.hu | ✅⁴ | ne | ~5 s | ověřeno živě, vč. skupin (říjen 2026) |
 | **LeoExpress** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ | ✅ | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅³ | ✅ | ~5 s | ověřeno živě (říjen 2026) |
 
 ² Cena za jednoho dospělého (normální jízdné); ptá se jen, když cesta začíná
 nebo končí v Polsku.
 ³ Cena spočítaná z tarifu integrovaného systému, ne od prodejce.
+⁴ Ptá se jen, když cesta začíná nebo končí v Maďarsku.
+
+**MÁV** (Maďarské dráhy) – veřejné JSON API e-shopu jegy.mav.hu
+(`IK_API_PROD/api/OfferRequestApi`). Seznam ~54 tis. stanic a zastávek se
+stáhne jednou za 14 dní. „Budapest“ znamená všechna budapešťská nádraží
+(skupina „BUDAPEST*“). Typ cestujícího se vybere podle věku z číselníku MÁV,
+zvlášť pro vnitrostátní a mezinárodní jízdenky. Cena je za 2. třídu pro celou
+skupinu: mezinárodně v EUR (např. Praha → Budapešť od 37 €), po Maďarsku
+v HUF. Ptá se jen tehdy, když aspoň jeden konec cesty leží v Maďarsku – pro
+Praha – Brno nebo Praha – Vídeň nejde na MÁV žádný dotaz.
 
 **Leo Express** se ptá jen tam, kde opravdu jezdí: obě místa musí být v jeho
 seznamu ~190 stanic (Praha, Pardubice, Olomouc, Ostrava, Kraków, Žilina,
@@ -248,7 +259,8 @@ jiných hacků se IDOS neptá (desítky dotazů by vedly k blokaci).
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
 fungovat – viz [ÖBB](#öbb).
 
-Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto, Arriva a PKP – jsou rychlé
+Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV,
+Leo Express a IDS – jsou rychlé
 a nepotřebují prohlížeč. Ostatní zapnete v GUI v panelu *Zdroje dat*
 nebo přes `--providers`.
 
