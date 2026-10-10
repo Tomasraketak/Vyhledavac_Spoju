@@ -778,6 +778,15 @@ Příklady (12. 10. 2026, ověřeno proti ČD): Třeboň → Havlíčkův Brod R
 České Budějovice → Plzeň R 638 (student s ISIC) ČD 102 Kč, IDESKA do
 Horažďovic 49 Kč + IDPK (6 zón do Plzně) 40 Kč = **89 Kč**.
 
+**Lom jen tam, kde vlak staví.** Podle SPPO ČD musí mít cestující jízdenku
+aspoň do nejbližší stanice, kde jeho vlak zastavuje – jízdenka končící ve
+stanici, kterou vlak projíždí (např. Kralice nad Oslavou u rychlíku Náměšť
+n. O. – Brno), nestačí. Hack proto lomí jen ve stanicích, kde zastavení
+potvrdil jízdní řád: trasa vlaku z cd.cz, zastávky spoje ČD, tentýž vlak
+u jiného dopravce (Arriva vrací celou trasu i přes změnu čísla vlaku).
+Trasa ze železniční sítě (když vlak cestou mění číslo) slouží jen
+k výpočtu projetých zón.
+
 Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u ČD).
 **ODIS** má jen zóny (z jízdních řádů, ukazují se v našeptávači a detailu):
 jízdné REGION se od 2025 počítá z tarifních kilometrů (5 Kč + 0,75 Kč/km),

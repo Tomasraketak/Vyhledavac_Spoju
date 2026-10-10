@@ -92,9 +92,10 @@ def offline_cd(monkeypatch):
         monkeypatch.setattr(tariff, "_prices", {})
 
 
-def cd_journey(origin, destination, dep, arr, price, line="Os 8800"):
+def cd_journey(origin, destination, dep, arr, price, line="Os 8800", stops=None):
+    """Spoj ČD; ``stops`` = stanice, kde vlak zastavuje (jen tam smí být lom)."""
     j = make_journey(provider="ČD", origin=origin, destination=destination,
-                     dep=dep, arr=arr, price=price, line=line)
+                     dep=dep, arr=arr, price=price, line=line, stops=stops)
     j.legs[0].carrier = "ČD"
     return j
 
@@ -102,7 +103,9 @@ def cd_journey(origin, destination, dep, arr, price, line="Os 8800"):
 @pytest.mark.asyncio
 async def test_split_at_ideska_boundary():
     query = SearchQuery(origin="Třeboň", destination="Havlíčkův Brod", departure=at(9))
-    base = cd_journey("Třeboň", "Havlíčkův Brod", at(10), at(12, 30), 250)
+    base = cd_journey("Třeboň", "Havlíčkův Brod", at(10), at(12, 30), 250,
+                      stops=["Třeboň", "Veselí nad Lužnicí", "Jindřichův Hradec", "Počátky-Žirovnice",
+                             "Horní Cerekev", "Havlíčkův Brod"])
     calls = []
 
     async def search(q, allow_browser=False):
@@ -220,7 +223,8 @@ def test_physical_route_includes_stations_express_skips():
 @pytest.mark.asyncio
 async def test_two_systems_in_a_row():
     query = SearchQuery(origin="České Budějovice", destination="Plzeň", departure=at(5))
-    base = cd_journey("České Budějovice", "Plzeň", at(6), at(8), 300)
+    base = cd_journey("České Budějovice", "Plzeň", at(6), at(8), 300,
+                      stops=["České Budějovice", "Strakonice", "Horažďovice předměstí", "Nepomuk", "Plzeň"])
 
     async def search(q, allow_browser=False):
         return []
@@ -249,7 +253,9 @@ async def test_ideska_then_vdv(monkeypatch):
     from vyhledavac.ids import online
     monkeypatch.setitem(online.vdv._prices, ("758", "600"), online.vdv.parse(VDV_HTML))
     query = SearchQuery(origin="Třeboň", destination="Havlíčkův Brod", departure=at(5))
-    base = cd_journey("Třeboň", "Havlíčkův Brod", at(6, 6), at(8, 51), 269)
+    base = cd_journey("Třeboň", "Havlíčkův Brod", at(6, 6), at(8, 51), 269,
+                      stops=["Třeboň", "Veselí n.Lužnicí", "Jindřichův Hradec", "Počátky-Žirovnice",
+                             "Horní Cerekev", "Jihlava", "Havlíčkův Brod"])
 
     async def search(q, allow_browser=False):
         return []
@@ -294,7 +300,8 @@ async def test_vdv_then_jmk_chain(monkeypatch):
     """Žďár nad Sázavou → Brno: VDV do Křižanova, dál IDS JMK."""
     monkeypatch.setitem(online.vdv._prices, ("400", "347"), online.vdv.parse(VDV_HTML))
     query = SearchQuery(origin="Žďár nad Sázavou", destination="Brno", departure=at(9))
-    base = cd_journey("Žďár nad Sázavou", "Brno", at(10), at(11, 10), 200)
+    base = cd_journey("Žďár nad Sázavou", "Brno", at(10), at(11, 10), 200,
+                      stops=["Žďár nad Sázavou", "Křižanov", "Tišnov", "Brno hl. n."])
 
     async def search(q, allow_browser=False):
         return []
@@ -415,3 +422,27 @@ async def test_season_pass_in_whole_hack():
     found = await IdsTicketHack().find(query, [cd_journey("České Budějovice", "Tábor", at(10),
                                                           at(11), 999)], None)
     assert found and found[0].price == 0
+
+
+@pytest.mark.asyncio
+async def test_no_split_where_train_only_passes(monkeypatch):
+    """Lom jen ve stanici, kde vlak staví (SPPO ČD): R jede Náměšť n.O. – Brno bez
+    zastavení v Kralicích, takže tam jízdenka VDV končit nesmí."""
+    monkeypatch.setitem(online.vdv._prices, ("758", "303"), online.vdv.parse(VDV_HTML))
+    query = SearchQuery(origin="Počátky-Žirovnice", destination="Brno", departure=at(9))
+    base = cd_journey("Počátky-Žirovnice", "Brno", at(10), at(12), 400, line="R 653",
+                      stops=["Počátky-Žirovnice", "Horní Cerekev", "Jihlava", "Třebíč",
+                             "Náměšť n.Oslavou", "Brno hl. n."])
+
+    async def search(q, allow_browser=False):
+        return []
+
+    found = await IdsTicketHack().find(query, [base], search)
+    for journey in found:
+        assert all(s.origin != "Kralice nad Oslavou" and s.destination != "Kralice nad Oslavou"
+                   for s in journey.segments)
+    route = [ids_ticket._stop(n) for n in railnet.route("Počátky-Žirovnice", "Brno")]
+    assert any(s.name == "Kralice nad Oslavou" for s in route)      # síť ji zná…
+    ids_ticket._mark_halts(route, {ids_ticket._station_key(n) for n in base.legs[0].stop_names()})
+    halts = {s.name for s in route if s.halts}
+    assert "Kralice nad Oslavou" not in halts and "Náměšť nad Oslavou" in halts   # …ale vlak tam nestaví

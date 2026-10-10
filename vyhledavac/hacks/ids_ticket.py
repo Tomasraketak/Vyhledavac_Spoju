@@ -14,7 +14,11 @@ jinak síť z jízdního řádu) a zkusí:
    Brod: IDESKA do Počátek-Žirovnice, zbytek u ČD), nebo obráceně.
 
 Vybere nejlevnější variantu. Cestující nikde nepřestupuje – jen má víc
-jízdenek. Na ČD se pro lom ptá nejvýš jednou na každou stanici lomu (hledání
+jízdenek. **Lom jen ve stanici, kde vlak zastavuje:** podle SPPO ČD musí mít
+cestující jízdenku aspoň do nejbližší stanice, kde jeho vlak staví – jízdenka
+„do“ stanice, kterou vlak projíždí, nestačí. Když trasu vlaku z cd.cz nemáme
+(vlak cestou mění číslo) a bere se ze sítě, smí být lom jen v zastávce
+potvrzené jízdním řádem spoje (ČD, Arriva, cd.cz po částech). Na ČD se pro lom ptá nejvýš jednou na každou stanici lomu (hledání
 přes prohlížeč je pomalé), výsledek poslouží všem vlakům najednou.
 """
 
@@ -24,7 +28,7 @@ import asyncio
 import datetime as dt
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Sequence
 
@@ -67,6 +71,7 @@ class RouteStop:
     kraj: str = ""
     node: str = ""                  # jméno v železniční síti (pro projeté stanice)
     estimated: bool = False         # čas je odhad ze sítě, ne z jízdního řádu vlaku
+    halts: bool = True              # vlak tu opravdu zastavuje (jen tady smí být lom)
 
 
 @dataclass
@@ -123,7 +128,12 @@ class IdsTicketHack(TravelHack):
         fallback = [_stop(n) for n in railnet.route(query.origin, query.destination)]
         async with httpx.AsyncClient() as client:
             routes = await asyncio.gather(*(self._route(client, query, j) for j in base))
-        routes = [r or _with_times(fallback, j) for r, j in zip(routes, base)]
+            estimated = [not r for r in routes]
+            routes = [r or _with_times(fallback, j) for r, j in zip(routes, base)]
+            for route, journey, guess in zip(routes, base, estimated):
+                if guess and route:
+                    known = await self._known_stops(client, journey, journeys)
+                    _mark_halts(route, known)
         await self._prefetch(routes, query)
 
         # Úseky, na které se musí zeptat ČD – jedna otázka na stanici lomu.
@@ -172,7 +182,7 @@ class IdsTicketHack(TravelHack):
                 n = len(route) - 1
                 if n < 1:
                     continue
-                points = {0, n} | {k for k in range(1, n) if len(route[k].systems) >= 2}
+                points = {0, n} | {k for k in range(1, n) if len(route[k].systems) >= 2 and route[k].halts}
                 for other in SYSTEMS:
                     for k in (self._last_inside(route, other), self._first_inside(route, other)):
                         if k is not None:
@@ -213,7 +223,40 @@ class IdsTicketHack(TravelHack):
             route.append(_stop(ours, s.name, s.departure if i == 0 else s.arrival or s.departure))
         return route
 
+    async def _known_stops(self, client: httpx.AsyncClient, journey: Journey,
+                           others: Sequence[Journey]) -> set[str]:
+        """Stanice, kde vlak spoje podle jízdního řádu opravdu zastavuje.
+
+        Zdroje: zastávky v samotném spoji, tentýž vlak od jiného dopravce
+        (Arriva vrací celou trasu i přes změnu čísla vlaku) a cd.cz pro
+        každý úsek zvlášť (i když vlak cestou změní číslo, každé číslo zvlášť
+        ukáže svůj kus trasy).
+        """
+        names: set[str] = set()
+        rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+        for leg in rides:
+            names.update(s.name for s in leg.stops)
+            names.update((leg.origin, leg.destination))
+        for other in others:
+            if other is journey or not _close(other.departure, journey.departure) \
+                    or not _close(other.arrival, journey.arrival):
+                continue
+            if any(leg.mode is not Mode.TRAIN for leg in other.legs if leg.mode is not Mode.WALK):
+                continue
+            for leg in other.legs:
+                names.update(s.name for s in leg.stops)
+        for leg in rides:
+            for number in dict.fromkeys(_numbers(leg.line)):
+                stops = await cdtrain.train_stops(client, number, leg.departure)
+                names.update(s.name for s in stops if s.arrival or s.departure)
+        return {_station_key(n) for n in names if n}
+
     # ---- plánování ----------------------------------------------------------------
+    @staticmethod
+    def _split_point(stop: RouteStop, system: str) -> bool:
+        """Smí tu jízdenka systému končit/začínat? Známá zóna a vlak tu staví."""
+        return system in stop.systems and stop.halts
+
     @staticmethod
     def _inside(stop: RouteStop, system: str) -> bool:
         return system in stop.systems or (system in LENIENT and not stop.systems)
@@ -225,8 +268,8 @@ class IdsTicketHack(TravelHack):
         k = 0
         while k + 1 < len(route) and cls._inside(route[k + 1], system):
             k += 1
-        while k > 0 and system not in route[k].systems:
-            k -= 1             # lom jen ve stanici se známou zónou
+        while k > 0 and not cls._split_point(route[k], system):
+            k -= 1             # lom jen ve stanici se známou zónou, kde vlak staví
         return k
 
     @classmethod
@@ -236,7 +279,7 @@ class IdsTicketHack(TravelHack):
         k = len(route) - 1
         while k - 1 >= 0 and cls._inside(route[k - 1], system):
             k -= 1
-        while k < len(route) - 1 and system not in route[k].systems:
+        while k < len(route) - 1 and not cls._split_point(route[k], system):
             k += 1
         return k
 
@@ -306,7 +349,7 @@ class IdsTicketHack(TravelHack):
         # 1+2) jízdenky IDS za sebou – jeden systém, nebo řetěz několika
         #      (Praha → Brno: PID, IREDO, IDS JMK). Lom jen ve stanici, která
         #      patří do více systémů; nejlevnější řetěz hledá dynamické programování.
-        nodes = [0] + [k for k in range(1, n) if len(route[k].systems) >= 2] + [n]
+        nodes = [0] + [k for k in range(1, n) if len(route[k].systems) >= 2 and route[k].halts] + [n]
         best: dict[int, Plan] = {0: Plan(Decimal(0), [])}
         for b in nodes[1:]:
             for a in nodes:
@@ -372,7 +415,10 @@ class IdsTicketHack(TravelHack):
                     f"{_zones(fare)}) za {plan.total:.0f} Kč místo {journey.price:.0f} Kč u ČD – "
                     f"ušetříte {saving:.0f} Kč.")
         else:
-            note = (f"✂️ Nepřestupujete – stejný vlak, jen {len(segments)} jízdenky: "
+            rides = sum(1 for leg in journey.legs if leg.mode is not Mode.WALK)
+            same = ("Nepřestupujete – stejný vlak" if rides == 1
+                    else "Stejné vlaky a přestupy jako u ČD")
+            note = (f"✂️ {same}, jen {len(segments)} jízdenky (lom jen ve stanicích, kde vlak staví): "
                     + "; ".join(lines) + f". Celkem {plan.total:.0f} Kč místo "
                     f"{journey.price:.0f} Kč za jednu jízdenku ČD – ušetříte {saving:.0f} Kč.")
         notes = [note, "Jízdenky IDS platí v regionálních vlacích ČD (Os, Sp, R) zařazených do "
@@ -405,6 +451,30 @@ def _with_times(route: list[RouteStop], journey: Journey) -> list[RouteStop]:
         when = journey.departure + dt.timedelta(minutes=minutes * scale)
         timed.append(RouteStop(stop.name, when, stop.systems, stop.kraj, stop.node, True))
     return timed
+
+
+def _station_key(name: str) -> str:
+    """Jedna podoba jména stanice pro porovnání („Náměšť n.Oslavou“ = „Náměšť nad Oslavou“)."""
+    place = stations.rail_place(name)
+    return normalize(place.name if place else name)
+
+
+def _numbers(line: str) -> list[str]:
+    """Čísla vlaků z označení spoje („R 653“, „R 653 ➔ R 96653“)."""
+    return re.findall(r"\b\d{2,6}\b", line or "")
+
+
+def _mark_halts(route: list[RouteStop], known: set[str]) -> None:
+    """Trasa odhadnutá ze sítě obsahuje i stanice, kterými vlak jen projíždí.
+
+    Zastavení se počítá jen tam, kde ho potvrdil jízdní řád (``known``);
+    konce cesty jsou vždy zastávky.
+    """
+    last = len(route) - 1
+    for k, stop in enumerate(route):
+        halts = k in (0, last) or _station_key(stop.node or stop.name) in known \
+            or _station_key(stop.name) in known
+        route[k] = replace(stop, halts=halts)
 
 
 def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:
