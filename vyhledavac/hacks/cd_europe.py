@@ -32,10 +32,10 @@ from typing import Sequence
 
 import httpx
 
-from .. import geo
+from .. import citytransfer, geo
 from ..models import Fare, FareStatus, Journey, SearchQuery
 from ..money import get_converter
-from ..normalize import matches_station
+from ..normalize import matches_station, normalize
 from ..registry import HACKS
 from .base import SearchFn, TravelHack, combine
 
@@ -59,7 +59,17 @@ def continues(first: Journey, second: Journey) -> bool:
     gap = second.departure - first.arrival
     if _numbers(last.line) & _numbers(nxt.line) and abs(gap.total_seconds()) <= 180:
         return True
-    return MIN_TRANSFER <= gap <= dt.timedelta(hours=3)
+    needed = MIN_TRANSFER
+    # v Praze/Brně známe přejezd mezi nádražími (Na Knížecí -> hl. n. metrem)
+    move = citytransfer.transfer(first.destination, second.origin)
+    if move is not None:
+        needed = max(needed, dt.timedelta(minutes=move.needed if move.minutes else 0))
+    elif normalize(first.destination) != normalize(second.origin) and (
+            citytransfer.hub_of(first.destination)
+            or not (matches_station(first.destination, second.origin)
+                    or matches_station(second.origin, first.destination))):
+        return False         # jiná stanice, přejezd neznáme
+    return needed <= gap <= dt.timedelta(hours=3)
 
 
 def _stops_at(journey: Journey, station: str) -> bool:

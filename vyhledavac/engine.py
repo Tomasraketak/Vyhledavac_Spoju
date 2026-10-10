@@ -37,7 +37,7 @@ PartialCallback = Callable[[ProviderResult], None]
 
 
 #: Pořadí, ve kterém hacky běží (viz ``SearchEngine.build``).
-HACK_ORDER = ("ids_ticket", "split_ticket", "hub_transfer", "hidden_city",
+HACK_ORDER = ("ids_ticket", "obb_partial", "split_ticket", "hub_transfer", "hidden_city",
               "cd_europe_beyond", "cd_europe_border", "regional_pass")
 
 

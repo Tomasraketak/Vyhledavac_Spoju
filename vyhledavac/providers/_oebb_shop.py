@@ -262,6 +262,9 @@ class ShopOffer:
     first_class: Decimal | None = None
     sold_out: bool = False
     has_offer: bool = False
+    section_count: int = 0
+    #: Cena platí jen pro část trasy (``reducedScope``): (odkud, kam) podle shopu.
+    scope: tuple[str, str] | None = None
 
 
 def parse_time(value: Any) -> dt.datetime | None:
@@ -309,7 +312,8 @@ def parse_connection(raw: dict[str, Any]) -> ShopOffer | None:
             is_train=bool(category.get("train", True)),
         ))
     return ShopOffer(connection_id=str(raw["id"]), departure=departure,
-                     arrival=arrival, sections=sections)
+                     arrival=arrival, sections=sections,
+                     section_count=len(raw.get("sections") or []))
 
 
 def apply_offer(offer: ShopOffer, raw: dict[str, Any]) -> None:
@@ -328,6 +332,14 @@ def apply_offer(offer: ShopOffer, raw: dict[str, Any]) -> None:
         return
     offer.price = price
     offer.first_class = _decimal(raw.get("firstClass"))
+    # „Ticket nur für Teilstrecke“: cena jen za úseky sectionIdx od–do
+    for part in raw.get("reducedScope") or []:
+        start, end = part.get("from") or {}, part.get("to") or {}
+        whole = (start.get("sectionIdx", 0) == 0
+                 and end.get("sectionIdx", -1) >= max(offer.section_count - 1, 0))
+        if not whole:
+            offer.scope = (str(start.get("name") or ""), str(end.get("name") or ""))
+            break
 
 
 # ---------------------------------------------------------------------------

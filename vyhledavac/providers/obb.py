@@ -232,6 +232,18 @@ def merge_offers(journeys: list[Journey], offers: list[ShopOffer], provider,
 
 
 def _price_journey(journey: Journey, offer: ShopOffer, provider) -> None:
+    if offer.price is not None and offer.scope is not None:
+        # Shop prodá jízdenku jen na část trasy – jako cena celého spoje by
+        # vyšla nesmyslně nízko. Zbytek dopočítá hack ``obb_partial``.
+        start, end = offer.scope
+        price_czk = provider.converter.to_czk(offer.price, "EUR")
+        journey.fares = []
+        journey.fare_status = FareStatus.NOT_BOOKABLE
+        journey.notes.append(f"ÖBB prodá jízdenku jen na úsek {start} → {end} "
+                             f"({offer.price:.2f} €) – zbytek trasy je potřeba dokoupit jinde.")
+        journey.raw["partial"] = {"from": start, "to": end, "eur": str(offer.price),
+                                  "czk": str(price_czk) if price_czk is not None else None}
+        return
     if offer.price is not None:
         journey.fares = [provider.make_fare(offer.price, "EUR", label="od",
                                             tariff="dospělý bez slevy")]

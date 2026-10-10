@@ -60,7 +60,7 @@ log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8765
 #: Hacky zapnuté při prvním spuštění.
-DEFAULT_HACKS = ("split_ticket", "ids_ticket", "hub_transfer", "cd_europe_border",
+DEFAULT_HACKS = ("split_ticket", "ids_ticket", "obb_partial", "hub_transfer", "cd_europe_border",
                  "cd_europe_beyond", "regional_pass")
 #: Po kolika sekundách bez jediného dotazu z prohlížeče se server ukončí.
 IDLE_SHUTDOWN = 120.0

@@ -118,10 +118,18 @@ async def test_beyond_uses_obb_times_when_cd_shows_only_border_train():
 
 
 def test_same_train_or_transfer():
-    a = make_journey(dep=at(7), arr=at(9), line="R 321")
-    assert continues(a, make_journey(dep=at(9, 1), arr=at(10), line="R 321"))
-    assert not continues(a, make_journey(dep=at(9, 1), arr=at(10), line="REX 7"))
-    assert continues(a, make_journey(dep=at(9, 10), arr=at(10), line="REX 7"))
+    a = make_journey(dep=at(7), arr=at(9), line="R 321", origin="Třeboň", destination="Marchegg")
+    nxt = dict(origin="Marchegg", destination="Bratislava hl.st.")
+    assert continues(a, make_journey(dep=at(9, 1), arr=at(10), line="R 321", **nxt))
+    assert not continues(a, make_journey(dep=at(9, 1), arr=at(10), line="REX 7", **nxt))
+    assert continues(a, make_journey(dep=at(9, 10), arr=at(10), line="REX 7", **nxt))
+    # jiná stanice v Praze: nutný přejezd (Na Knížecí -> hl. n. metrem, ne za 6 minut)
+    bus = make_journey(dep=at(7), arr=at(9), origin="Třeboň", destination="Praha (Na Knížecí)")
+    train = dict(origin="Praha hl.n.", destination="Bratislava hl.st.")
+    assert not continues(bus, make_journey(dep=at(9, 6), arr=at(13), line="EC 283", **train))
+    assert continues(bus, make_journey(dep=at(9, 40), arr=at(13), line="EC 283", **train))
+    assert not continues(bus, make_journey(dep=at(9, 40), arr=at(13), origin="Brno hl.n.",
+                                           destination="Bratislava hl.st."))
 
 
 # ---- regionální jízdenky -----------------------------------------------------------
@@ -163,3 +171,41 @@ def test_koleo_connection_and_price():
     price = {"prices": [{"value": "28.5", "tariff_names": ["Przejazd tam"], "valid_price": True},
                         {"value": "35", "tariff_names": ["X"], "valid_price": True}]}
     assert pkp.parse_price(price) == (Decimal("28.5"), "Przejazd tam")
+
+
+# ---- ÖBB jen na část trasy ---------------------------------------------------------------
+def test_obb_reduced_scope_is_not_a_full_price():
+    from vyhledavac.providers import _oebb_shop as shop
+
+    offer = shop.ShopOffer("c1", at(12), at(17), [], section_count=6)
+    shop.apply_offer(offer, {"connectionId": "c1", "price": 14.9, "offerError": False,
+                             "reducedScope": [{"from": {"name": "Trebon", "sectionIdx": 0},
+                                               "to": {"name": "Marchegg Bahnhof", "sectionIdx": 4}}]})
+    assert offer.scope == ("Trebon", "Marchegg Bahnhof")
+    whole = shop.ShopOffer("c2", at(12), at(17), [], section_count=3)
+    shop.apply_offer(whole, {"connectionId": "c2", "price": 20, "reducedScope": [
+        {"from": {"name": "A", "sectionIdx": 0}, "to": {"name": "B", "sectionIdx": 2}}]})
+    assert whole.scope is None and whole.price == 20
+
+
+@pytest.mark.asyncio
+async def test_obb_partial_buys_the_rest_separately():
+    from vyhledavac.hacks.obb_partial import ObbPartialHack
+
+    query = SearchQuery(origin="Třeboň", destination="Bratislava hl.st.", departure=at(11))
+    legs = [Leg("Trebon", "Ceské Velenice", at(12, 8), at(12, 50), Mode.TRAIN, "ÖBB", "Os 8713"),
+            Leg("Ceské Velenice", "Marchegg Bahnhof", at(13), at(16, 30), Mode.TRAIN, "ÖBB", "REX 41"),
+            Leg("Marchegg Bahnhof", "Bratislava hl.st.", at(16, 50), at(17, 12), Mode.TRAIN, "ÖBB", "REX 8")]
+    partial = Journey(provider="ÖBB", legs=legs,
+                      raw={"partial": {"from": "Trebon", "to": "Marchegg Bahnhof", "eur": "14.9",
+                                       "czk": "363"}})
+    rest = make_journey(provider="ÖBB", origin="Marchegg Bahnhof", destination="Bratislava hl.st.",
+                        dep=at(16, 50), arr=at(17, 12), price=105, line="REX 8")
+
+    async def search(q, allow_browser=False, only=None):
+        assert (q.origin, q.destination) == ("Marchegg Bahnhof", "Bratislava hl.st.")
+        return [rest]
+
+    found = await ObbPartialHack().find(query, [partial], search)
+    assert len(found) == 1 and found[0].price == Decimal(468)
+    assert [s.destination for s in found[0].segments] == ["Marchegg Bahnhof", "Bratislava hl.st."]
