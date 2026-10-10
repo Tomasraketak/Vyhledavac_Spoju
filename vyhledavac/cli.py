@@ -17,7 +17,7 @@ from .engine import SearchEngine
 from .models import DEFAULT_TZ, DiscountCard, Passenger, SearchQuery, SearchResult
 from .registry import FILTERS, HACKS, PROVIDERS, load_plugins
 
-DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB"]
+DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva"]
 
 
 def build_parser() -> argparse.ArgumentParser:

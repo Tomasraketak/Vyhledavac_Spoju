@@ -73,7 +73,7 @@ class RouteStop:
 class Plan:
     """Rozpis jízdenek pro jeden vlak."""
     total: Decimal
-    pieces: list[tuple[str, int, int, IdsFare | Journey]]   # (systém/"ČD", od, do, cena)
+    pieces: list[tuple[str, int, int, IdsFare | Journey]]   # (systém/dopravce, od, do, cena)
 
 
 def _stop(name: str, display: str | None = None, time: dt.datetime | None = None) -> RouteStop:
@@ -334,7 +334,7 @@ class IdsTicketHack(TravelHack):
                 continue
             fare = ids(system, 0, k, b=other.departure)
             if fare is not None:
-                plans.append(Plan(fare.price + other.price, [(system, 0, k, fare), ("ČD", k, n, other)]))
+                plans.append(Plan(fare.price + other.price, [(system, 0, k, fare), (other.provider, k, n, other)]))
 
         # 4) začátek u ČD, dál systém
         for system in SYSTEMS:
@@ -346,7 +346,7 @@ class IdsTicketHack(TravelHack):
                 continue
             fare = ids(system, k, n, a=other.arrival)
             if fare is not None:
-                plans.append(Plan(fare.price + other.price, [("ČD", 0, k, other), (system, k, n, fare)]))
+                plans.append(Plan(fare.price + other.price, [(other.provider, 0, k, other), (system, k, n, fare)]))
 
         return min(plans, key=lambda p: p.total, default=None)
 
@@ -358,7 +358,7 @@ class IdsTicketHack(TravelHack):
             origin, destination = route[i].name, route[j].name
             if isinstance(price, Journey):
                 segment = price
-                lines.append(f"{origin} → {destination}: jízdenka ČD {segment.price:.0f} Kč")
+                lines.append(f"{origin} → {destination}: jízdenka {segment.provider} {segment.price:.0f} Kč")
             else:
                 segment = _ids_segment(journey, origin, destination, route[i].time, route[j].time,
                                        price)
@@ -377,7 +377,7 @@ class IdsTicketHack(TravelHack):
                     f"{journey.price:.0f} Kč za jednu jízdenku ČD – ušetříte {saving:.0f} Kč.")
         notes = [note, "Jízdenky IDS platí v regionálních vlacích ČD (Os, Sp, R) zařazených do "
                        "systému; koupíte je v aplikaci systému, v aplikaci ČD Můj vlak nebo u průvodčího."]
-        label = " + ".join(dict.fromkeys(p[0] if p[0] != "ČD" else "ČD" for p in plan.pieces))
+        label = " + ".join(dict.fromkeys(p[0] for p in plan.pieces))
         return Journey(
             provider=label, legs=list(journey.legs),
             fares=[Fare(amount=plan.total, currency="CZK", amount_czk=plan.total,
@@ -501,6 +501,8 @@ def _same_train_tail(options: Sequence[Journey], journey: Journey,
     """Zbytek téhož vlaku: stejný příjezd, odjezd mezi odjezdem a příjezdem celé cesty."""
     best = None
     for option in options:
+        if any(leg.mode is not Mode.TRAIN for leg in option.legs if leg.mode is not Mode.WALK):
+            continue          # jiný dopravce (Arriva SJT) ano, ale jen tentýž vlak
         if option.price is None or not _close(option.arrival, journey.arrival):
             continue
         if not (journey.departure < option.departure < journey.arrival):
@@ -517,6 +519,8 @@ def _same_train_head(options: Sequence[Journey], journey: Journey,
     """Začátek téhož vlaku: stejný odjezd, příjezd do bodu lomu před koncem cesty."""
     best = None
     for option in options:
+        if any(leg.mode is not Mode.TRAIN for leg in option.legs if leg.mode is not Mode.WALK):
+            continue          # jiný dopravce (Arriva SJT) ano, ale jen tentýž vlak
         if option.price is None or not _close(option.departure, journey.departure):
             continue
         if not (journey.departure < option.arrival < journey.arrival):

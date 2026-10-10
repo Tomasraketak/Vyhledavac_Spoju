@@ -199,12 +199,14 @@ asyncio.run(main())
 | **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ | částečně | ~30 s | ověřeno živě, vč. slev |
 | **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ~30 s + ~8 s/cena | ověřeno živě, vč. slev |
 | **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ | ne | ~20 s | ověřeno živě, vč. slev |
+| **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ | ne | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
+| **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ | ✅ | ~3 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
 fungovat – viz [ÖBB](#öbb).
 
-Ve výchozím nastavení běží RegioJet, FlixBus a ÖBB – jsou rychlé
+Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto a Arriva – jsou rychlé
 a nepotřebují prohlížeč. Ostatní zapnete v GUI v panelu *Zdroje dat*
 nebo přes `--providers`.
 
@@ -443,6 +445,45 @@ a hlásila chybu – v GUI se to navíc zobrazilo jako „chybí prohlížeč“
 přestože se okno otevřelo. Teď program počká a skrytý prohlížeč stačí,
 žádné okno nevyskakuje. Když se stránka nevykreslí ani za 20 s, bývá to
 výpadek jejich API a program to tak i napíše.
+
+### Bileto
+
+**Soubor:** `providers/bileto.py` · **Typ:** JSON API · **Klíč:** ne (veřejné údaje portálu)
+
+Na [bileto.cz](https://bileto.cz/) prodávají jízdenky menší autobusoví
+dopravci, kteří jinde online nejsou – např. RETROBUS Line (Lipno – České
+Budějovice – Třeboň – Brno – Olomouc), Dinarica (České Budějovice – Brno),
+UNITED BUSES (České Budějovice – Jindřichův Hradec – Praha). Web volá API
+`api.bileto.com/v1` a my taky: token (client_credentials s údaji, které
+jsou v jejich JavaScriptu), `places` (město / zastávka), `connections`,
+pak `passengers` (věk, karta ISIC) a `prices` – cena je za celou skupinu
+(dítě do 6 let zdarma, děti, studenti s ISIC a senioři se slevou).
+Seznam linek předem stáhnout nejde, proto se Bileta ptáme na každou trasu;
+když místo nezná, zobrazí se „nejezdí tam“. Třeboň → Brno: 300 Kč dospělý,
+150 Kč student/dítě/senior (13. 10. 2026).
+
+### Arriva
+
+**Soubor:** `providers/arriva.py` · **Typ:** JSON API · **Klíč:** ne (anonymní token e-shopu)
+
+E-shop [shop.arriva.cz](https://shop.arriva.cz/) (odkaz „Vyhledat spoj“ na
+arriva.cz) volá `api.arriva.cz/v1`: anonymní token z cookie
+`ArrticCookie` (`shop.arriva.cz/api/trigger`), `Place/Search`,
+`Route/Search` a `Price/CalculateBySearch`. Prodává:
+
+* vlaky Arriva (R Praha – Turnov – Liberec / Tanvald …) v tarifu Arriva,
+* expresní autobusy Arriva (Praha – Most – Litvínov, Brno – Olomouc …),
+* jízdenky **SJT** (Systém jednotného tarifu) i na vlaky jiných dopravců
+  (ČD) – u nich je dopravce „jiný dopravce (SJT)“. Je to tedy i rychlý
+  zdroj cen ČD vlaků bez prohlížeče.
+
+Obec Arriva nezná jako celek, proto se hledá nádraží i hlavní autobusová
+zastávka obce (Praha hl. n. + Praha, Nádraží Holešovice) a výsledky se
+sloučí. Vlak, který jen mění číslo (R 653 → R 96653), je jeden úsek.
+
+**Kombinace:** travel hacky (*lomená jízdenka*, *jízdenky IDS*) se na dílčí
+úseky ptají všech zapnutých dopravců, takže Bileto i Arriva se do kombinací
+zapojí samy – např. Brno → Šumperk: RegioJet do Vyškova + Arriva (SJT) dál.
 
 ---
 
