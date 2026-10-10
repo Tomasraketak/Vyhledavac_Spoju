@@ -14,6 +14,9 @@ jízdenky **SJT** (Systém jednotného tarifu) – ty platí i ve vlacích jiný
 dopravců (ČD) a bývají levnější než jízdenka ČD. U takových spojů je jako
 dopravce uvedeno „jiný dopravce (SJT)“.
 
+Vlak, který cestou jen mění číslo, slučuje do jednoho úseku společný
+``merge_through_trains`` (pro všechny dopravce).
+
 Obec se hledá dvakrát: jednou mezi nádražími a jednou mezi autobusovými
 zastávkami (Arriva nemá „celé město“ jako jedno místo).
 """
@@ -251,14 +254,6 @@ def to_journey(raw: dict[str, Any], link: str) -> Journey | None:
         label = (f"Bus {line.get('number')}" if is_bus
                  else f"{prefix} {line.get('number')}".strip())
         mode = Mode.BUS if is_bus else Mode.TRAIN
-        prev = legs[-1] if legs else None
-        if (prev is not None and prev.mode is mode and prev.stops and stops
-                and prev.stops[-1].name == stops[0].name and _same_vehicle(prev, line, departure)):
-            # tentýž vlak jen mění číslo (R 653 -> R 96653 -> R 653) – není to přestup
-            prev.stops[-1].departure = stops[0].departure
-            prev.stops.extend(stops[1:])
-            prev.destination, prev.arrival = stops[-1].name, arrival
-            continue
         legs.append(Leg(
             origin=stops[0].name if stops else "", destination=stops[-1].name if stops else "",
             departure=departure, arrival=arrival, mode=mode,
@@ -268,16 +263,6 @@ def to_journey(raw: dict[str, Any], link: str) -> Journey | None:
         return None
     return Journey(provider="Arriva", legs=legs, fare_status=FareStatus.UNKNOWN,
                    journey_id=str(raw["searchId"]), deep_link=link)
-
-
-def _same_vehicle(prev: Leg, line: dict[str, Any], departure: dt.datetime) -> bool:
-    """Navazuje úsek na předchozí týmž vozidlem? Stejné číslo, nebo číslo jen
-    s předčíslím (653 / 96653), a pokračuje do 20 minut ve stejné stanici."""
-    if not dt.timedelta(0) <= departure - prev.arrival <= dt.timedelta(minutes=20):
-        return False
-    a = prev.line.split()[-1] if prev.line else ""
-    b = str(line.get("number") or "")
-    return bool(a and b) and (a.endswith(b) or b.endswith(a))
 
 
 def parse_price(data: Any) -> tuple[Decimal | None, str]:

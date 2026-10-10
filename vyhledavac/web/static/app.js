@@ -684,38 +684,31 @@
   // ---- karta spoje ---------------------------------------------------------
   function legLabel(leg) { return leg.line || modeOf(leg).name; }
 
-  function timeline(j) {
+  function routeStrip(j) {
     const parts = [];
-    j.legs.forEach((leg, i) => {
-      const g = Math.max(1, minutes(leg.arr) - minutes(leg.dep));
-      if (leg.mode === 'walk') {
-        parts.push(`<div class="tl-walk" style="flex:${g} 1 0" title="Přesun ${Math.round(g)} min">${`<span>${icon('footprints', 14)}</span>`}</div>`);
-      } else {
-        const m = modeOf(leg);
-        parts.push(`<div class="tl-ride" style="flex:${g} 1 0;background:${m.bg};color:${m.fg}" title="${esc(legLabel(leg))} ${esc(leg.from)} → ${esc(leg.to)}">${icon(m.icon, 15)}${g >= 20 ? `<span>${esc(legLabel(leg))}</span>` : ''}</div>`);
+    if (j.hack) parts.push(`<span class="badge tag-accent">${icon('lightbulb', 14)}Travel hack</span>`);
+    j.vehicles.forEach((v, i) => {
+      const m = modeOf(v);
+      if (i > 0) {
+        const w = j.waits[i - 1];
+        const risk = w.gap < RISKY_TRANSFER;
+        parts.push(`<span class="strip-x ${risk ? 'risk' : ''}" title="Přestup ${w.gap} min v ${esc(w.at)}${risk ? ' – riziko' : ''}">${icon('arrow-right', 13)}<span>${esc(shortStation(w.at))} · ${w.gap} min</span></span>`);
       }
-      const next = j.legs[i + 1];
-      if (next) {
-        const gap = minutes(next.dep) - minutes(leg.arr);
-        if (gap > 0) {
-          const risk = leg.mode !== 'walk' && next.mode !== 'walk' && gap < RISKY_TRANSFER;
-          parts.push(`<div class="tl-wait ${risk ? 'risk' : ''}" style="flex:${gap} 1 0" title="Čekání ${Math.round(gap)} min"><span></span></div>`);
-        }
-      }
+      parts.push(`<span class="badge" style="background:${m.bg};color:${m.fg}" title="${esc(legLabel(v))}: ${esc(v.from)} → ${esc(v.to)}">${icon(m.icon, 14)}${esc(legLabel(v))}</span>`);
     });
-    return `<div class="timeline">${parts.join('')}</div>`;
+    return `<div class="strip">${parts.join('')}</div>`;
   }
+
+  // „Veselí n.Lužnicí“ zůstane, „Brno, ÚAN Zvonařka (stan. 5)“ -> „Brno, ÚAN Zvonařka“.
+  function shortStation(name) { return String(name || '').replace(/\s*\([^)]*\)\s*$/, ''); }
 
   function journeyCard(j) {
     const isOpen = S.open === j.id;
     const first = j.vehicles[0] || j.legs[0];
     const days = Math.round((new Date(dayOf(j.arr)) - new Date(dayOf(j.dep))) / 86400000);
-    const badges = j.vehicles.length > 1 || j.hack
-      ? `<div class="badges">${j.hack ? `<span class="badge tag-accent">${icon('lightbulb', 14)}Travel hack</span>` : ''}${j.vehicles.map(v => { const m = modeOf(v); return `<span class="badge" style="background:${m.bg};color:${m.fg}">${icon(m.icon, 14)}${esc(legLabel(v))}</span>`; }).join('')}</div>` : '';
-    const transfers = j.waits.map(w => {
-      const risk = w.gap < RISKY_TRANSFER;
-      return `<span class="xfer ${risk ? 'risk' : ''}"><i></i>Přestup ${w.gap} min · ${esc(w.at)}${risk ? ' (riziko)' : ''}</span>`;
-    }).join('');
+    // Jeden řádek: čím se jede a kde se přestupuje. Podrobnosti (časy,
+    // zastávky) jsou v rozbaleném detailu – tady by se jen opakovaly.
+    const strip = routeStrip(j);
     const reservation = j.legs.some(l => l.reservation) ? `<span class="tag tag-neutral">povinná místenka</span>` : '';
     const platform = first && first.stops[0] && first.stops[0].platform ? `<span class="muted">${esc(first.from)}: nástupiště ${esc(first.stops[0].platform)}</span>` : '';
     const seats = (j.fares.find(f => f.seats != null) || {}).seats;
@@ -733,7 +726,7 @@
           <div class="jr-dur"><strong>${dur(j.minutes)}</strong><span class="muted">${j.realTransfers ? pl(j.realTransfers, '1 přestup', `${j.realTransfers} přestupy`, `${j.realTransfers} přestupů`) : 'Přímé'}</span></div>
           <div class="jr-stations">${esc(j.legs[0].from)} → ${esc(j.legs[j.legs.length - 1].to)}</div>
         </div>
-        <div class="jr-mid">${badges}${timeline(j)}<div class="jr-info">${reservation}${platform}${transfers}</div></div>
+        <div class="jr-mid">${strip}${reservation || platform ? `<div class="jr-info">${reservation}${platform}</div>` : ''}</div>
         <div class="jr-price">
           <div><div class="amount ${j.price == null ? 'unknown' : ''}">${esc(priceText(j))}</div>
             <div class="sub">${stillPricing ? `<span class="pending">${icon('loader-circle', 12, 'spin')}zjišťuji cenu…</span>` : subParts.join(' · ')}</div></div>

@@ -151,7 +151,9 @@ def test_arriva_merges_renumbered_train():
         part(653, "Veselí n.Lužnicí", "Horní Cerekev", "2026-10-13T05:00:00Z", "2026-10-13T06:00:00Z"),
         part(96653, "Horní Cerekev", "Náměšť n.Oslavou", "2026-10-13T06:06:00Z", "2026-10-13T07:00:00Z"),
         part(653, "Náměšť n.Oslavou", "Brno hl.n.", "2026-10-13T07:00:00Z", "2026-10-13T07:30:00Z")]}
+    from vyhledavac.models import merge_through_trains
     journey = arriva.to_journey(raw, "")
+    journey.legs = merge_through_trains(journey.legs)
     assert len(journey.legs) == 1 and journey.legs[0].destination == "Brno hl.n."
     assert [s.name for s in journey.legs[0].stops][1] == "Horní Cerekev"
 
@@ -164,4 +166,5 @@ def test_arriva_keeps_real_transfer():
     raw = {"searchId": "s", "routes": [
         part(730, "Třeboň", "Veselí n.Lužnicí", "2026-10-13T04:00:00Z", "2026-10-13T04:30:00Z"),
         part(653, "Veselí n.Lužnicí", "Brno hl.n.", "2026-10-13T04:42:00Z", "2026-10-13T07:00:00Z")]}
-    assert len(arriva.to_journey(raw, "").legs) == 2
+    from vyhledavac.models import merge_through_trains
+    assert len(merge_through_trains(arriva.to_journey(raw, "").legs)) == 2

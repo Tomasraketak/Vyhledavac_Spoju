@@ -19,7 +19,7 @@ from typing import Any, Callable, ClassVar, Sequence
 
 from ..cache import Cache, get_cache
 from ..errors import ProviderError, ProviderUnavailableError
-from ..models import Fare, Journey, ProviderResult, SearchQuery
+from ..models import Fare, Journey, ProviderResult, SearchQuery, merge_through_trains
 from ..money import CurrencyConverter, get_converter
 from ..registry import PROVIDERS
 
@@ -115,6 +115,7 @@ class Provider(abc.ABC):
                 continue
             clone = copy.copy(journey)
             clone.fares = list(journey.fares)
+            clone.legs = merge_through_trains(journey.legs)
             snapshot.append(clone)
         try:
             callback(snapshot)
@@ -184,6 +185,8 @@ class Provider(abc.ABC):
             _PUBLISH.reset(publish_token)
 
         journeys = [j for j in journeys if _is_sane(j)]
+        for journey in journeys:          # vlak, který jen mění číslo, není přestup
+            journey.legs = merge_through_trains(journey.legs)
         return ProviderResult(
             provider=self.name,
             journeys=journeys,

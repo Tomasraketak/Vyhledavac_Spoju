@@ -177,18 +177,11 @@ svg.i { display: block; flex: none; }
 .jr-stations { font-size: 12px; color: var(--color-neutral-700); }
 .jr-mid { flex: 1 1 360px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
 .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+.strip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.strip-x { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-neutral-700); white-space: nowrap; }
+.strip-x.risk { color: var(--color-accent-700); font-weight: 700; }
 .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; font-size: 13px; font-weight: 700; }
-.timeline { display: flex; height: 30px; gap: 2px; }
-.tl-ride { min-width: 26px; display: flex; align-items: center; gap: 6px; padding: 0 7px; overflow: hidden; white-space: nowrap; font-size: 12px; font-weight: 700; box-sizing: border-box; }
-.tl-walk { min-width: 24px; display: flex; align-items: center; justify-content: center; color: var(--color-neutral-600); background: linear-gradient(90deg, var(--color-neutral-500) 50%, transparent 0) center/5px 2px repeat-x; }
-.tl-walk span { background: var(--color-surface); padding: 0 2px; display: flex; }
-.tl-wait { min-width: 16px; display: flex; align-items: center; justify-content: center; background: linear-gradient(var(--color-divider), var(--color-divider)) center/100% 2px no-repeat; }
-.tl-wait span { width: 10px; height: 10px; background: var(--color-surface); border: 2px solid var(--color-text); display: block; box-sizing: border-box; }
-.tl-wait.risk span { border-color: var(--color-accent); }
 .jr-info { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; font-size: 13px; }
-.xfer { display: inline-flex; align-items: center; gap: 6px; color: var(--color-neutral-800); }
-.xfer i { width: 8px; height: 8px; border: 2px solid currentColor; display: block; box-sizing: border-box; }
-.xfer.risk { color: var(--color-accent-700); font-weight: 700; }
 .jr-price { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px; }
 .jr-price .amount { font-size: 24px; font-weight: 800; line-height: 1.15; }
 .jr-price .amount.unknown { color: var(--color-neutral-600); font-size: 20px; }
