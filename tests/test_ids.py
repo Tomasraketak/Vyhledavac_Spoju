@@ -363,3 +363,55 @@ def test_idzk_parse_city_ticket_variants():
     html = ('<p class="thePrice">18<span> Kč<em> &nbsp;/ &nbsp;Platnost jízdenky 30 min</em></span><br />'
             '24<span> Kč<em> &nbsp;/ &nbsp;Platnost jízdenky 60 min</em></span></p>')
     assert online.idzk.parse(html) == [(30, Decimal(18)), (60, Decimal(24))]
+
+
+def test_pid_prague_single_fares_by_age():
+    """Jen po Praze: junioři a studenti platí plné, senioři 60–65 zvýhodněné (Tarif PID 2026)."""
+    junior, student = Passenger(age=16), Passenger(age=20, cards=(DiscountCard.ISIC,))
+    assert pid.best_fare("P", "P", junior, 20).price == Decimal(36)
+    assert pid.best_fare("P", "P", student, 20).price == Decimal(36)
+    assert pid.best_fare("P", "P", Passenger(age=62), 20).price == Decimal(18)
+    assert pid.best_fare("P", "3", junior, 40).price == Decimal(36)     # v regionu sleva (6 pásem)
+
+
+def _route(*stops):
+    return [ids_ticket.RouteStop(name, at(10) + dt.timedelta(minutes=5 * k), {system: zones},
+                                 "Jihočeský kraj", name)
+            for k, (name, system, zones) in enumerate(stops)]
+
+
+def test_season_pass_splits_route_into_uncovered_runs(monkeypatch):
+    monkeypatch.setattr(railnet, "physical_route", lambda a, b: [a, b])
+    route = _route(("A", "IDESKA", ("100",)), ("B", "IDESKA", ("200",)),
+                   ("C", "IDESKA", ("300",)), ("D", "IDESKA", ("400",)))
+    runs = ids_ticket._uncovered_runs(route, "IDESKA", 0, 3, frozenset({"100", "200"}))
+    assert [(a, b, z) for a, b, z in runs] == [(2, 3, [("300",), ("400",)])]
+    assert ids_ticket._uncovered_runs(route, "IDESKA", 0, 3, frozenset({"*"})) == []
+    middle = ids_ticket._uncovered_runs(route, "IDESKA", 0, 3, frozenset({"100", "400"}))
+    assert [(a, b) for a, b, _ in middle] == [(1, 2)]
+
+
+def test_season_pass_prices_only_zones_outside(monkeypatch):
+    monkeypatch.setattr(railnet, "physical_route", lambda a, b: [a, b])
+    route = _route(("Praha", "PID", ("P",)), ("Libeň", "PID", ("0",)), ("Klánovice", "PID", ("B",)),
+                   ("Úvaly", "PID", ("1",)), ("Tuklaty", "PID", ("2",)))
+    for stop in route:
+        stop.kraj = "Středočeský kraj"
+    hack = IdsTicketHack()
+    adult = Passenger(age=30)
+    full = hack._passenger_fare(route, "PID", 0, 4, 40, adult)
+    assert full.price == Decimal(60)                                   # P–2 = 5 pásem
+    prague = Passenger(age=30, passes=(("PID", ("P", "0", "B")),))
+    rest = hack._passenger_fare(route, "PID", 0, 4, 40, prague)
+    assert rest.price == Decimal(24) and "předplatné" in rest.name     # doplatek 1–2
+    covered = Passenger(age=30, passes=(("PID", ("*",)),))
+    assert hack._passenger_fare(route, "PID", 0, 4, 40, covered).price == 0
+
+
+@pytest.mark.asyncio
+async def test_season_pass_in_whole_hack():
+    query = SearchQuery(origin="České Budějovice", destination="Tábor", departure=at(9),
+                        passengers=(Passenger(age=30, passes=(("IDESKA", ("*",)),)),))
+    found = await IdsTicketHack().find(query, [cd_journey("České Budějovice", "Tábor", at(10),
+                                                          at(11), 999)], None)
+    assert found and found[0].price == 0

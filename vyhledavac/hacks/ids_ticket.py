@@ -33,7 +33,7 @@ import httpx
 from .. import cdtrain, railnet, stations
 from ..ids import IdsFare, group_fare, ideska, idpk, idsok, jmk, pid
 from ..ids.online import duk, idol, idzk, iredo, vdv
-from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery
+from ..models import Fare, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery
 from ..normalize import normalize
 from ..registry import HACKS
 from .base import SearchFn, TravelHack
@@ -43,6 +43,10 @@ log = logging.getLogger(__name__)
 #: Systémy, jejichž tarif umíme spočítat.
 SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk, duk, idzk, idsok)}
 LINKS = {name: m.URL for name, m in SYSTEMS.items()}
+#: Příklady zón pro nastavení předplatného ve webovém rozhraní.
+PASS_EXAMPLES = {"PID": "P, 0, B", "IDESKA": "100", "IDPK": "001", "VDV": "1", "IREDO": "600",
+                 "IDOL": "0001", "IDS JMK": "100, 101", "DÚK": "101", "IDZK": "1344",
+                 "IDSOK": "71, 710"}
 #: Systémy, u kterých se zóny drobných zastávek nemusí dát dohledat (pásmo
 #: nádraží se bere z autobusové zastávky v obci). Mezilehlá zastávka bez
 #: jakýchkoli údajů tu trasu systému nepřeruší; cenu určují jen zóny konců
@@ -120,7 +124,7 @@ class IdsTicketHack(TravelHack):
         async with httpx.AsyncClient() as client:
             routes = await asyncio.gather(*(self._route(client, query, j) for j in base))
         routes = [r or _with_times(fallback, j) for r, j in zip(routes, base)]
-        await self._prefetch(routes)
+        await self._prefetch(routes, query)
 
         # Úseky, na které se musí zeptat ČD – jedna otázka na stanici lomu.
         tails: dict[str, list[Journey]] = {}
@@ -154,11 +158,11 @@ class IdsTicketHack(TravelHack):
                 found.append(self._result(journey, route, plan))
         return found
 
-    async def _prefetch(self, routes: list[list[RouteStop]]) -> None:
+    async def _prefetch(self, routes: list[list[RouteStop]], query: SearchQuery) -> None:
         """Systémy, jejichž ceny se zjišťují online (VDV), si je stáhnou předem.
 
-        Ptáme se jen na dvojice zón, které může plán použít: konce trasy
-        a stanice na hranicích systémů.
+        Ptáme se jen na dvojice zón, které může plán použít: konce trasy,
+        stanice na hranicích systémů a hranice předplatného cestujících.
         """
         for system, module in SYSTEMS.items():
             if not hasattr(module, "prefetch"):
@@ -174,11 +178,16 @@ class IdsTicketHack(TravelHack):
                         if k is not None:
                             points.add(k)
                 points = sorted(i for i in points if system in route[i].systems)
+                passes = {p.pass_zones(system) for p in query.passengers} - {None}
                 for a in points:
                     for b in points:
                         if a < b:
                             pairs.update((x, y) for x in route[a].systems[system]
                                          for y in route[b].systems[system])
+                            for zones in passes:
+                                for _, _, passed in _uncovered_runs(route, system, a, b, zones):
+                                    if passed:
+                                        pairs.update((x, y) for x in passed[0] for y in passed[-1])
             try:
                 await module.prefetch(pairs)
             except Exception:
@@ -238,15 +247,46 @@ class IdsTicketHack(TravelHack):
             return None
         if any(not self._inside(s, system) for s in part):
             return None
+        return group_fare(query.passengers,
+                          lambda p: self._passenger_fare(route, system, i, j, minutes, p))
+
+    def _single_fare(self, route: list[RouteStop], system: str, i: int, j: int,
+                     minutes: float, passenger: Passenger) -> IdsFare | None:
+        """Jízdenka jednoho cestujícího bez ohledu na předplatné."""
+        part = route[i:j + 1]
         if system == pid.SYSTEM and not any(s.kraj in pid.HOME_REGIONS for s in part):
             return None        # PID neplatí na cesty jen po jiném kraji
-        module = SYSTEMS[system]
-        if hasattr(module, "best_for_route"):        # cena podle všech projetých zón
-            passed = _passed_zones(part, system)
-            return group_fare(query.passengers,
-                              lambda p: module.best_for_route(passed, p, minutes))
-        return group_fare(query.passengers, lambda p: module.best_between(
-            route[i].systems[system], route[j].systems[system], p, minutes))
+        return _price(system, _passed_zones(part, system), passenger, minutes)
+
+    def _passenger_fare(self, route: list[RouteStop], system: str, i: int, j: int,
+                        minutes: float, passenger: Passenger) -> IdsFare | None:
+        """Jízdenka cestujícího s ohledem na jeho předplatné zóny.
+
+        Úsek uvnitř předplacených zón je zdarma; mimo ně se kupuje jízdenka
+        jen na zbytek – na zóny za hranicí předplatného (i ty, kterými vlak
+        jen projede). Vede-li cesta ven a zase zpět, jsou to dvě jízdenky.
+        Pokud by to vyšlo dráž než jedna jízdenka na celou cestu, platí ta.
+        """
+        full = self._single_fare(route, system, i, j, minutes, passenger)
+        zones = passenger.pass_zones(system)
+        if not zones:
+            return full
+        first, last = route[i].systems[system][0], route[j].systems[system][0]
+        runs = _uncovered_runs(route, system, i, j, zones)
+        if not runs:
+            return IdsFare(system, Decimal(0), None, "předplatné", first, last)
+        total, pieces = Decimal(0), []
+        for a, b, passed in runs:
+            fare = _price(system, passed, passenger, _part_minutes(route, a, b, minutes))
+            if fare is None:
+                return full
+            total += fare.price
+            pieces.append(fare)
+        if full is not None and full.price <= total:
+            return full
+        name = "předplatné + " + " + ".join(f"{f.name} ({_zones(f)})" for f in pieces)
+        return IdsFare(system, total, min((f.minutes for f in pieces if f.minutes), default=None),
+                       name, first, last)
 
     def _best_plan(self, query: SearchQuery, journey: Journey, route: list[RouteStop],
                    cd_tails: dict[str, list[Journey]],
@@ -377,6 +417,61 @@ def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:
             zones.append(place.systems.get(system, ()) if place else ())
         zones.append(b.systems.get(system, ()))
     return zones
+
+
+def _price(system: str, passed: list[tuple[str, ...]], passenger: Passenger,
+           minutes: float) -> IdsFare | None:
+    """Nejlevnější jízdenka systému přes dané zóny (projeté zastávky v pořadí)."""
+    module = SYSTEMS[system]
+    if hasattr(module, "best_for_route"):        # cena podle všech projetých zón
+        return module.best_for_route(passed, passenger, minutes)
+    known = [z for z in passed if z]
+    if not known:
+        return None
+    return module.best_between(known[0], known[-1], passenger, minutes)
+
+
+def _covers(zones: frozenset[str], own: tuple[str, ...]) -> bool:
+    """Leží zastávka v předplacených zónách? Ve dvou zónách stačí jedna z nich."""
+    return "*" in zones or bool(zones.intersection(own))
+
+
+def _uncovered_runs(route: list[RouteStop], system: str, i: int, j: int,
+                    zones: frozenset[str]) -> list[tuple[int, int, list[tuple[str, ...]]]]:
+    """Souvislé úseky trasy mimo předplatné: (od, do, projeté zóny mimo předplatné).
+
+    Úsek začíná poslední stanicí v předplatném a končí první další v něm;
+    zóny se pak oříznou na ty za hranicí předplatného, aby se počítaly i
+    zóny stanic, kterými vlak jen projede.
+    """
+    state: list[bool] = []
+    for stop in route[i:j + 1]:
+        own = stop.systems.get(system)
+        state.append(_covers(zones, own) if own else (state[-1] if state else False))
+    runs = []
+    k = 0
+    while k < len(state):
+        if state[k]:
+            k += 1
+            continue
+        start = k
+        while k < len(state) and not state[k]:
+            k += 1
+        lo, hi = i + max(start - 1, 0), i + min(k, len(state) - 1)
+        passed = _passed_zones(route[lo:hi + 1], system)
+        while passed and (not passed[0] or _covers(zones, passed[0])):
+            passed.pop(0)
+        while passed and (not passed[-1] or _covers(zones, passed[-1])):
+            passed.pop()
+        runs.append((i + start, i + k - 1, passed))
+    return runs
+
+
+def _part_minutes(route: list[RouteStop], a: int, b: int, whole: float) -> float:
+    minutes = _minutes(route[a].time, route[b].time, whole)
+    if route[a].estimated or route[b].estimated:
+        minutes = minutes * 1.15 + 5                     # rezerva u odhadnutého času
+    return min(whole, minutes)
 
 
 def _zones(fare: IdsFare) -> str:

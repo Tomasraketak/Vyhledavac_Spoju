@@ -13,6 +13,14 @@ Pravidla z pid.cz („Tarifní pásma PID“):
 * cesta jen po Praze -> jízdenka pro Prahu (30 nebo 90 minut);
 * jízdenky PID nelze použít na cesty jen po území jiného kraje
   (to hlídá hack – potřebuje kraj zastávek).
+
+Slevy (Tarif PID od 1. 1. 2026, https://pid.cz/neplatvicnezmusis/):
+
+* v regionu (cesta zasahuje do vnějšího pásma) – zvýhodněné jízdné pro děti
+  6–15, juniory 15–18, studenty 18–26 a seniory 65+;
+* jen po Praze – děti 6–15 a senioři 65+ jezdí zdarma, zvýhodněnou
+  jednotlivou jízdenku mají jen senioři 60–65; junioři a studenti platí
+  plné jízdné (slevu mají jen na předplatné).
 """
 
 from __future__ import annotations
@@ -49,12 +57,19 @@ def _data() -> dict | None:
 
 
 def category(passenger: Passenger) -> str | None:
-    """'full' / 'reduced', ``None`` = zdarma (dítě do 6 let)."""
+    """Jízdné v regionu: 'full' / 'reduced', ``None`` = zdarma (dítě do 6 let)."""
     if passenger.age < 6:
         return None
     if passenger.age < 18 or passenger.age >= 65 or passenger.is_student:
         return "reduced"
     return "full"
+
+
+def city_category(passenger: Passenger) -> str | None:
+    """Jízdné jen po Praze: zdarma do 15 a od 65 let, sleva jen pro seniory 60–65."""
+    if passenger.age < 15 or passenger.age >= 65:
+        return None
+    return "reduced" if passenger.age >= 60 else "full"
 
 
 def zone_count(zone_from: str, zone_to: str) -> int | None:
@@ -67,16 +82,17 @@ def fares(zone_from: str, zone_to: str, passenger: Passenger) -> list[IdsFare]:
     data = _data()
     if data is None:
         return []
-    kind = category(passenger)
+    city = zone_from in PRAHA and zone_to in PRAHA
+    kind = city_category(passenger) if city else category(passenger)
     if kind is None:
-        return [IdsFare(SYSTEM, Decimal(0), None, "dítě do 6 let zdarma", zone_from, zone_to)]
-    out: list[IdsFare] = []
-    if zone_from in PRAHA and zone_to in PRAHA and (6 <= passenger.age < 15 or passenger.age >= 65):
+        if passenger.age < 6:
+            return [IdsFare(SYSTEM, Decimal(0), None, "dítě do 6 let zdarma", zone_from, zone_to)]
         # Přeprava za 0 Kč v Praze: děti 6–15 a senioři 65+ (s dokladem / aplikací v Lítačce)
         who = "dítě 6–15" if passenger.age < 15 else "senior 65+"
-        out.append(IdsFare(SYSTEM, Decimal(0), None, f"{who} v Praze zdarma (doklad PID / Lítačka)",
-                           zone_from, zone_to))
-    if zone_from in PRAHA and zone_to in PRAHA:
+        return [IdsFare(SYSTEM, Decimal(0), None, f"{who} v Praze zdarma (doklad PID / Lítačka)",
+                        zone_from, zone_to)]
+    out: list[IdsFare] = []
+    if city:
         for minutes, row in data["praha"].items():
             if row.get(kind) is not None:
                 out.append(IdsFare(SYSTEM, Decimal(row[kind]), int(row["minutes"]),

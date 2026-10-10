@@ -98,12 +98,16 @@ svg.i { display: block; flex: none; }
 .adv-hint { font-size: 12px; color: var(--color-neutral-700); }
 .adv-hint.warn { color: var(--color-accent-700); }
 .pax-cell { grid-column: span 2; }
+.wide-cell { grid-column: 1 / -1; }
 @media (max-width: 640px) { .pax-cell { grid-column: auto; } }
 .pax-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-bottom: 8px; border-bottom: 1px solid var(--color-divider); }
 .pax-n { font-weight: 700; min-width: 1.5em; }
 .pax-cat { font-size: 13px; opacity: .75; min-width: 9em; }
 .pax-del { margin-left: auto; }
 .pax-add { align-self: flex-start; }
+.pax-row select, .pass-zones input { font: inherit; font-size: 14px; padding: 6px 8px; border: 2px solid var(--color-divider); background: var(--color-bg); color: var(--color-text); }
+.pass-zones { display: flex; align-items: center; gap: 8px; font-size: 14px; flex: 1 1 12em; }
+.pass-zones input { flex: 1; min-width: 8em; }
 .adv-age { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .adv-age input[type=number] { width: 72px; font: inherit; font-size: 16px; font-weight: 600; padding: 6px 8px; border: 2px solid var(--color-divider); background: var(--color-bg); color: var(--color-text); }
 .switch { align-self: flex-start; display: flex; align-items: center; gap: 10px; background: transparent; border: 0; padding: 0; font: inherit; font-size: 14px; color: var(--color-text); cursor: pointer; text-align: left; }

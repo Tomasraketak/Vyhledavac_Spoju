@@ -515,6 +515,13 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   se počítají pro každého zvlášť a sečtou (dítě do 6 let zdarma, děti
   a senioři v Praze v PID zdarma…). ZSSK a ÖBB umějí cenu jen pro jednoho
   cestujícího – stránka na to upozorní. Nastavení si stránka pamatuje.
+- **Předplatné jízdenky IDS** (v *Pokročilých možnostech*): komu, jaký
+  systém a které zóny má předplacené (časový kupón; `*` = celá síť),
+  třeba „PID · P, 0, B“ nebo „IDS JMK · 100, 101“. Jízdenky IDS pak uvnitř
+  předplatného nic nestojí a mimo něj se kupuje jen doplatek za zóny za
+  hranicí předplatného (i ty, kterými vlak jen projede): Praha → Beroun
+  s kupónem na Prahu = jízdenka na pásma 1–4 za 48 Kč místo 84 Kč. Kódy zón
+  ukazuje našeptávač u zastávek.
 - **Zdroje dat** jsou přepínací čipy se živým stavem (hledám / ceny 3/5… /
   N spojů · čas / nejezdí tam / chyba / blokováno). *Rychlé* = jen zdroje
   bez prohlížeče.
@@ -715,7 +722,7 @@ u koho, za kolik, a o kolik je to levnější než jedna jízdenka ČD.
 | Systém | Tarif | Zóny stanic |
 |---|---|---|
 | IDESKA (Jihočeský kraj) | celý tarif z [kalkulačky IDESKA](https://kalkulacka.ideska.info/) | seznam zastávek kalkulačky + mapa zón |
-| PID (Praha, Středočeský) | ceník podle počtu pásem z [pid.cz](https://pid.cz/jizdne-a-tarif/) (P, 0, B, 1–13 navazují) | data PID |
+| PID (Praha, Středočeský) | ceník podle počtu pásem z [pid.cz](https://pid.cz/jizdne-a-tarif/) ([Tarif 2026](https://pid.cz/neplatvicnezmusis/): P, 0, B, 1–13 navazují; Praha se pro cestu do regionu počítá jako 3 pásma). Jen po Praze: děti 6–15 a senioři 65+ zdarma, sleva jen senioři 60–65, junioři a studenti platí plné; v regionu sleva pro děti, juniory, studenty a seniory 65+ | data PID |
 | VDV (Vysočina) | za běhu z [tarifního počítadla kraje](https://www.kr-vysocina.cz/spocitat-jizdne/ms-122447) (cena podle výchozí a cílové zóny, pamatuje se) | zastávky a nádraží z mapy počítadla, i přesahy (Počátky-Žirovnice) |
 | IREDO (Královéhradecký, Pardubický) | za běhu z [tarifního kalkulátoru IREDO](https://iredo.info/tarifni-kalkulator/) (stejné počítadlo jako VDV) | zastávky a nádraží z mapy kalkulátoru |
 | IDS JMK (Jihomoravský) | [Tarif IDS JMK od 1. 10. 2026](https://content.idsjmk.cz/cenik/261001/Tarif.pdf): cena podle počtu projetých zón, ceny aplikace POSEIDON (2 zóny 22 Kč … všechny 102 Kč), zlevněná A polovina, senior 70+ 24 h za 40 Kč | zóny z GTFS IDS JMK, nádraží podle nejbližší zastávky |
@@ -734,7 +741,7 @@ Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u Č
 **ODIS** má jen zóny (z jízdních řádů, ukazují se v našeptávači a detailu):
 jízdné REGION se od 2025 počítá z tarifních kilometrů (5 Kč + 0,75 Kč/km),
 které pro trasu vlaku veřejně dostupné nejsou – úseky v ODIS proto ocení ČD.
-IDS KK zatím chybí také. Každý cestující skupiny dostane svou jízdenku
+IDS KK (Karlovarský kraj) se záměrně nepočítá – úseky tam ocení ČD. Každý cestující skupiny dostane svou jízdenku
 (dítě do 6 let zdarma, děti / studenti / senioři zvýhodněné podle pravidel
 systému) a ceny se sečtou. Počítadla VDV, IREDO, IDOL, DÚK a IDZK se volají za běhu (z vašeho počítače),
 proto u nich ceny chybí, když je počítadlo nedostupné.

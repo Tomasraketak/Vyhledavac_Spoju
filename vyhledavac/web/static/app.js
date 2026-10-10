@@ -64,6 +64,14 @@
     }
     return [{ age: store.get('age', 26), isic: store.get('isic', false), skFree: store.get('skFree', false) }];
   }
+  // Předplatné IDS: [{pax: index cestujícího | 'all', system: 'PID', zones: 'P, 0, B'}]
+  function loadPasses() {
+    const saved = store.get('passes', []);
+    return Array.isArray(saved) ? saved.filter(e => e && typeof e.system === 'string').slice(0, 20).map(e => ({
+      pax: e.pax === 'all' ? 'all' : Math.max(0, parseInt(e.pax, 10) || 0),
+      system: e.system, zones: String(e.zones || ''),
+    })) : [];
+  }
   const today = new Date();
   const pad = n => String(n).padStart(2, '0');
   const S = {
@@ -72,6 +80,7 @@
     hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket'])),
     // Cestující: [{age, isic, skFree}] – starší verze ukládala jednoho do kořene.
     pax: loadPax(),
+    passes: loadPasses(),
     pass: false,                  // rozbalený panel Cestující
     modes: [...ALL_GROUPS],
     adv: false,
@@ -265,7 +274,7 @@
     if (!providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
     const body = {
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
-      passengers: S.pax.map(p => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree })),
+      passengers: S.pax.map((p, i) => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree, passes: passesFor(i) })),
       providers, hacks: [...S.hacksOn],
     };
     if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
@@ -482,7 +491,22 @@
     return 'dospělý';
   }
 
+  // Předplatné zóny cestujícího pro server: {"PID": "P, 0, B, 1"}.
+  function passesFor(i) {
+    const out = {};
+    S.passes.filter(e => (e.pax === 'all' || e.pax === i) && e.zones.trim()).forEach(e => {
+      out[e.system] = out[e.system] ? `${out[e.system]}, ${e.zones}` : e.zones;
+    });
+    return out;
+  }
+  const activePasses = () => S.passes.filter(e => e.zones.trim() && (e.pax === 'all' || e.pax < S.pax.length));
+
   function passengerSummary() {
+    const extra = activePasses().length ? ` · předplatné ${[...new Set(activePasses().map(e => e.system))].join(', ')}` : '';
+    return passengerSummaryBase() + extra;
+  }
+
+  function passengerSummaryBase() {
     if (S.pax.length === 1) {
       const p = S.pax[0];
       const parts = [`${p.age} let`, passengerCategory(p)];
@@ -536,11 +560,33 @@
       <div class="adv-cell"><span class="adv-title">Minimální čas na přestup</span>${seg('buffer', S.buffer, [[0, 'Standardní'], [3, '+3 min'], [5, '+5 min'], [10, '+10 min']])}<span class="adv-hint">Skryje spojení s kratším přestupem.</span></div>
       <div class="adv-cell"><span class="adv-title">Travel hacky</span>${hacks || '<span class="adv-hint">Žádné nejsou k dispozici.</span>'}
         <span class="adv-hint">Hledají levnější kombinace jízdenek; platí od příštího hledání.</span></div>
-      <div class="adv-cell"><span class="adv-title">Zobrazení</span>
+      <div class="adv-cell pax-cell"><span class="adv-title">Zobrazení</span>
         ${sw('onlyPriced', S.onlyPriced, 'Jen spoje se známou cenou')}
         ${sw('sameDep', S.sameDep, 'Stejný odjezd: skrýt pozdější a dražší')}
         ${sw('pareto', S.pareto, 'Skrýt dražší i pomalejší')}</div>
+      ${renderPassesCell()}
     </div>`;
+  }
+
+  function renderPassesCell() {
+    const systems = S.meta && S.meta.idsSystems ? S.meta.idsSystems : [];
+    if (!systems.length) return '';
+    const example = name => (systems.find(x => x.name === name) || {}).example || '';
+    const opt = (value, label, on) => `<option value="${esc(value)}"${on ? ' selected' : ''}>${esc(label)}</option>`;
+    const rows = S.passes.map((e, i) => {
+      const who = S.pax.length > 1
+        ? `<select data-act="pass-pax" data-key="${i}" aria-label="Komu předplatné patří">${opt('all', 'všichni', e.pax === 'all')}${S.pax.map((p, k) => opt(k, `${k + 1}. cestující (${p.age} let)`, e.pax === k)).join('')}</select>` : '';
+      return `<div class="pax-row">
+        ${who}
+        <select data-act="pass-sys" data-key="${i}" aria-label="Integrovaný systém">${systems.map(x => opt(x.name, x.name, x.name === e.system)).join('')}</select>
+        <label class="pass-zones">zóny <input type="text" value="${esc(e.zones)}" placeholder="např. ${esc(example(e.system))}" data-act="pass-zones" data-key="${i}" aria-label="Předplacené zóny (oddělte čárkou, * = celá síť)" autocomplete="off"></label>
+        <button type="button" class="btn btn-ghost pax-del" data-act="pass-del" data-key="${i}" aria-label="Odebrat předplatné">${icon('x', 16)}</button>
+      </div>`;
+    }).join('');
+    return `<div class="adv-cell wide-cell"><span class="adv-title">Předplatné jízdenky IDS</span>
+      ${rows}
+      <button type="button" class="btn btn-secondary pax-add" data-act="pass-add">${icon('plus', 16)}<span>Přidat předplatné</span></button>
+      <span class="adv-hint">Zóny, na které máte časovou jízdenku (kupón). Jízdenky IDS pak počítají jen s doplatkem za zóny mimo ni – uvnitř předplatného je cesta zdarma. Více zón oddělte čárkou, <strong>*</strong> = celá síť. Kód zóny vidíte v našeptávači u zastávky (např. „IDS JMK · zóny 100, 101“).</span></div>`;
   }
 
   function renderResultsHead() {
@@ -817,6 +863,7 @@
     if (S.providersOn) store.set('providers', [...S.providersOn]);
     store.set('hacks', [...S.hacksOn]);
     store.set('pax', S.pax);
+    store.set('passes', S.passes);
     store.set('onlyPriced', S.onlyPriced);
     store.set('pareto', S.pareto);
     store.set('sameDep', S.sameDep);
@@ -853,7 +900,17 @@
     reset() { S.modes = [...ALL_GROUPS]; S.maxT = 'any'; S.direct = false; S.buffer = 0; S.onlyPriced = false; S.off.clear(); },
     'reset-all'() { ACTIONS.reset(); S.pareto = false; S.sameDep = false; },
     'pax-add'() { if (S.pax.length < MAX_PAX) S.pax.push({ age: 26, isic: false, skFree: false }); },
-    'pax-del'(key) { if (S.pax.length > 1) S.pax.splice(Number(key), 1); },
+    'pax-del'(key) {
+      const k = Number(key);
+      if (S.pax.length <= 1) return;
+      S.pax.splice(k, 1);
+      S.passes = S.passes.filter(e => e.pax !== k).map(e => (e.pax !== 'all' && e.pax > k ? { ...e, pax: e.pax - 1 } : e));
+    },
+    'pass-add'() {
+      const systems = S.meta && S.meta.idsSystems ? S.meta.idsSystems : [];
+      if (systems.length && S.passes.length < 20) S.passes.push({ pax: S.pax.length > 1 ? 'all' : 0, system: systems.some(x => x.name === 'PID') ? 'PID' : systems[0].name, zones: '' });
+    },
+    'pass-del'(key) { S.passes.splice(Number(key), 1); },
     'pax-isic'(key) { const p = S.pax[Number(key)]; if (p) p.isic = !p.isic; },
     'pax-sk'(key) { const p = S.pax[Number(key)]; if (p) p.skFree = !p.skFree; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
@@ -895,6 +952,12 @@
       const v = Math.max(0, Math.min(120, parseInt(el.value, 10) || 0));
       const p = S.pax[Number(el.dataset.key) || 0];
       if (p) p.age = v;
+    } else if (el.dataset.act === 'pass-pax' || el.dataset.act === 'pass-sys' || el.dataset.act === 'pass-zones') {
+      const e = S.passes[Number(el.dataset.key)];
+      if (!e) return;
+      if (el.dataset.act === 'pass-pax') e.pax = el.value === 'all' ? 'all' : Number(el.value);
+      else if (el.dataset.act === 'pass-sys') e.system = el.value;
+      else e.zones = el.value.slice(0, 200);
     } else if (el.name === 'cur') {
       S.cur = el.value;
     } else return;

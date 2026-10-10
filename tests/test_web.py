@@ -250,3 +250,11 @@ def test_group_warns_about_single_passenger_providers():
     data = snapshot(web.SearchSession(q, ["RegioJet", "ÖBB"], []))
     assert any("ÖBB" in p["provider"] and "jednoho" in p["message"] for p in data["problems"])
     assert not any("RegioJet" in p["provider"] for p in data["problems"])
+
+
+def test_parse_query_season_passes():
+    q = web.parse_query({"from": "Praha", "to": "Brno", "passengers": [
+        {"age": 40, "passes": {"PID": "p, 0 b", "IDS JMK": ["*"]}}, {"age": 8}]})
+    assert q.passengers[0].pass_zones("PID") == frozenset({"P", "0", "B"})
+    assert q.passengers[0].pass_zones("IDS JMK") == frozenset({"*"})
+    assert q.passengers[1].pass_zones("PID") is None

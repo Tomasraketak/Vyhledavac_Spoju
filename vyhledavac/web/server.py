@@ -23,6 +23,7 @@ import datetime as dt
 import json
 import logging
 import mimetypes
+import re
 import threading
 import time
 import urllib.parse
@@ -37,6 +38,7 @@ from typing import Any
 from .. import stations
 from ..browser import playwright_available
 from ..engine import SearchEngine
+from ..hacks.ids_ticket import PASS_EXAMPLES, SYSTEMS as IDS_SYSTEMS
 from ..filters.base import FilterPipeline
 from ..models import (
     DEFAULT_TZ,
@@ -252,6 +254,8 @@ class WebApp:
             } for name, cls in PROVIDERS.items()],
             "hacks": [{"name": name, "label": short_label(getattr(cls, "label", name)),
                        "default": name in DEFAULT_HACKS} for name, cls in HACKS.items()],
+            "idsSystems": [{"name": name, "example": PASS_EXAMPLES.get(name, "")}
+                           for name in IDS_SYSTEMS],
             "playwright": playwright_available(),
             "eurRate": float(rate) if rate else 25.0,
             "loadErrors": {k: str(v) for k, v in LOAD_ERRORS.items()},
@@ -332,7 +336,23 @@ def _passenger(item: dict[str, Any]) -> Passenger:
         raise ValueError("Věk musí být mezi 0 a 120.")
     cards = tuple(card for card, on in ((DiscountCard.ISIC, item.get("isic")),
                                         (DiscountCard.SK_FREE, item.get("skFree"))) if on)
-    return Passenger(age=age, cards=cards)
+    return Passenger(age=age, cards=cards, passes=_passes(item.get("passes")))
+
+
+def _passes(raw: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """Předplatné IDS: ``{"PID": ["P", "0", "B"], "IDS JMK": ["*"]}``."""
+    if not isinstance(raw, dict):
+        return ()
+    out = []
+    for system, zones in raw.items():
+        if not isinstance(zones, (list, str)):
+            continue
+        if isinstance(zones, str):
+            zones = re.split(r"[,;\s]+", zones)
+        clean = tuple(dict.fromkeys(str(z).strip().upper() for z in zones if str(z).strip()))[:60]
+        if clean:
+            out.append((str(system)[:20], clean))
+    return tuple(out[:20])
 
 
 # ---------------------------------------------------------------------------

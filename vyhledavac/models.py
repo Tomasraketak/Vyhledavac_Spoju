@@ -121,9 +121,16 @@ class Passenger:
 
     age: int = 26
     cards: tuple[DiscountCard, ...] = ()
+    #: Předplatné jízdenky IDS: (systém, zóny), "*" = celá síť systému.
+    passes: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def has(self, card: DiscountCard) -> bool:
         return card in self.cards
+
+    def pass_zones(self, system: str) -> frozenset[str] | None:
+        """Zóny systému, na které má cestující předplatné (``None`` = žádné)."""
+        zones = [z for name, zs in self.passes if name == system for z in zs]
+        return frozenset(zones) if zones else None
 
     @property
     def is_child(self) -> bool:
