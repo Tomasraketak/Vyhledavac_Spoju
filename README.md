@@ -202,9 +202,25 @@ asyncio.run(main())
 | **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ | ne | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ | ✅ | ~3 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
 | **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅² | ✅ | ~5 s | ověřeno živě (říjen 2026) |
+| **LeoExpress** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ | ✅ | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
+| **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅³ | ✅ | ~5 s | ověřeno živě (říjen 2026) |
 
 ² Cena za jednoho dospělého (normální jízdné); ptá se jen, když cesta začíná
 nebo končí v Polsku.
+³ Cena spočítaná z tarifu integrovaného systému, ne od prodejce.
+
+**Leo Express** se ptá jen tam, kde opravdu jezdí: obě místa musí být v jeho
+seznamu ~190 stanic (Praha, Pardubice, Olomouc, Ostrava, Kraków, Žilina,
+Košice …) – na Brno nebo Plzeň dotaz vůbec nejde. Cena nejlevnější volné třídy
+pro celou skupinu (dítě 0–5, junior 6–17, student 18–25, senior 65+).
+
+**IDS (z IDOS)** – web ČD autobusy integrovaných systémů neumí. Když obě místa
+leží ve stejném IDS, program načte spojení z idos.cz (vlaky, autobusy, MHD;
+nejvýš 2 stránky), u autobusu ověří v detailu spoje, že linka je v IDS
+(„linka 300 [IDESKA]“, jinak seznam linek z JDF `data/ids_lines.json.gz`,
+obnova `python tools/build_ids_lines.py --jdf JDF.zip`), a cenu spočítá tarif
+systému – i podle projetých zón, se slevami, skupinou a předplatným. Dálkové
+autobusy a vlaky EC/IC/RJ se vynechají.
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
@@ -803,6 +819,14 @@ proto u nich ceny chybí, když je počítadlo nedostupné.
 
 Strategie nabídnou variantu jen při úspoře nad nastavený práh
 (výchozí 3 %, u skrytého města 8 %).
+
+### ÖBB jen na část trasy (`obb_partial`)
+
+Shop ÖBB u některých spojů prodá jízdenku jen na úsek („Ticket nur für
+Teilstrecke“, např. Třeboň → Marchegg 14,90 € Sparschiene, ale ne do
+Bratislavy). Taková cena se u celého spoje nezobrazí – byla by nesmyslně nízká;
+spoj má poznámku „ÖBB prodá jízdenku jen na úsek …“. Hack pak dokoupí zbytek
+samostatnou jízdenkou (i ÖBB) a nabídne kombinaci, pokud je levnější.
 
 ### Přestup v Praze / Brně mezi dopravci (`hub_transfer`)
 

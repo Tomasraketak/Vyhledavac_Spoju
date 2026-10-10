@@ -72,6 +72,7 @@ class RouteStop:
     node: str = ""                  # jméno v železniční síti (pro projeté stanice)
     estimated: bool = False         # čas je odhad ze sítě, ne z jízdního řádu vlaku
     halts: bool = True              # vlak tu opravdu zastavuje (jen tady smí být lom)
+    rail: bool = True               # železniční stanice (projeté stanice dohledá síť)
 
 
 @dataclass
@@ -89,8 +90,8 @@ def _stop(name: str, display: str | None = None, time: dt.datetime | None = None
 
 def eligible(journey: Journey) -> bool:
     """Spoj ČD, na kterém může platit jízdenka IDS."""
-    if journey.is_hack or journey.price is None:
-        return False
+    if journey.is_hack or journey.price is None or journey.provider == "IDS":
+        return False             # spoje od „dopravce“ IDS už jsou za cenu IDS
     rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
     if not rides:
         return False
@@ -481,7 +482,9 @@ def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:
     """Zóny všech stanic, kterými vlak projede – i těch, kde nestaví."""
     zones: list[tuple[str, ...]] = [part[0].systems.get(system, ())]
     for a, b in zip(part, part[1:]):
-        between = railnet.physical_route(a.node or a.name, b.node or b.name)[1:-1]
+        # autobus: trasa je úplná (všechny zastávky z jízdního řádu), síť se neptá
+        between = (railnet.physical_route(a.node or a.name, b.node or b.name)[1:-1]
+                   if a.rail and b.rail else [])
         for name in between:
             place = stations.rail_place(name)
             zones.append(place.systems.get(system, ()) if place else ())
