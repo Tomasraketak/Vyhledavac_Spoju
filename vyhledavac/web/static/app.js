@@ -987,10 +987,13 @@
     const names = meta.providers.map(p => p.name);
     S.providersOn = new Set(saved ? saved.filter(n => names.includes(n)) : meta.providers.filter(p => p.default).map(p => p.name));
     // Nově přidaní dopravci (např. Bileto, Arriva) se zapnou i uloženému výběru.
-    const known = store.get('providersKnown', null);
-    if (saved && Array.isArray(known)) meta.providers.filter(p => p.default && !known.includes(p.name)).forEach(p => S.providersOn.add(p.name));
-    else if (saved) ['Bileto', 'Arriva'].filter(n => names.includes(n)).forEach(n => S.providersOn.add(n));
-    store.set('providersKnown', names);
+    // (Starší verze si „známé“ dopravce uložila dřív, než zapnula PKP, Leo Express
+    // a IDS – proto nový klíč a jednorázové zapnutí všech dopravců přidaných od té doby.)
+    const known = store.get('providersKnown2', null);
+    const added = ['Bileto', 'Arriva', 'PKP', 'LeoExpress', 'IDS'];
+    if (saved) meta.providers.filter(p => p.default && (Array.isArray(known) ? !known.includes(p.name) : added.includes(p.name)))
+      .forEach(p => S.providersOn.add(p.name));
+    store.set('providersKnown2', names);
     persistOptions();
     render();
   }).catch(() => failClient('Nepodařilo se načíst nastavení ze serveru.'));
