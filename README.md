@@ -133,7 +133,7 @@ jednotlivcům. Program je proto postavený tak, aby žádný klíč nepotřebova
 
 ¹ E-shop ÖBB občas dotazy odmítne (hlavně z VPN a serveroven). Pak zůstane
 jízdní řád a ceny se doplní od ostatních dopravců, kteří stejný vlak
-prodávají – viz [ÖBB a ceny](#öbb).
+prodávají – viz [ÖBB a ceny](docs/DOPRAVCI.md#öbb).
 
 Výchozí výběr (RegioJet, FlixBus, ÖBB) funguje hned po instalaci
 a nepotřebuje ani prohlížeč. Ostatní si zaškrtnete v GUI v panelu
@@ -191,78 +191,43 @@ asyncio.run(main())
 
 ### Přehled
 
-| Dopravce | Soubor | Jak získává data | Ceny | Mezizastávky | Rychlost | Stav (září 2026) |
+**Podrobně ke každému dopravci** (adresy API, postup, cestující, ceny, kdy
+se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
+
+| Dopravce | Soubor | Jak získává data | Ceny | Mezizastávky | Kdy se ptá | Stav (říjen 2026) |
 |---|---|---|---|---|---|---|
-| **RegioJet** | `providers/regiojet.py` | JSON API jejich webu | ✅ | ✅ | ~4 s | ověřeno živě, vč. slev |
-| **FlixBus** | `providers/flixbus.py` | JSON API jejich webu | ✅ | částečně | ~2 s | ověřeno živě, vč. slev |
-| **ÖBB** | `providers/obb.py` + `_hafas.py` + `_oebb_shop.py` | jízdní řád HAFAS + JSON API e-shopu | ✅¹ | ✅ všechny | ~3 s | jízdní řád ověřen; ceny¹ |
-| **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ | částečně | ~30 s | ověřeno živě, vč. slev |
-| **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ~30 s + ~8 s/cena | ověřeno živě, vč. slev |
-| **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ | ne | ~20 s | ověřeno živě, vč. slev |
-| **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ | ne | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
-| **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ | ✅ | ~3 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
-| **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅² | ✅ | ~5 s | ověřeno živě (říjen 2026) |
-| **MÁV** | `providers/mav.py` | JSON API e-shopu jegy.mav.hu | ✅⁴ | ne | ~5 s | ověřeno živě, vč. skupin (říjen 2026) |
-| **LeoExpress** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ | ✅ | ~2 s | ověřeno živě, vč. slev a skupin (říjen 2026) |
-| **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅³ | ✅ | ~5 s | ověřeno živě (říjen 2026) |
-
-² Cena za jednoho dospělého (normální jízdné); ptá se jen, když cesta začíná
-nebo končí v Polsku.
-³ Cena spočítaná z tarifu integrovaného systému, ne od prodejce.
-⁴ Ptá se jen, když cesta začíná nebo končí v Maďarsku.
-
-**MÁV** (Maďarské dráhy) – veřejné JSON API e-shopu jegy.mav.hu
-(`IK_API_PROD/api/OfferRequestApi`). Seznam ~54 tis. stanic a zastávek se
-stáhne jednou za 14 dní. „Budapest“ znamená všechna budapešťská nádraží
-(skupina „BUDAPEST*“). Typ cestujícího se vybere podle věku z číselníku MÁV,
-zvlášť pro vnitrostátní a mezinárodní jízdenky. Cena je za 2. třídu pro celou
-skupinu: mezinárodně v EUR (např. Praha → Budapešť od 37 €), po Maďarsku
-v HUF. Ptá se jen tehdy, když aspoň jeden konec cesty leží v Maďarsku – pro
-Praha – Brno nebo Praha – Vídeň nejde na MÁV žádný dotaz.
-
-**Leo Express** se ptá jen tam, kde opravdu jezdí: obě místa musí být v jeho
-seznamu ~190 stanic (Praha, Pardubice, Olomouc, Ostrava, Kraków, Žilina,
-Košice …) – na Brno nebo Plzeň dotaz vůbec nejde. Cena nejlevnější volné třídy
-pro celou skupinu (dítě 0–5, junior 6–17, student 18–25, senior 65+).
-
-**IDS (z IDOS)** – web ČD autobusy integrovaných systémů neumí. Když obě místa
-leží ve stejném IDS, program načte spojení z idos.cz (vlaky, autobusy, MHD;
-nejvýš 2 stránky), u autobusu ověří v detailu spoje, že linka je v IDS
-(„linka 300 [IDESKA]“, jinak seznam linek z JDF `data/ids_lines.json.gz`,
-obnova `python tools/build_ids_lines.py --jdf JDF.zip`), a cenu spočítá tarif
-systému – i podle projetých zón, se slevami, skupinou a předplatným.
-
-IDOS se ptá i tehdy, když je jeden konec cesty obyčejná zastávka nebo obec bez
-nádraží (Domanín, Vrchy → Praha) – takové místo ostatní dopravci neznají.
-Spoj se ocení po úsecích: co pokryje IDS, spočítá tarif; úseky mimo IDS
-(dálkový autobus, rychlík do Prahy, RETROBUS do Brna) dopočítá hack
-`idos_complete` u dopravců (Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
-Express a – jsou-li zapnuté – ČD a OneTicket přes prohlížeč) – jízdenka na
-tentýž spoj.
-
-Vlak se smí rozdělit jen v zastávce, kde staví (zastávky z detailu spoje
-v IDOS). Program porovná několik rozpisů a nabídne nejlevnější:
-- IDS po celých úsecích;
-- nejlevnější pokrytí IDS s lomem ve stanici vlaku, třeba IDESKA do Benešova
-  a PID dál (systémy se na trati 220 překrývají);
-- IDS co nejdál, zbytek vlaku jednou jízdenkou dopravce;
-- vlak celý u dopravce, IDS jen autobus.
-
-Poslední rozpis se zkouší i u spoje, který IDS ocení celý (od 80 Kč na
-cestujícího). Jízdenka ČD se slevou totiž může vyjít levněji; levnější
-výsledek pak spoj z IDS nahradí. Když se cenu dopočítat nepodaří, spoj zůstane vidět
-s jízdním řádem a „cena neznámá“. Stejnojmenné obce (Domanín u Třeboně ×
-Domanín na Moravě) se rozliší podle systému sousedních zastávek. Na dílčí úseky
-jiných hacků se IDOS neptá (desítky dotazů by vedly k blokaci).
+| **RegioJet** | `providers/regiojet.py` | JSON API jejich webu | ✅ skupina | ✅ | vždy | ověřeno živě, vč. slev |
+| **FlixBus** | `providers/flixbus.py` | JSON API jejich webu | ✅ skupina | ne | vždy | ověřeno živě, vč. slev |
+| **ÖBB** | `providers/obb.py` + `_hafas.py` + `_oebb_shop.py` | jízdní řád HAFAS + JSON API e-shopu | ✅¹ | ✅ všechny | ne po Česku | jízdní řád ověřen; ceny¹ |
+| **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ skupina | částečně | ne na zastávky bez nádraží | ověřeno živě, vč. slev |
+| **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ne po Česku | ověřeno živě, vč. slev |
+| **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ skupina | ne | jen Česko | ověřeno živě, vč. slev |
+| **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ skupina | ne | vždy | ověřeno živě |
+| **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ skupina | ✅ | vždy | ověřeno živě |
+| **Leo Express** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ skupina | ✅ | jen jeho stanice | ověřeno živě |
+| **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅² | ✅ | jeden IDS nebo zastávka bez nádraží | ověřeno živě |
+| **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅ 1 dospělý | ✅ | konec v Polsku | ověřeno živě |
+| **MÁV** | `providers/mav.py` | JSON API e-shopu jegy.mav.hu | ✅ skupina | ne | konec v Maďarsku | ověřeno živě |
+| **DB** | `providers/db.py` | JSON API int.bahn.de (+ prohlížeč) | ✅ skupina³ | ✅ | konec v DE/NL/BE/FR/CH/DK/LU | stanice ověřeny, spoje³ |
+| **NS** | `providers/ns.py` | JSON API plánovače ns.nl | ✅ jen po NL | ✅ | konec v Nizozemsku | ověřeno živě |
+| **Trenitalia** | `providers/trenitalia.py` | JSON API lefrecce.it | ✅ jen po Itálii⁴ | ne | konec v Itálii | ověřeno živě |
+| SNCF | – | – | – | – | – | nezapojeno: hledání chrání captcha DataDome |
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
-fungovat – viz [ÖBB](#öbb).
+fungovat.
+² Cena spočítaná z tarifu integrovaného systému, ne od prodejce.
+³ int.bahn.de chrání Akamai: z datacentra prošlo vyhledání stanic, dotaz na
+spoje ne (ani v prohlížeči). Z domácího připojení by měl projít; zpracování
+odpovědi je podle formátu db-vendo-client.
+⁴ U mezinárodních spojů vrací Trenitalia jen orientační cenu nebo cenu za
+italskou část trasy – ta se jako cena spoje nebere.
 
-Ve výchozím nastavení běží RegioJet, FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV,
-Leo Express a IDS – jsou rychlé
-a nepotřebují prohlížeč. Ostatní zapnete v GUI v panelu *Zdroje dat*
-nebo přes `--providers`.
+Ve výchozím nastavení běží všichni dopravci bez prohlížeče: RegioJet,
+FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, Leo Express
+a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
+Česku nezdržují. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
+dat* nebo přes `--providers`.
 
 ### Společné pro všechny
 
@@ -327,218 +292,11 @@ za dospělého a upozorní na to.
 
 ---
 
-### RegioJet
+### Jednotliví dopravci
 
-**Soubor:** `providers/regiojet.py` · **Typ:** JSON API · **Klíč:** ne
-
-1. Při prvním hledání stáhne číselník měst a stanic (`/consts/locations`,
-   ~145 kB) a uloží ho na 7 dní do cache. Souběžná hledání ho stahují jen
-   jednou.
-2. Název z formuláře najde v číselníku (tolerantně k diakritice a
-   překlepům, „Vídeň“ = „Wien“).
-3. Zavolá `/routes/search/simple` s kódem tarifu podle kategorie
-   cestujícího.
-4. U prvních spojů v časovém okně si souběžně stáhne detail
-   (`/routes/{id}/simple`) – z něj zná jednotlivé úseky, přestupy
-   a cenové třídy (Low cost, Standard, Business…).
-
-**Na co si dát pozor:** kódy tarifů klamou – `ISIC` je u RegioJetu senior
-65+, student je `CZECH_STUDENT_PASS_26`. Vyprodaný spoj chodí s cenou 0
-a `pricesCount: 0`; program ho ukáže jako *Vyprodáno*, ne jako spoj
-zadarmo.
-
-### FlixBus
-
-**Soubor:** `providers/flixbus.py` · **Typ:** JSON API · **Klíč:** ne
-
-1. Přes našeptávač (`/search/autocomplete/cities`) najde ID měst.
-2. Zavolá `/search/service/v4/search` se seznamem cestujících
-   (`{"student": 1}` apod.). Datum chce ve tvaru `DD.MM.YYYY`.
-3. Cena je **včetně poplatku platformy** (`total_with_platform_fee`) –
-   tedy to, co skutečně zaplatíte.
-
-**Slevy:** student, senior a mládež 6–17 let mají 50 %, ale jen na
-**vnitrostátních** linkách (Praha → Brno). Na mezinárodních (Praha →
-Vídeň) stojí stejně jako dospělý – to FlixBus spočítá sám. Když slevovou
-kategorii na trase nezná (HTTP 400), program zopakuje dotaz pro
-dospělého a upozorní na to. Samotným dětem FlixBus jízdenku neprodá
-a API pak vrací nesmyslnou nulu – program cenu v tom případě neukáže.
-
-### ÖBB
-
-**Soubory:** `providers/obb.py`, `_hafas.py`, `_oebb_shop.py` · **Typ:**
-dvě API · **Klíč:** ne
-
-ÖBB jsou dva nezávislé zdroje, které běží souběžně:
-
-- **Jízdní řád** z veřejného HAFASu (`fahrplan.oebb.at/bin/mgate.exe`) –
-  protokol, na kterém jede většina evropských železnic. Vrací spoje
-  **včetně všech mezizastávek**, i pro české vlaky. Na tom stojí travel
-  hack „lomená jízdenka“. `_hafas.py` je obecný – další dopravce na HAFASu
-  (DB, SBB…) je jen nová konfigurace.
-- **Ceny** z JSON API e-shopu `shop.oebbtickets.at`. HAFAS má u ÖBB tarify
-  vypnuté, takže ceny zná jen e-shop. Ten dá každému návštěvníkovi
-  **anonymní token** (žádná registrace) a s ním se program zeptá:
-  `init` → `stations` → `travelActions` → `timetable` → `prices`.
-  Ceny se pak přiřadí ke spojům z HAFASu podle času odjezdu a příjezdu.
-
-Před e-shopem stojí Cloudflare, který odmítá **TLS otisk Pythonu** – httpx
-dostane 403 bez ohledu na hlavičky. Program se proto ptá přes
-[`curl_cffi`](https://github.com/lexiforest/curl_cffi) s otiskem skutečného
-Chromu (je v `requirements.txt`; když chybí, zkusí se httpx a pak
-prohlížeč).
-
-Tři chyby, kvůli kterým ÖBB dlouho vracelo jen jízdní řád nebo hlášku
-„HTTP 404“:
-
-- shop přestal posílat `availabilityState`, a program proto zahazoval
-  **každou** cenu;
-- prázdné `"datetimeArrival": ""` v dotazu přimělo shop ignorovat datum
-  a vracet spoje „od teď“ – nespárovaly se pak s jízdním řádem;
-- `init` se zkoušel ve verzích v4 → v5 → v6 a skutečnou chybu z v4
-  přepsala 404 z neexistující v6.
-
-Původní skript bral ceny ze stejného e-shopu přes Firefox a klikání do
-formuláře, a to občas prošlo. Teď se ptá přímo jeho API:
-
-| Situace | Co uvidíte |
-|---|---|
-| Všechno funguje | spoje ÖBB s cenami, mezizastávkami a 1. třídou |
-| E-shop odmítne přímý dotaz | zkusí se totéž **zevnitř prohlížeče** (je-li nainstalovaný Playwright) |
-| E-shop odmítne i prohlížeč, nebo je pomalý (> 45 s) | spoje bez ceny + žluté upozornění; ceny se doplní od jiných dopravců, kteří vlak prodávají |
-| Spadne jízdní řád, e-shop odpoví | spoje z e-shopu s cenou, jen bez mezizastávek |
-| Spadne obojí | chyba u ÖBB, ostatní dopravci běží dál |
-
-Blokace (*„Zugriff vorübergehend eingeschränkt“*) se týká hlavně IP adres
-serveroven a VPN. Z domácí sítě obvykle projde.
-
-### České dráhy
-
-**Soubor:** `providers/cd.py` · **Typ:** prohlížeč · **Klíč:** ne
-
-ČD nemají veřejné API – formulář posílá POST zpět na stránku a výsledek
-vykreslí server. Postup:
-
-1. Otevře `cd.cz/spojeni-a-jizdenka/`, počká na doplnění formuláře
-   JavaScriptem a zavře cookie lištu.
-2. V okně *Cestující* přidá tarif podle kategorie (např. *Junior 18–25
-   let, Žákovský průkaz ČR*), odebere výchozího dospělého a v souhrnu
-   formuláře ověří, že se tarif opravdu změnil. Dřív hledal tlačítko
-   „ISIC“, které na cd.cz není, a potichu nechal dospělého.
-3. Vyplní odkud/kam přes našeptávač a odešle.
-4. Počká na stránku `/spojeni-tam/…` a z ní přečte spoje a ceny.
-
-Dvě chyby, kvůli kterým původní scraper vracel prázdný seznam:
-**formulář je na stránce třikrát** (desktop, mobil, sbalený) a viditelný
-je jen jeden – program proto hledá první skutečně viditelnou kopii; a
-**dialog „Čekejte…“** zachytává kliknutí – program čeká, až zmizí.
-
-Po mnoha dotazech z jedné IP adresy ČD vrací stránku bez formuláře.
-Program to pozná a nahlásí jako dočasnou blokaci, ne jako rozbitý kód.
-
-### ZSSK
-
-**Soubor:** `providers/zssk.py` · **Typ:** prohlížeč · **Klíč:** ne
-
-`predaj.zssk.sk` je JSF aplikace bez API a v seznamu spojů ceny
-**neukazuje** – cenu zná až nákupní formulář. Postup:
-
-1. Vyplní odkud/kam. Návrhy našeptávače čte z odpovědi
-   `/autocompleteStations/…` a vybere ten, který **opravdu odpovídá**
-   zadané stanici (na „Vídeň“ ZSSK jako první nabízí slovenský Vígľaš).
-   Zkusí i jiné tvary jména (Viedeň, Wien); když nesedí nic, ZSSK tam
-   „nejezdí“.
-2. Nastaví datum ve slovenském tvaru `30. 9. 2026` a odešle.
-3. Přečte seznam spojů – po jednotlivých vlacích, takže přestupy i noční
-   spoje přes půlnoc mají správné časy a data.
-4. **Jízdní řád pošle hned** – v rozhraní je vidět za ~5 s.
-5. **Ceny:** pro prvních 10 spojů projde *Kúpiť lístok → Voľba cestujúcich*
-   *→ Voľba cestovného lístka* a přečte konečnou cenu. Běží to **souběžně
-   ve 3 oddělených kontextech prohlížeče** (pro ZSSK tři různí návštěvníci)
-   a **každá cena se zobrazí hned**, jak je známá – na poslední spoj se
-   nečeká. Ceny se mezi spoji nesdílí (dynamické ceny, zahraniční lístky).
-
-Žádné pevné prodlevy: čeká se na odpověď našeptávače či serveru, výchozí
-cestující (dospělý bez slevy) se nepřeklikává a na seznam se vrací otevřením
-`/search` (~1 s). Bratislava → Košice: dřív 106 s a cena u 4 z 5 spojů,
-teď spoje za 5 s, první cena za ~9 s, všech 5 cen za ~18 s.
-
-Spoj, u kterého formulář nepokračuje (lůžkový vůz, trasa mimo e-shop),
-se označí „nelze koupit online“ a nezkouší se znovu. Když ZSSK trasu
-neprodává vůbec (Praha → Vídeň), zbytek se přeskočí.
-
-```bash
-python -m vyhledavac Bratislava Košice --providers ZSSK
-```
-
-Slovenská 100% sleva (studenti a senioři se slovenským nárokem) se zapíná
-kartou `sk_free`: `--card sk_free`. Cena `0 Kč` je pak platná cena.
-
-### OneTicket
-
-**Soubor:** `providers/oneticket.py` · **Typ:** prohlížeč · **Klíč:** ne
-
-Prodává jízdenky napříč českými dopravci pod jednotným tarifem (SJT), takže
-je to **nejlepší zdroj cen českých vlaků**. Jejich REST API je jen pro
-smluvní partnery s klíčem, proto program ovládá veřejný web:
-
-1. Otevře `oneticket.cz/search` a **počká, až React vykreslí formulář**
-   (první 1–3 s je stránka prázdná).
-2. Vyplní odkud, kam a datum. Pokud našeptávač stanici nezná (zahraničí),
-   skončí za pár sekund s „nejezdí tam“ – dřív čekal 45 s a hlásil chybu
-   „OneTicket nevrátil žádné spojení“.
-3. V okně cestujících vynuluje výchozího dospělého a nastaví tarif podle
-   kategorie (Plné, Junior, Student, Senior).
-4. Odešle a **přečte JSON, který si stránka sama stáhla** (`/search`,
-   `/price`): všechny vlaky spoje, mezizastávky, dopravce. Cena lístku SJT
-   platí pro trasu, takže se přiřadí každému spoji po stejné trase. Čtení
-   HTML zůstává jako záloha.
-
-Dřívější verze kontrolovala stránku hned po načtení, viděla ji prázdnou
-a hlásila chybu – v GUI se to navíc zobrazilo jako „chybí prohlížeč“,
-přestože se okno otevřelo. Teď program počká a skrytý prohlížeč stačí,
-žádné okno nevyskakuje. Když se stránka nevykreslí ani za 20 s, bývá to
-výpadek jejich API a program to tak i napíše.
-
-### Bileto
-
-**Soubor:** `providers/bileto.py` · **Typ:** JSON API · **Klíč:** ne (veřejné údaje portálu)
-
-Na [bileto.cz](https://bileto.cz/) prodávají jízdenky menší autobusoví
-dopravci, kteří jinde online nejsou – např. RETROBUS Line (Lipno – České
-Budějovice – Třeboň – Brno – Olomouc), Dinarica (České Budějovice – Brno),
-UNITED BUSES (České Budějovice – Jindřichův Hradec – Praha). Web volá API
-`api.bileto.com/v1` a my taky: token (client_credentials s údaji, které
-jsou v jejich JavaScriptu), `places` (město / zastávka), `connections`,
-pak `passengers` (věk, karta ISIC) a `prices` – cena je za celou skupinu
-(dítě do 6 let zdarma, děti, studenti s ISIC a senioři se slevou).
-Seznam linek předem stáhnout nejde, proto se Bileta ptáme na každou trasu;
-když místo nezná, zobrazí se „nejezdí tam“. Třeboň → Brno: 300 Kč dospělý,
-150 Kč student/dítě/senior (13. 10. 2026).
-
-### Arriva
-
-**Soubor:** `providers/arriva.py` · **Typ:** JSON API · **Klíč:** ne (anonymní token e-shopu)
-
-E-shop [shop.arriva.cz](https://shop.arriva.cz/) (odkaz „Vyhledat spoj“ na
-arriva.cz) volá `api.arriva.cz/v1`: anonymní token z cookie
-`ArrticCookie` (`shop.arriva.cz/api/trigger`), `Place/Search`,
-`Route/Search` a `Price/CalculateBySearch`. Prodává:
-
-* vlaky Arriva (R Praha – Turnov – Liberec / Tanvald …) v tarifu Arriva,
-* expresní autobusy Arriva (Praha – Most – Litvínov, Brno – Olomouc …),
-* jízdenky **SJT** (Systém jednotného tarifu) i na vlaky jiných dopravců
-  (ČD) – u nich je dopravce „jiný dopravce (SJT)“. Je to tedy i rychlý
-  zdroj cen ČD vlaků bez prohlížeče.
-
-Obec Arriva nezná jako celek, proto se hledá nádraží i hlavní autobusová
-zastávka obce (Praha hl. n. + Praha, Nádraží Holešovice) a výsledky se
-sloučí. Změna čísla vlaku (R 653 → R 96653) se ukazuje jako přestup –
-bývá to náhradní doprava.
-
-**Kombinace:** travel hacky (*lomená jízdenka*, *jízdenky IDS*) se na dílčí
-úseky ptají všech zapnutých dopravců, takže Bileto i Arriva se do kombinací
-zapojí samy – např. Brno → Šumperk: RegioJet do Vyškova + Arriva (SJT) dál.
+Postup u každého dopravce (RegioJet, FlixBus, ÖBB, ČD, ZSSK, OneTicket,
+Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia), včetně
+chyb, na které jsme narazili, je v **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 
 ---
 
@@ -556,7 +314,7 @@ vyhledavac/
 ├── data/            stations.json.gz – sestavuje tools/build_stations.py
 ├── registry.py      registr pluginů
 ├── engine.py        orchestrace, izolace chyb, průběžné výsledky
-├── providers/       dopravci      (regiojet, flixbus, obb, cd)
+├── providers/       dopravci      (15 – viz docs/DOPRAVCI.md)
 ├── filters/         filtry        (11 vestavěných)
 └── hacks/           travel hacky  (split_ticket, hidden_city)
 ```
