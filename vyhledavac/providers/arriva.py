@@ -17,6 +17,8 @@ dopravce uvedeno „jiný dopravce (SJT)“.
 Úseky se neslučují: změna čísla vlaku (R 653 -> R 96653) bývá náhradní
 doprava, tedy skutečný přestup.
 
+Ptáme se jen na cesty po Česku (oba konce v ČR).
+
 Obec se hledá dvakrát: jednou mezi nádražími a jednou mezi autobusovými
 zastávkami (Arriva nemá „celé město“ jako jedno místo).
 """
@@ -30,6 +32,7 @@ import urllib.parse
 from decimal import Decimal
 from typing import Any
 
+from .. import geo
 from ..errors import StationNotFoundError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
@@ -125,6 +128,8 @@ class ArrivaProvider(HttpProvider):
 
     # ---- hledání ---------------------------------------------------------------
     async def search(self, query: SearchQuery) -> list[Journey]:
+        if geo.leaves_czechia(query.origin, query.destination):
+            raise StationNotFoundError(self.name, "ptáme se jen na cesty po Česku")
         origins, destinations = await asyncio.gather(
             self.candidates(query.origin), self.candidates(query.destination))
         pairs = [(origins[kind], destinations[kind]) for kind in (TRAIN, BUS)

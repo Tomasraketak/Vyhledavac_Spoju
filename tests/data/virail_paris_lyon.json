@@ -1,0 +1,470 @@
+{
+ "status": "processing",
+ "progress": 78,
+ "skey": "01a12cf6-f690-7296-807f-c0aed237a766",
+ "price": {
+  "format": ":currencySymbol :price",
+  "currency": "EUR",
+  "currencySymbol": "€",
+  "min": 12.49,
+  "max": 163
+ },
+ "tz": {
+  "from": "Europe/Paris",
+  "to": "Europe/Paris"
+ },
+ "result": [
+  {
+   "id": "sg:9e5707d56c644b2e487df2a025ad6779",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "train",
+     "carrier": "inOui",
+     "departure_name": "Paris, Paris-Gare-de-Lyon",
+     "departure_code": "871",
+     "departure_datetime": "2026-10-14T11:00:00+02:00",
+     "arrival_name": "Lyon, Lyon-Perrache",
+     "arrival_code": "18",
+     "arrival_datetime": "2026-10-14T13:10:00+02:00",
+     "locale": "en",
+     "price": 67,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 6611,
+      "from_city_id": "1",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/100e3000i03LO1XgWIg1XgYK4001ID001010401GQ",
+      "data": {}
+     },
+     "departure_id": "s.1388452518237375",
+     "arrival_id": "s.1357487518482725",
+     "id": "sg:58fd1b430f9bdbfdaac12e08517940cd"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 67,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/100e3000i03LO1XgWIg1XgYK4001ID001010401GQ",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:74842aafeba96289b5477d7fba936381",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "train",
+     "carrier": "Ouigo",
+     "departure_name": "Paris, Paris-Gare-de-Lyon",
+     "departure_code": "871",
+     "departure_datetime": "2026-10-14T19:26:00+02:00",
+     "arrival_name": "Lyon, Lyon-Perrache",
+     "arrival_code": "18",
+     "arrival_datetime": "2026-10-14T21:40:00+02:00",
+     "locale": "en",
+     "price": 30,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 7805,
+      "from_city_id": "1",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/100e3000i04q91Xh4BW1Xh6HC0021T001010400KM",
+      "data": {}
+     },
+     "departure_id": "s.1388452518237375",
+     "arrival_id": "s.1357487518482725",
+     "id": "sg:43b598cb85848affff7ad627ae5fb60c"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 30,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/100e3000i04q91Xh4BW1Xh6HC0021T001010400KM",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:ad595de38065b00952ac101db0e504e9",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "train",
+     "carrier": "Lyria",
+     "departure_name": "Paris, Paris-Gare-de-Lyon",
+     "departure_code": "871",
+     "departure_datetime": "2026-10-14T12:18:00+02:00",
+     "arrival_name": "Bourg-en-Bresse, Gare de Bourg-en-Bresse",
+     "arrival_code": "684",
+     "arrival_datetime": "2026-10-14T14:08:00+02:00",
+     "locale": "en",
+     "price": 64,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 9773,
+      "from_city_id": "1",
+      "to_city_id": "492",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/100e300b203M41XgXVK1XgZEc002xD00101_100b2001604uI1XgZWA1Xh1cY007PJ001010401C0",
+      "data": {}
+     },
+     "departure_id": "s.1388452518237375",
+     "arrival_id": "s.1362002518521525",
+     "id": "sg:ac853bea0f47f233bf7193056c5935e2"
+    },
+    {
+     "datasource": "kombo",
+     "transport": "bus",
+     "carrier": "Autocar TER",
+     "departure_name": "Bourg-en-Bresse, Gare de Bourg-en-Bresse",
+     "departure_code": "684",
+     "departure_datetime": "2026-10-14T14:27:00+02:00",
+     "arrival_name": "Lyon, Lyon-Part-Dieu",
+     "arrival_code": "68",
+     "arrival_datetime": "2026-10-14T15:48:00+02:00",
+     "locale": "en",
+     "price": 0,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 30115,
+      "from_city_id": "492",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "departure_id": "s.1362002518521525",
+     "arrival_id": "s.1357607518486075",
+     "id": "sg:24361cea71bdc10324d0a40fb5c7fbb6"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 64,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/100e300b203M41XgXVK1XgZEc002xD00101_100b2001604uI1XgZWA1Xh1cY007PJ001010401C0",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:324ba20d3f31901b3a4f73de92bd225a",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "train",
+     "carrier": "inOui",
+     "departure_name": "Paris, Paris-Gare-de-Lyon",
+     "departure_code": "871",
+     "departure_datetime": "2026-10-14T11:00:00+02:00",
+     "arrival_name": "Lyon, Lyon-Part-Dieu",
+     "arrival_code": "68",
+     "arrival_datetime": "2026-10-14T12:56:00+02:00",
+     "locale": "en",
+     "price": 67,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 6611,
+      "from_city_id": "1",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/100e3001603LO1XgWIg1XgYww001ID001010401GQ",
+      "data": {}
+     },
+     "departure_id": "s.1388452518237375",
+     "arrival_id": "s.1357607518486075",
+     "id": "sg:4f1d0441d13873bdec072d9911c2ec41"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 67,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/100e3001603LO1XgWIg1XgYww001ID001010401GQ",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:80da93e333b4220e57502e7950b71146",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "train",
+     "carrier": "Ouigo",
+     "departure_name": "Paris, Paris-Gare-de-Lyon",
+     "departure_code": "871",
+     "departure_datetime": "2026-10-14T19:26:00+02:00",
+     "arrival_name": "Lyon, Lyon-Part-Dieu",
+     "arrival_code": "68",
+     "arrival_datetime": "2026-10-14T21:22:00+02:00",
+     "locale": "en",
+     "price": 30,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": 7805,
+      "from_city_id": "1",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/100e3001604q91Xh4BW1Xh6qc0021T001010400KM",
+      "data": {}
+     },
+     "departure_id": "s.1388452518237375",
+     "arrival_id": "s.1357607518486075",
+     "id": "sg:d587e7672badefff85c1e53ec72a96d6"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 30,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/100e3001604q91Xh4BW1Xh6qc0021T001010400KM",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:998ad88c5a1b83546762e00c85b570c7",
+   "segments": [
+    {
+     "transport": "car",
+     "carrier": "BlaBlaCar",
+     "departure_name": "90 Av. d'Ivry, Paris",
+     "departure_code": "48.825233,2.362162",
+     "departure_datetime": "2026-10-14T09:00:00+02:00",
+     "arrival_name": "40 Rue Stéphane Dechant, La Mulatière",
+     "arrival_code": "45.727967,4.815038",
+     "arrival_datetime": "2026-10-14T13:50:00+02:00",
+     "locale": "en",
+     "price": 29.79,
+     "currency": "EUR",
+     "deeplink": {
+      "method": "GET",
+      "url": "https://action.metaffiliation.com/trk.php?mclic=P5117815701872191&redir=https://www.blablacar.com/trip?source=CARPOOLING&id=6wd6vEp0QEuFzAWbDJMXIwfWgJslrWTjmZct36AEzAmQ",
+      "data": {}
+     },
+     "metadata": {
+      "transport_type": "standard",
+      "transport_id": "SUV 2008",
+      "facilities": [],
+      "datasource": "blablacar",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "datasource": "blablacar",
+     "departure_id": null,
+     "arrival_id": null,
+     "id": "sg:00b2d6f8c570d3196798cc251eaf15a7"
+    }
+   ],
+   "datasource": "blablacar",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "blablacar",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "blablacar",
+      "source_tier": "aggregator",
+      "price": 29.79,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://action.metaffiliation.com/trk.php?mclic=P5117815701872191&redir=https://www.blablacar.com/trip?source=CARPOOLING&id=6wd6vEp0QEuFzAWbDJMXIwfWgJslrWTjmZct36AEzAmQ",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  },
+  {
+   "id": "sg:89ccd60d8db4ce7d5ea580c2de7cb628",
+   "segments": [
+    {
+     "datasource": "kombo",
+     "transport": "bus",
+     "carrier": "FlixBus",
+     "departure_name": "Paris, Gare routière de Bercy-Seine",
+     "departure_code": "111709",
+     "departure_datetime": "2026-10-14T20:00:00+02:00",
+     "arrival_name": "Lyon, Lyon Gerland",
+     "arrival_code": "115741",
+     "arrival_datetime": "2026-10-15T02:00:00+02:00",
+     "locale": "en",
+     "price": 17.98,
+     "currency": "EUR",
+     "metadata": {
+      "transport_id": null,
+      "from_city_id": "1",
+      "to_city_id": "18",
+      "facilities": [],
+      "transport_type": "standard",
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "scraped": true
+     },
+     "deeplink": {
+      "method": "GET",
+      "url": "https://www.kombo.co/affilate/1865/en/1/10t3L0u6N00021Xh58Q1XhaLe0000023l010200ro",
+      "data": {}
+     },
+     "departure_id": null,
+     "arrival_id": null,
+     "id": "sg:98ad5001c7b3bf8308881ca600b40e99"
+    }
+   ],
+   "datasource": "kombo",
+   "deeplink": {},
+   "metadata": {
+    "datasource": "kombo",
+    "source_tier": "aggregator",
+    "scraped": true,
+    "sources": [
+     {
+      "datasource": "kombo",
+      "source_tier": "aggregator",
+      "price": 17.98,
+      "currency": "EUR",
+      "scraped": true,
+      "deeplink": {
+       "method": "GET",
+       "url": "https://www.kombo.co/affilate/1865/en/1/10t3L0u6N00021Xh58Q1XhaLe0000023l010200ro",
+       "data": {}
+      },
+      "primary": true
+     }
+    ],
+    "source_count": 1,
+    "meta_search": false
+   }
+  }
+ ]
+}

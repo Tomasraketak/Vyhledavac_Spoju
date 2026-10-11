@@ -13,7 +13,8 @@ a regionální linky. Web bileto.cz volá veřejné JSON API
 4. ``POST /passengers`` (věk, karty) a ``POST /prices`` -> cena spoje pro
    celou skupinu.
 
-Které linky a zastávky Bileto má, se nedá rozumně vypsat předem – proto se
+Ptáme se jen na cesty po Česku (oba konce v ČR); které linky a zastávky
+Bileto má, se nedá rozumně vypsat předem – proto se
 ptáme pokaždé; když Bileto místo nezná, je to „nejezdí tam“.
 """
 
@@ -25,6 +26,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from .. import geo
 from ..errors import StationNotFoundError, TransientProviderError
 from ..models import (
     DEFAULT_TZ,
@@ -63,7 +65,7 @@ class BiletoProvider(HttpProvider):
     label = "Bileto (menší autobusoví dopravci: RETROBUS, Dinarica …)"
     multi_passenger = True
     currency = "CZK"
-    countries = ("CZ", "SK", "AT", "HR", "SI", "PL")
+    countries = ("CZ",)
     referer = WEB
     min_interval = 0.2
 
@@ -110,6 +112,8 @@ class BiletoProvider(HttpProvider):
 
     # ---- hledání -------------------------------------------------------------
     async def search(self, query: SearchQuery) -> list[Journey]:
+        if geo.leaves_czechia(query.origin, query.destination):
+            raise StationNotFoundError(self.name, "ptáme se jen na cesty po Česku")
         (from_id, _), (to_id, _) = await asyncio.gather(
             self.resolve(query.origin), self.resolve(query.destination))
         when = query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")

@@ -152,3 +152,15 @@ def test_arriva_keeps_each_train_number_as_leg():
         part(730, "Třeboň", "Veselí n.Lužnicí", "2026-10-13T04:00:00Z", "2026-10-13T04:30:00Z"),
         part(653, "Veselí n.Lužnicí", "Brno hl.n.", "2026-10-13T04:42:00Z", "2026-10-13T07:00:00Z")]}
     assert len(arriva.to_journey(raw, "").legs) == 2
+
+
+# ---- jen cesty po Česku ------------------------------------------------------------
+@pytest.mark.parametrize("cls", [BiletoProvider, ArrivaProvider])
+@pytest.mark.parametrize("origin,destination", [("Praha", "Wien"), ("Bratislava", "Brno")])
+def test_only_within_czechia(cls, origin, destination):
+    from vyhledavac.errors import StationNotFoundError
+
+    provider = cls(cache=MemoryCache())
+    query = SearchQuery(origin=origin, destination=destination, departure=at(6))
+    with pytest.raises(StationNotFoundError):
+        asyncio.run(provider.search(query))     # bez jediného síťového dotazu

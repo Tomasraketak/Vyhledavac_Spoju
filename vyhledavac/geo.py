@@ -108,6 +108,11 @@ def country_of(name: str) -> str | None:
     return "CZ"
 
 
+def leaves_czechia(*names: str) -> bool:
+    """Leží některé z míst prokazatelně mimo Česko? (Neznámé místo se nepočítá.)"""
+    return any(country_of(n) not in (None, "CZ") for n in names)
+
+
 # ---- hraniční přechody: (tranzitní země, cílová země) -> [(poslední v tranzitu, první v cíli)]
 BORDERS: dict[tuple[str, str], list[tuple[str, str]]] = {
     ("AT", "SK"): [("Marchegg", "Devínska Nová Ves"), ("Kittsee", "Bratislava-Petržalka")],

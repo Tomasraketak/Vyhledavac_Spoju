@@ -202,8 +202,8 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **ČD** | `providers/cd.py` | web cd.cz v prohlížeči | ✅ skupina | částečně | ne na zastávky bez nádraží | ověřeno živě, vč. slev |
 | **ZSSK** | `providers/zssk.py` | web predaj.zssk.sk v prohlížeči | ✅ | ne | ne po Česku | ověřeno živě, vč. slev |
 | **OneTicket** | `providers/oneticket.py` | web oneticket.cz v prohlížeči | ✅ skupina | ne | jen Česko | ověřeno živě, vč. slev |
-| **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ skupina | ne | vždy | ověřeno živě |
-| **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ skupina | ✅ | vždy | ověřeno živě |
+| **Bileto** | `providers/bileto.py` | JSON API portálu bileto.cz | ✅ skupina | ne | jen po ČR | ověřeno živě |
+| **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ skupina | ✅ | jen po ČR | ověřeno živě |
 | **Leo Express** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ skupina | ✅ | jen jeho stanice | ověřeno živě |
 | **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅² | ✅ | jeden IDS nebo zastávka bez nádraží | ověřeno živě |
 | **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅ 1 dospělý | ✅ | konec v Polsku | ověřeno živě |
@@ -218,7 +218,7 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **CFR** | `providers/cfr.py` | HTML formuláře bilete.cfrcalatori.ro | ✅⁵ | ✅ | konec v Rumunsku, jen vnitrostátně | ověřeno živě |
 | **SŽ** | `providers/sz.py` | HTML e-shopu eshop.sz.si | ✅ skupina | ✅ | jen po Slovinsku | ověřeno živě |
 | **HŽPP** | `providers/hzpp.py` | JSON API prodaja.hzpp.hr | ✅⁶ | ne | jen po Chorvatsku | ověřeno živě |
-| SNCF | – | – | – | – | – | nezapojeno: hledání chrání captcha DataDome |
+| **SNCF** | `providers/sncf.py` | JSON API srovnávače Virail (ceny od Komba/Omia) | ✅⁷ | ne | konec ve Francii | API ověřeno živě |
 | Italo | – | – | – | – | – | nezapojeno: přihlášení chrání Akamai |
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
@@ -234,11 +234,13 @@ italskou část trasy – ta se jako cena spoje nebere.
 podle jeho pravidel (děti, mládež).
 ⁶ Dětské jízdné online není – děti 6–11 let se počítají jako dospělí (horní
 odhad, spoj nese poznámku).
+⁷ Přímo SNCF i Trainline chrání captcha DataDome, proto přes srovnávač
+Virail. Cena je od agregátoru; u skupiny jen orientační (neověřeno).
 
 Ve výchozím nastavení běží všichni dopravci bez prohlížeče: RegioJet,
-FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, OUIGO, Renfe,
+FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
 Eurostar, European Sleeper, CFR, SŽ, HŽPP, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
-Česku nezdržují. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
+Česku nezdržují. Bileto a Arriva se naopak ptají jen na cesty po Česku. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
 dat* nebo přes `--providers`.
 
 ### Společné pro všechny
@@ -307,7 +309,7 @@ za dospělého a upozorní na to.
 ### Jednotliví dopravci
 
 Postup u každého dopravce (RegioJet, FlixBus, ÖBB, ČD, ZSSK, OneTicket,
-Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia, OUIGO, Renfe,
+Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
 Eurostar, European Sleeper, CFR, SŽ, HŽPP), včetně
 chyb, na které jsme narazili, je v **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 

@@ -8,7 +8,7 @@ U každého dopravce tu najdete:
 - kdy se ho program vůbec ptá;
 - na co si dát pozor.
 
-Na konci je přehled dopravců, které zapojit nešlo (SNCF), a jak dopravce
+Na konci je přehled dopravců, které zapojit nešlo (Italo), a jak dopravce
 přidat.
 
 Stav „ověřeno živě“ znamená, že při vývoji (říjen 2026) prošlo skutečné
@@ -27,11 +27,11 @@ rozhraní.
 - Zahraniční:
   [ÖBB](#öbb) · [ZSSK](#zssk) · [PKP (Koleo)](#pkp-koleo) · [MÁV](#máv) ·
   [DB](#db--deutsche-bahn) · [NS](#ns--nizozemské-dráhy) ·
-  [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [Renfe](#renfe--španělské-dráhy) ·
+  [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [SNCF](#sncf-přes-virail) · [Renfe](#renfe--španělské-dráhy) ·
   [Eurostar](#eurostar) · [European Sleeper](#european-sleeper) ·
   [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
   [HŽPP](#hžpp--chorvatské-dráhy)
-- [Nezapojení dopravci (SNCF, Italo)](#nezapojení-dopravci)
+- [Nezapojení dopravci (Italo, Trainline, SNCF Connect)](#nezapojení-dopravci)
 - [Jak přidat dopravce](#jak-přidat-dopravce)
 
 ---
@@ -110,8 +110,8 @@ dopravce.
 | FlixBus | `flixbus.py` | JSON API | vždy | skupina, CZK | ověřeno živě |
 | ČD | `cd.py` | prohlížeč (cd.cz) | ne na zastávky bez nádraží | skupina, CZK | ověřeno živě |
 | OneTicket | `oneticket.py` | prohlížeč | jen Česko | skupina, CZK | ověřeno živě |
-| Arriva | `arriva.py` | JSON API | vždy | skupina, CZK | ověřeno živě |
-| Bileto | `bileto.py` | JSON API | vždy | skupina, CZK | ověřeno živě |
+| Arriva | `arriva.py` | JSON API | jen po ČR | skupina, CZK | ověřeno živě |
+| Bileto | `bileto.py` | JSON API | jen po ČR | skupina, CZK | ověřeno živě |
 | Leo Express | `leo.py` | GraphQL API | jen jeho stanice | skupina, CZK | ověřeno živě |
 | IDS | `ids_idos.py`, `idos.py` | IDOS + tarify IDS | jeden IDS / zastávka bez nádraží | skupina, z tarifu | ověřeno živě |
 | ÖBB | `obb.py`, `_hafas.py`, `_oebb_shop.py` | HAFAS + e-shop API | ne po Česku | skupina, EUR | jízdní řád živě; e-shop z datacentra blokován |
@@ -128,7 +128,7 @@ dopravce.
 | CFR | `cfr.py` | HTML formuláře | konec v Rumunsku (jen vnitrostátně) | dospělý/dítě → skupina, RON | ověřeno živě |
 | SŽ | `sz.py` | HTML formuláře e-shopu | jen po Slovinsku | skupina, EUR | ověřeno živě |
 | HŽPP | `hzpp.py` | JSON API e-shopu | jen po Chorvatsku | skupina (děti jako dospělí), EUR | ověřeno živě |
-| SNCF | – | – | – | – | nezapojeno (DataDome) |
+| SNCF | `sncf.py` | JSON API srovnávače Virail | konec ve Francii | 1 osoba, EUR (skupina jen orientačně) | API ověřeno živě, pak rate limit |
 | Italo | – | – | – | – | nezapojeno (Akamai) |
 
 ---
@@ -256,6 +256,8 @@ typu. Nenásobit znovu (byla to chyba se dvojnásobnou cenou).
   náhradní doprava.
 - Duplicitní autobusy (nádraží + zastávka) se slučují podle odjezdu
   a linky.
+- Ptá se jen na cesty po Česku. Leží-li začátek nebo cíl prokazatelně
+  v cizině (`geo.leaves_czechia`), končí bez dotazu na síť.
 
 ## Bileto
 
@@ -276,6 +278,8 @@ Line, Dinarica, UNITED BUSES a další.
 - Seznam linek předem stáhnout nejde, proto se Bileto ptá na každou trasu.
   Neznámé místo = „nejezdí tam“.
 - Dítě do 6 let jede zdarma. Studenti s ISIC, děti a senioři mají slevu.
+- Ptá se jen na cesty po Česku. Leží-li začátek nebo cíl prokazatelně
+  v cizině (`geo.leaves_czechia`), končí bez dotazu na síť.
 
 ## Leo Express
 
@@ -759,9 +763,43 @@ Děti do 6 let se nepočítají (jedou zdarma).
 
 ---
 
+## SNCF (přes Virail)
+
+**Soubor:** `providers/sncf.py` · **Typ:** JSON API srovnávače virail.com · **Klíč:** žádný
+
+SNCF ani Trainline se z programu ptát nedají (DataDome, viz
+[Nezapojení dopravci](#nezapojení-dopravci)). Srovnávač **Virail** ale
+ukazuje vlaky SNCF (TGV INOUI, OUIGO, TER, Intercités, Lyria) i s cenami,
+které zjistily agregátory **Kombo** a **Omio**, a jeho API captchu nemá.
+
+**Postup:**
+1. `GET /api/legacy-autocomplete/v2/search?q=…&locale_code=en_us` najde
+   město (`k` = „a.<geonames id>“, `c` = země).
+2. `GET /api/v1/search/transport?departure&arrival&date&adult_pax&youth_pax&senior_pax&transports=train&currency=EUR`
+   spustí hledání na jejich serveru. Stejný dotaz se opakuje každých 6 s,
+   dokud `status` není `success` (nejvýš 60 s); průběžné výsledky se
+   ukazují hned.
+3. Každý výsledek má `segments` (typ vlaku, nádraží, časy s časovou zónou,
+   cena, odkaz na nákup) a `metadata.sources` (kdo cenu zjistil).
+
+**Pozor:**
+- **Rate limit.** Po několika hledáních vrací Virail HTTP 429
+  `{"status":"error","message":"rate_limited"}` – z datacentra i desítky
+  minut. Proto se ptáme jen na cesty, které začínají nebo končí ve Francii,
+  ne na dílčí úseky hacků, a výsledek se 20 minut drží v cache.
+- **Cena je od agregátoru**, ne přímo od SNCF, a může být mírně stará.
+  Spoj nese poznámku, odkaz vede na nákup u Komba / Omia.
+- **Skupina neověřena.** Cestující se posílají (věky mládeže 0–25
+  a seniorů 60+ jako „8.0,12.0“), ale ověřit, že cena je za všechny,
+  kvůli rate limitu nešlo. U více cestujících je cena jen v poznámce.
+- Bez čísel vlaků a mezizastávek, hledá se mezi městy (Paříž = všechna
+  nádraží). Vrací i jiné dopravce po Francii (Frecciarossa Paříž – Lyon).
+
+---
+
 ## Nezapojení dopravci
 
-### SNCF (Francie)
+### SNCF Connect a Trainline
 
 `sncf-connect.com` chrání ochrana **DataDome**:
 - obyčejný HTTP dotaz dostane stránku „Please enable JS“;
@@ -770,9 +808,14 @@ Děti do 6 let se nepočítají (jedou zdarma).
 - vyhledání spojů (`/bff/api/v1/itineraries`) končí HTTP 403 s captchou
   (`geo.captcha-delivery.com`).
 
-Obejít captchu nejde a nebylo by to fér, proto SNCF zapojené není.
-Francouzské vlaky uvidíte v jízdním řádu ÖBB (HAFAS). Ceny tras přes
-Německo do Francie (Paříž – Frankfurt ICE/TGV) zná DB.
+**Trainline** (thetrainline.com) má stejnou ochranu: našeptávač
+(`/api/locations-search/v2/search`) odpovídá, hledání spojů
+(`POST /api/journey-search/`) vrací captchu DataDome s `t=bv` (zablokovaný
+návštěvník), a to i ze skutečného prohlížeče. Omio a Rail Europe vrací 403
+už na úvodní stránce.
+
+Obcházet captchu nebudeme, proto se vlaky SNCF hledají přes
+[Virail](#sncf-přes-virail).
 
 ---
 
