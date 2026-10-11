@@ -1,0 +1,657 @@
+{
+ "trips": [
+  {
+   "tripId": "100e3000i03LO1XgVMc1XgXO0001IB00101040358",
+   "bestPrice": {
+    "amount": 14350,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 871,
+       "arrivalStationId": 18,
+       "departureTime": "2026-10-14T10:00:00.000Z",
+       "arrivalTime": "2026-10-14T12:10:00.000Z",
+       "companyId": 14496,
+       "ticketId": "100e3000i03LO1XgVMc1XgXO0001IB00101",
+       "transportNumber": "TGV INOUI 6609",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 11850,
+      "currency": "EUR"
+     },
+     "subTripId": "100e3000i03LO1XgVMc1XgXO0001IB00101040358",
+     "providerId": 4,
+     "remainingSeats": 14
+    }
+   ],
+   "isAvailable": true,
+   "unsellableReason": null,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "10001001603LM1Xh10o1Xh5Pq004CJ001010403pC",
+   "bestPrice": {
+    "amount": 15920,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 1,
+       "arrivalStationId": 68,
+       "departureTime": "2026-10-14T15:35:00.000Z",
+       "arrivalTime": "2026-10-14T20:44:00.000Z",
+       "companyId": 14494,
+       "ticketId": "10001001603LM1Xh10o1Xh5Pq004CJ00101",
+       "transportNumber": "TER 17777 operated by SNCF VOYAGEURS 1187",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 13120,
+      "currency": "EUR"
+     },
+     "subTripId": "10001001603LM1Xh10o1Xh5Pq004CJ001010403pC",
+     "providerId": 4,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "unsellableReason": null,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "100e3001603LO1XgTMk1XgVIk001JL00101_10016000i03LM1XgWDq1XgWLa03IEf001010403l6",
+   "bestPrice": {
+    "amount": 15540,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 871,
+       "arrivalStationId": 68,
+       "departureTime": "2026-10-14T07:52:00.000Z",
+       "arrivalTime": "2026-10-14T09:56:00.000Z",
+       "companyId": 14496,
+       "ticketId": "100e3001603LO1XgTMk1XgVIk001JL00101",
+       "transportNumber": "TGV INOUI 6681",
+       "isSeatMapEligible": false
+      },
+      {
+       "departureStationId": 68,
+       "arrivalStationId": 18,
+       "departureTime": "2026-10-14T10:55:00.000Z",
+       "arrivalTime": "2026-10-14T11:03:00.000Z",
+       "companyId": 14494,
+       "ticketId": "10016000i03LM1XgWDq1XgWLa03IEf00101",
+       "transportNumber": "TER 886615 operated by SNCF VOYAGEURS 1187",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 12840,
+      "currency": "EUR"
+     },
+     "subTripId": "100e3001603LO1XgTMk1XgVIk001JL00101_10016000i03LM1XgWDq1XgWLa03IEf001010403l6",
+     "providerId": 4,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "unsellableReason": null,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "100e300b203M41XgXVK1XgZEc002xD00101_100b2001604uI1XgZWA1Xh1cY007PJ001010403e0",
+   "bestPrice": {
+    "amount": 15100,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 871,
+       "arrivalStationId": 684,
+       "departureTime": "2026-10-14T12:18:00.000Z",
+       "arrivalTime": "2026-10-14T14:08:00.000Z",
+       "companyId": 14512,
+       "ticketId": "100e300b203M41XgXVK1XgZEc002xD00101",
+       "transportNumber": "9773",
+       "isSeatMapEligible": false
+      },
+      {
+       "departureStationId": 684,
+       "arrivalStationId": 68,
+       "departureTime": "2026-10-14T14:27:00.000Z",
+       "arrivalTime": "2026-10-14T15:48:00.000Z",
+       "companyId": 17280,
+       "ticketId": "100b2001604uI1XgZWA1Xh1cY007PJ00101",
+       "transportNumber": "TER 30115 operated by SNCF VOYAGEURS 1187",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 12400,
+      "currency": "EUR"
+     },
+     "subTripId": "100e300b203M41XgXVK1XgZEc002xD00101_100b2001604uI1XgZWA1Xh1cY007PJ001010403e0",
+     "providerId": 4,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "unsellableReason": null,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "107fK001604q91XgULi1XgWLa0022T00101_10016000i03LM1XgXde1XgXkY03FOg001010401mw",
+   "bestPrice": {
+    "amount": 5640,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 27884,
+       "arrivalStationId": 68,
+       "departureTime": "2026-10-14T08:55:00.000Z",
+       "arrivalTime": "2026-10-14T11:03:00.000Z",
+       "companyId": 16997,
+       "ticketId": "107fK001604q91XgULi1XgWLa0022T00101",
+       "transportNumber": "OUIGO N° 7867",
+       "isSeatMapEligible": false
+      },
+      {
+       "departureStationId": 68,
+       "arrivalStationId": 18,
+       "departureTime": "2026-10-14T11:32:00.000Z",
+       "arrivalTime": "2026-10-14T11:40:00.000Z",
+       "companyId": 14494,
+       "ticketId": "10016000i03LM1XgXde1XgXkY03FOg00101",
+       "transportNumber": "TER 875704 operated by SNCF VOYAGEURS 1187",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 5240,
+      "currency": "EUR"
+     },
+     "subTripId": "107fK001604q91XgULi1XgWLa0022T00101_10016000i03LM1XgXde1XgXkY03FOg001010401mw",
+     "providerId": 4,
+     "remainingSeats": 79
+    }
+   ],
+   "isAvailable": true,
+   "unsellableReason": null,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.06
+  },
+  {
+   "tripId": "10t3L0u6N00021XgMSA1XgS1W0000023l010201Nf",
+   "bestPrice": {
+    "amount": 8197,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 111709,
+       "arrivalStationId": 115741,
+       "departureTime": "2026-10-14T00:30:00.000Z",
+       "arrivalTime": "2026-10-14T06:00:00.000Z",
+       "companyId": 2,
+       "ticketId": "10t3L0u6N00021XgMSA1XgS1W0000023l01",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 6897,
+      "currency": "EUR"
+     },
+     "subTripId": "10t3L0u6N00021XgMSA1XgS1W0000023l010201Nf",
+     "providerId": 2
+    }
+   ],
+   "isAvailable": true,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.18
+  },
+  {
+   "tripId": "100020ix403FH1XgTr21XgV9u00mEx1UP01_10ix40u6N03FH1XgYK41Xh436001kL1UP010101fm",
+   "bestPrice": {
+    "amount": 5096,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 2,
+       "arrivalStationId": 71242,
+       "departureTime": "2026-10-14T07:30:00.000Z",
+       "arrivalTime": "2026-10-14T09:20:00.000Z",
+       "companyId": 14117,
+       "ticketId": "100020ix403FH1XgTr21XgV9u00mEx1UP01",
+       "transportNumber": "87081",
+       "isSeatMapEligible": false
+      },
+      {
+       "departureStationId": 71242,
+       "arrivalStationId": 115741,
+       "departureTime": "2026-10-14T13:10:00.000Z",
+       "arrivalTime": "2026-10-14T18:50:00.000Z",
+       "companyId": 14117,
+       "ticketId": "10ix40u6N03FH1XgYK41Xh436001kL1UP01",
+       "transportNumber": "5131",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 4796,
+      "currency": "EUR"
+     },
+     "subTripId": "100020ix403FH1XgTr21XgV9u00mEx1UP01_10ix40u6N03FH1XgYK41Xh436001kL1UP010101fm",
+     "providerId": 1,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.06
+  },
+  {
+   "tripId": "10t3L0u6N04pX1XgVek1Xh0LS0010R2qR1A0100Mm",
+   "bestPrice": {
+    "amount": 3698,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 111709,
+       "arrivalStationId": 115741,
+       "departureTime": "2026-10-14T09:25:00.000Z",
+       "arrivalTime": "2026-10-14T15:20:00.000Z",
+       "companyId": 16985,
+       "ticketId": "10t3L0u6N04pX1XgVek1Xh0LS0010R2qR1A",
+       "transportNumber": "3897",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 2998,
+      "currency": "EUR"
+     },
+     "subTripId": "10t3L0u6N04pX1XgVek1Xh0LS0010R2qR1A0100Mm",
+     "providerId": 1,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "10t3L0u6N03FH1XgY7m1Xh436001kL1UP010100J8",
+   "bestPrice": {
+    "amount": 3398,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 111709,
+       "arrivalStationId": 115741,
+       "departureTime": "2026-10-14T12:30:00.000Z",
+       "arrivalTime": "2026-10-14T18:50:00.000Z",
+       "companyId": 14117,
+       "ticketId": "10t3L0u6N03FH1XgY7m1Xh436001kL1UP01",
+       "transportNumber": "5131",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 2798,
+      "currency": "EUR"
+     },
+     "subTripId": "10t3L0u6N03FH1XgY7m1Xh436001kL1UP010100J8",
+     "providerId": 1,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.21
+  },
+  {
+   "tripId": "10t3L0u6N04rk1Xh7X21Xhdzq0008U0Ii010101Qu",
+   "bestPrice": {
+    "amount": 8398,
+    "currency": "EUR"
+   },
+   "subTrips": [
+    {
+     "segments": [
+      {
+       "departureStationId": 111709,
+       "arrivalStationId": 115741,
+       "departureTime": "2026-10-14T23:00:00.000Z",
+       "arrivalTime": "2026-10-15T05:00:00.000Z",
+       "companyId": 17070,
+       "ticketId": "10t3L0u6N04rk1Xh7X21Xhdzq0008U0Ii01",
+       "transportNumber": "552",
+       "isSeatMapEligible": false
+      }
+     ],
+     "bestPrice": {
+      "amount": 7098,
+      "currency": "EUR"
+     },
+     "subTripId": "10t3L0u6N04rk1Xh7X21Xhdzq0008U0Ii010101Qu",
+     "providerId": 1,
+     "remainingSeats": null
+    }
+   ],
+   "isAvailable": true,
+   "promoFare": false,
+   "isRefundable": false,
+   "smartPricingFeePercentage": 0.18
+  }
+ ],
+ "dependencies": {
+  "stations": {
+   "1": {
+    "id": 1,
+    "name": "Gare de Paris-Bercy-Bourgogne-Pays d'Auvergne",
+    "latitude": "48.838402",
+    "longitude": "2.382410",
+    "cityId": 1
+   },
+   "2": {
+    "id": 2,
+    "name": "Gare Routière Roissypole - Terminal 3",
+    "latitude": "49.009899",
+    "longitude": "2.559320",
+    "cityId": 533
+   },
+   "18": {
+    "id": 18,
+    "name": "Lyon-Perrache",
+    "latitude": "45.749199",
+    "longitude": "4.826310",
+    "cityId": 18
+   },
+   "68": {
+    "id": 68,
+    "name": "Lyon-Part-Dieu",
+    "latitude": "45.760899",
+    "longitude": "4.862460",
+    "cityId": 18
+   },
+   "684": {
+    "id": 684,
+    "name": "Gare de Bourg-en-Bresse",
+    "latitude": "46.200100",
+    "longitude": "5.214470",
+    "cityId": 492
+   },
+   "871": {
+    "id": 871,
+    "name": "Paris-Gare-de-Lyon",
+    "latitude": "48.845798",
+    "longitude": "2.373560",
+    "cityId": 1
+   },
+   "27884": {
+    "id": 27884,
+    "name": "Aéroport Charles-de-Gaulle 2 TGV",
+    "latitude": "49.003601",
+    "longitude": "2.570830",
+    "cityId": 533
+   },
+   "71242": {
+    "id": 71242,
+    "name": "Parking P5 Cars de Groupe",
+    "latitude": "48.731427",
+    "longitude": "2.363155",
+    "cityId": 534
+   },
+   "111709": {
+    "id": 111709,
+    "name": "Gare routière de Bercy-Seine",
+    "latitude": "48.836100",
+    "longitude": "2.379600",
+    "cityId": 1
+   },
+   "115741": {
+    "id": 115741,
+    "name": "Lyon Gerland",
+    "latitude": "45.726458",
+    "longitude": "4.827268",
+    "cityId": 18
+   }
+  },
+  "companies": {
+   "2": {
+    "id": 2,
+    "searchName": "Flixbus",
+    "displayName": "FlixBus",
+    "transportType": "bus",
+    "logoName": "flixbus",
+    "companyWebsite": null
+   },
+   "14117": {
+    "id": 14117,
+    "searchName": "BlaBlaCarBus",
+    "displayName": "BlaBlaCar Bus",
+    "transportType": "bus",
+    "logoName": "blablabus",
+    "companyWebsite": null
+   },
+   "14494": {
+    "id": 14494,
+    "searchName": "TER",
+    "displayName": "TER",
+    "transportType": "train",
+    "logoName": "ter",
+    "companyWebsite": null
+   },
+   "14496": {
+    "id": 14496,
+    "searchName": "inOui",
+    "displayName": "inOui",
+    "transportType": "train",
+    "logoName": "inoui",
+    "companyWebsite": null
+   },
+   "14512": {
+    "id": 14512,
+    "searchName": "lyria",
+    "displayName": "Lyria",
+    "transportType": "train",
+    "logoName": "lyria",
+    "companyWebsite": null
+   },
+   "16985": {
+    "id": 16985,
+    "searchName": "Itabus",
+    "displayName": "Itabus",
+    "transportType": "bus",
+    "logoName": "itabus",
+    "companyWebsite": null
+   },
+   "16997": {
+    "id": 16997,
+    "searchName": "Ouigo",
+    "displayName": "Ouigo",
+    "transportType": "train",
+    "logoName": "ouigo",
+    "companyWebsite": null
+   },
+   "17070": {
+    "id": 17070,
+    "searchName": "Gipsyy",
+    "displayName": "Gipsyy",
+    "transportType": "bus",
+    "logoName": "gipsyy",
+    "companyWebsite": null
+   },
+   "17280": {
+    "id": 17280,
+    "searchName": "Autocar-TER",
+    "displayName": "Autocar TER",
+    "transportType": "bus",
+    "logoName": "ter",
+    "companyWebsite": null
+   }
+  },
+  "cities": {
+   "1": {
+    "id": 1,
+    "name": "Paris",
+    "latitude": "48.856600",
+    "longitude": "2.351830",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1456928"
+   },
+   "18": {
+    "id": 18,
+    "name": "Lyon",
+    "latitude": "45.759700",
+    "longitude": "4.842220",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1448468"
+   },
+   "21": {
+    "id": 21,
+    "name": "Geneva",
+    "latitude": "46.200000",
+    "longitude": "6.149980",
+    "timeZone": "Europe/Zurich",
+    "countryCode": "CH",
+    "bookingComId": null
+   },
+   "34": {
+    "id": 34,
+    "name": "Avignon",
+    "latitude": "43.950000",
+    "longitude": "4.817000",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1409631"
+   },
+   "41": {
+    "id": 41,
+    "name": "Grenoble",
+    "latitude": "45.187800",
+    "longitude": "5.726940",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1430647"
+   },
+   "58": {
+    "id": 58,
+    "name": "Valence",
+    "latitude": "44.933300",
+    "longitude": "4.891670",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1474434"
+   },
+   "217": {
+    "id": 217,
+    "name": "Saint-Étienne",
+    "latitude": "45.434700",
+    "longitude": "4.390280",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1465168"
+   },
+   "492": {
+    "id": 492,
+    "name": "Bourg-en-Bresse",
+    "latitude": "46.205500",
+    "longitude": "5.228800",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1414325"
+   },
+   "533": {
+    "id": 533,
+    "name": "Paris-Charles-de-Gaulle Airport",
+    "latitude": "49.008600",
+    "longitude": "2.547310",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": null
+   },
+   "534": {
+    "id": 534,
+    "name": "Paris Orly Airport",
+    "latitude": "48.726200",
+    "longitude": "2.365230",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": null
+   },
+   "535": {
+    "id": 535,
+    "name": "Marne-la-Vallée Chessy (Disneyland Paris)",
+    "latitude": "48.872200",
+    "longitude": "2.775810",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": null
+   },
+   "2448": {
+    "id": 2448,
+    "name": "Massy",
+    "latitude": "48.725300",
+    "longitude": "2.256330",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": "-1450210"
+   },
+   "6403": {
+    "id": 6403,
+    "name": "Saint-Exupéry Airport LYS",
+    "latitude": "45.725600",
+    "longitude": "5.081110",
+    "timeZone": "Europe/Paris",
+    "countryCode": "FR",
+    "bookingComId": null
+   }
+  }
+ },
+ "percentageDone": 100,
+ "newLastIndex": 10,
+ "currency": "EUR"
+}

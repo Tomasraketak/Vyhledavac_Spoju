@@ -28,6 +28,16 @@ from .errors import BlockedError, RateLimitedError, TransientProviderError
 
 log = logging.getLogger(__name__)
 
+try:            # httpx rozbalí „br“ jen s balíčkem brotli – jinak ho nenabízet
+    import brotli  # noqa: F401
+    ACCEPT_ENCODING = "gzip, deflate, br"
+except ImportError:
+    try:
+        import brotlicffi  # noqa: F401
+        ACCEPT_ENCODING = "gzip, deflate, br"
+    except ImportError:
+        ACCEPT_ENCODING = "gzip, deflate"
+
 # Konzistentní profily prohlížečů. Míchat UA z jednoho a sec-ch-ua z jiného
 # je klasický způsob, jak se prozradit – proto jsou svázané dohromady.
 BROWSER_PROFILES: list[dict[str, str]] = [
@@ -130,7 +140,7 @@ def build_headers(
         "Accept": "application/json, text/plain, */*" if json_api
                   else "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": accept_language,
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": ACCEPT_ENCODING,
         "Connection": "keep-alive",
         "Sec-Fetch-Dest": "empty" if json_api else "document",
         "Sec-Fetch-Mode": "cors" if json_api else "navigate",

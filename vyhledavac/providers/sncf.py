@@ -1,41 +1,44 @@
-"""SNCF – francouzské vlaky (TGV INOUI, OUIGO, TER, Intercités, Lyria) přes srovnávač Virail.
+"""SNCF – francouzské vlaky (TGV INOUI, OUIGO, TER, Intercités, Lyria) přes prodejce Kombo.
 
 Přímo od SNCF to nejde: sncf-connect.com i Trainline (thetrainline.com)
 chrání hledání spojů DataDome – z datacentra vrací captchu „t=bv“
-(zablokovaný návštěvník) i skutečnému prohlížeči. Srovnávač **virail.com**
-ale vlaky SNCF ukazuje i s cenami (bere je od agregátorů Kombo a Omio)
-a jeho API žádnou captchu nemá:
+(zablokovaný návštěvník) i skutečnému prohlížeči. **Kombo** (kombo.co) je
+oficiální prodejce jízdenek SNCF (a Trenitalia France, OUIGO, autobusů)
+a jeho web volá API bez captchy:
 
-* ``GET /api/legacy-autocomplete/v2/search?q=…&locale_code=en_us`` – města
-  (``k`` = „a.<geonames id>“, ``c`` = země, ``stations`` = nádraží města);
-* ``GET /api/v1/search/transport?departure&arrival&date&adult_pax&youth_pax
-  &senior_pax&transports=train&currency=EUR`` – hledání běží na jejich
-  serveru; stejný dotaz se opakuje (Virail si ho pamatuje podle parametrů),
-  dokud ``status`` není ``success``. Mezitím ``result`` přibývá.
+* ``GET place.kombo.co/search?term=…&locale=en`` – města
+  (``i`` = id města, ``c`` = země, ``st`` = nádraží);
+* ``POST search.kombo.co/search`` ``{"departureCityId", "arrivalCityId",
+  "dateOutward", "passengers": [{"ageGroup": …}], "currency": "EUR"}`` →
+  ``key`` hledání;
+* ``GET search.kombo.co/search/trips?key=…&lastIndex=…`` – spoje přibývají,
+  dokud ``percentageDone`` není 100; ``newLastIndex`` říká, odkud číst příště.
+  ``dependencies`` obsahuje nádraží a dopravce (``companies``) podle id.
 
-Každý výsledek má ``segments`` (vlak, nádraží, čas s časovou zónou, cena)
-a ``metadata.sources`` (od koho je cena, ``primary`` = ta zobrazená).
+Spoj (``trip``) má ``subTrips`` (jednotlivé jízdenky), každá ``segments``
+(vlak s číslem – „TGV INOUI 6611“, nádraží, časy) a ``bestPrice``
+v centech **za celou skupinu**.
 
 Na co si dát pozor:
 
-* **Rate limit.** Virail dovolí jen pár hledání za několik minut – při
-  častém dotazování vrací ``{"status": "error", "code": 429}``. Proto se ptáme
-  jen tehdy, když aspoň jeden konec cesty leží ve Francii, dotazujeme se
-  nejvýš jednou za 6 s a výsledek se na 20 minut ukládá do cache.
-* **Cena je od agregátoru**, ne od SNCF: Kombo / Omio ji zjistily nedávno
-  (``scraped``), ale může být mírně neaktuální. Spoj proto nese poznámku
-  a odkaz vede na nákup u agregátoru.
-* **Skupina neověřena.** Cestující se posílají (``adult_pax``, věky mládeže
-  0–25 v ``youth_pax`` jako „8.0,12.0“, seniorů 60+ v ``senior_pax``), ale
-  kvůli rate limitu se nepodařilo ověřit, že vrácená cena je za celou
-  skupinu. U více cestujících se proto cena ukáže jen v poznámce
-  (``raw["indicative_eur"]``), ne jako cena spoje.
-* Virail nevrací čísla vlaků ani mezizastávky – úsek má jen typ vlaku
-  („inOui“, „TER“, „Ouigo“) a první a poslední zastávku.
-* Hledá se mezi **městy** (Paříž = všechna nádraží), konkrétní nádraží
-  v dotazu se nepoužije.
-* Vrací i vlaky jiných dopravců po Francii (Frecciarossa Paříž – Lyon,
-  Eurostar) – necháváme je, i to je cena, kterou jinde nenajdeme.
+* **Dvě ceny.** ``subTrips[].bestPrice`` je cena dopravce (stejná jako
+  na sncf-connect.com), ``trip.bestPrice`` je cena u Komba včetně jeho
+  poplatku (~18 %). Jako cenu spoje bereme cenu dopravce, cenu u Komba
+  píšeme do poznámky.
+* Cestující jsou věkové skupiny: ``Infant`` 0–3 (na klíně, zdarma),
+  ``Child`` 4–11 (u TGV INOUI −50 %), ``Young`` 12–27, ``Adult``,
+  ``Senior`` 60+. Ověřeno: dva dospělí = dvojnásobek, dospělý + dítě na
+  TGV INOUI = 1,5násobek.
+* **Časy mají „Z“, ale jsou místní** (TGV 6611 odjíždí z Paříže v 11:00,
+  Kombo píše „11:00:00.000Z“). Zónu bereme z města nádraží
+  (``dependencies.cities[].timeZone``).
+* Hledá se mezi **městy** (Paříž = všechna nádraží). Kombo vrací i autobusy
+  (FlixBus, BlaBlaCar) – ty zahazujeme, autobusy máme od jiných dopravců;
+  necháváme spoje s aspoň jedním vlakem (i Frecciarossa Paříž – Lyon).
+* Ptáme se jen tehdy, když aspoň jeden konec cesty leží ve Francii.
+
+Srovnávač virail.com ukazuje stejná data (od Komba), ale po několika
+hledáních vrací rate limit 429 – proto Kombo napřímo.
 """
 
 from __future__ import annotations
@@ -46,9 +49,11 @@ import logging
 import time
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .. import geo
-from ..errors import RateLimitedError, StationNotFoundError, TransientProviderError
+from ..errors import StationNotFoundError, TransientProviderError
 from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
@@ -56,43 +61,44 @@ from .base import HttpProvider
 
 log = logging.getLogger(__name__)
 
-BASE = "https://www.virail.com"
+WEB = "https://www.kombo.co"
+PLACE = "https://place.kombo.co"
+SEARCH = "https://search.kombo.co"
 PLACE_TTL = 30 * 24 * 3600
-RESULT_TTL = 20 * 60
-POLL_EVERY = 6.0
-#: Jak dlouho nejvýš čekat na dokončení hledání na straně Virailu (s).
-POLL_LIMIT = 60.0
-YOUTH_MAX, SENIOR_MIN = 25, 60
-#: Úseky, které nejsou vlak (autobus TER se počítá jako autobus).
-BUS_WORDS = ("autocar", "bus", "car ")
+POLL_EVERY = 1.5
+#: Jak dlouho nejvýš čekat, než Kombo dohledá všechny dopravce (s).
+POLL_LIMIT = 45.0
+FRANCE = "France"
 
 
 @PROVIDERS.register()
 class SncfProvider(HttpProvider):
     name = "SNCF"
-    label = "SNCF – vlaky ve Francii (TGV INOUI, OUIGO, TER) přes srovnávač Virail"
+    label = "SNCF – vlaky ve Francii (TGV INOUI, OUIGO, TER, Lyria) přes prodejce Kombo"
     multi_passenger = True
     currency = "EUR"
     countries = ("FR", "BE", "CH", "LU", "DE", "IT", "ES")
     international_only = True
-    hack_legs = False          # pár hledání za pár minut – na dílčí úseky hacků ne
-    referer = BASE + "/"
-    min_interval = POLL_EVERY
+    hack_legs = False
+    referer = WEB + "/"
+    min_interval = 0.3
     min_timeout = POLL_LIMIT + 30
 
+    async def _headers(self) -> dict[str, str]:
+        return {"Origin": WEB, "Accept": "application/json"}
+
     async def resolve(self, place: str) -> dict[str, Any]:
-        key = f"place:{normalize(place)}"
+        key = f"kombo-place:{normalize(place)}"   # „place:“ měla stará verze přes Virail
         cached = self.cache.get(self.name, key)
         if cached:
             return cached
-        data = await self.client.get_json(f"{BASE}/api/legacy-autocomplete/v2/search",
-                                          params={"q": place, "locale_code": "en_us", "limit": 12},
-                                          referer=self.referer)
-        items = [r for r in (data or {}).get("results") or [] if r.get("k")]
+        data = await self.client.get_json(f"{PLACE}/search", params={"term": place, "locale": "en"},
+                                          referer=self.referer, headers=await self._headers())
+        items = [r for r in (data or {}).get("results") or [] if r.get("i")]
         if not items:
-            raise StationNotFoundError(self.name, f"místo {place!r} Virail nezná")
+            raise StationNotFoundError(self.name, f"místo {place!r} Kombo nezná")
         chosen = pick_city(place, items)
-        out = {"id": chosen["k"], "name": chosen.get("n") or place, "country": chosen.get("c") or ""}
+        out = {"id": int(chosen["i"]), "name": chosen.get("n") or place, "country": chosen.get("c") or ""}
         self.cache.set(self.name, key, out, ttl=PLACE_TTL)
         return out
 
@@ -101,153 +107,152 @@ class SncfProvider(HttpProvider):
         if None not in known and "FR" not in known:
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Francii")
         origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
-        if "FR" not in (origin["country"], destination["country"]):
+        if FRANCE not in (origin["country"], destination["country"]):
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Francii")
-        params = {"departure": origin["id"], "arrival": destination["id"],
-                  "date": query.departure.astimezone(DEFAULT_TZ).date().isoformat(),
-                  **pax_params(query.passengers), "tld": "com", "locale": "en_us",
-                  "currency": "EUR", "transports": "train"}
-        key = "search:" + "|".join(f"{k}={v}" for k, v in sorted(params.items()))
-        data = self.cache.get(self.name, key)
-        if not data:
-            data = await self._poll(params, query)
-            if data.get("status") == "success":
-                self.cache.set(self.name, key, data, ttl=RESULT_TTL)
-        return self.journeys(data, query)
+        date = query.departure.astimezone(DEFAULT_TZ).date().isoformat()
+        started = await self.client.post_json(f"{SEARCH}/search", {
+            "departureCityId": origin["id"], "arrivalCityId": destination["id"], "dateOutward": date,
+            "locale": "en", "passengers": passengers(query.passengers),
+            "departureStationId": 0, "arrivalStationId": 0, "currency": "EUR"},
+            referer=self.referer, headers=await self._headers())
+        key = (started or {}).get("key")
+        if not key:
+            raise TransientProviderError(self.name, "Kombo nespustilo hledání")
+        link = (f"{WEB}/en/app/outward/1/{origin['id']}/{destination['id']}/{date}/"
+                f"{quote(origin['name'])}/{quote(destination['name'])}/0/0")
+        return await self._poll(key, query, link)
 
-    async def _poll(self, params: dict[str, str], query: SearchQuery) -> dict[str, Any]:
-        started = time.monotonic()
-        data: dict[str, Any] = {}
+    async def _poll(self, key: str, query: SearchQuery, link: str) -> list[Journey]:
+        trips: list[dict[str, Any]] = []
+        deps: dict[str, dict[str, Any]] = {}
+        last, begun = 0, time.monotonic()
         while True:
-            try:
-                fresh = await self.client.get_json(f"{BASE}/api/v1/search/transport", params=params,
-                                                   referer=self.referer) or {}
-            except RateLimitedError:
-                fresh = {"status": "error", "code": 429}
-            if fresh.get("code") == 429 and data.get("result"):
-                self.note("Virail přestal odpovídat (rate limit) – výsledky můžou být neúplné.")
-                return data
-            data = fresh
-            status = data.get("status")
-            if status == "error":
-                if data.get("code") == 429 or data.get("message") == "rate_limited":
-                    raise RateLimitedError(self.name, "Virail omezuje počet hledání z této IP adresy – "
-                                                      "zkuste to za chvíli", None)
-                raise TransientProviderError(self.name, f"Virail: {data.get('message') or 'chyba hledání'}")
-            if status != "processing" or time.monotonic() - started > POLL_LIMIT:
-                if status == "processing":
-                    self.note("Virail nedokončil hledání včas – výsledky můžou být neúplné.")
-                return data
-            self.publish(self.journeys(data, query))
+            data = await self.client.get_json(f"{SEARCH}/search/trips", params={"key": key, "lastIndex": last},
+                                              referer=self.referer, headers=await self._headers()) or {}
+            trips += data.get("trips") or []
+            for kind, values in (data.get("dependencies") or {}).items():
+                deps.setdefault(kind, {}).update(values or {})
+            last = data.get("newLastIndex", last)
+            journeys = self.journeys({"trips": trips, "dependencies": deps}, query, link)
+            done = data.get("percentageDone") == 100
+            if done or time.monotonic() - begun > POLL_LIMIT:
+                if not done:
+                    self.note("Kombo nedohledalo všechny dopravce včas – výsledky můžou být neúplné.")
+                return journeys
+            self.publish(journeys)
             await asyncio.sleep(POLL_EVERY)
 
-    def journeys(self, data: dict[str, Any], query: SearchQuery) -> list[Journey]:
+    def journeys(self, data: dict[str, Any], query: SearchQuery, link: str = WEB) -> list[Journey]:
+        deps = data.get("dependencies") or {}
         out = []
-        for item in data.get("result") or []:
-            journey = to_journey(item)
+        for trip in data.get("trips") or []:
+            journey = to_journey(trip, deps, link)
             if journey is None or not query.departure <= journey.departure <= query.window_end:
                 continue
-            price = item_price(item)
-            source = primary_source(item)
-            if price is not None and len(query.passengers) > 1:
-                # u skupiny nevíme jistě, zda agregátor počítal se všemi cestujícími
-                journey.raw = {"indicative_eur": str(price)}
-                journey.notes.append(f"Virail ({source}) uvádí {price:.2f} € – u skupiny není jisté, že jde "
-                                     "o cenu za všechny cestující; ověřte u prodejce.")
-            elif price is not None:
-                journey.fares = [self.make_fare(price, str(item_currency(item)), label=f"Virail ({source})",
-                                                tariff=", ".join(dict.fromkeys(leg.line for leg in journey.legs)))]
+            carrier_price, kombo_price = trip_prices(trip)
+            if trip.get("isAvailable") is False:
+                journey.fare_status = FareStatus.SOLD_OUT
+            elif carrier_price is not None:
+                journey.fares = [self.make_fare(carrier_price, "EUR", label="SNCF / Kombo",
+                                                tariff=", ".join(dict.fromkeys(leg.carrier for leg in journey.legs)))]
                 journey.fare_status = FareStatus.PRICED
-                journey.notes.append(f"Cenu zjistil agregátor {source} přes srovnávač Virail – před nákupem "
-                                     "ověřte u SNCF nebo u prodejce.")
+                if kombo_price is not None and kombo_price != carrier_price:
+                    journey.notes.append(f"Cena dopravce (sncf-connect.com). U Komba {kombo_price:.2f} € "
+                                         "včetně jeho poplatku.")
             out.append(journey)
         return out
 
 
-def pax_params(passengers: tuple[Passenger, ...]) -> dict[str, str]:
-    """Cestující pro Virail: dospělí počtem, mládež (do 25) a senioři (60+) věky."""
-    adults = sum(1 for p in passengers if YOUTH_MAX < p.age < SENIOR_MIN)
-    youth = [p.age for p in passengers if p.age <= YOUTH_MAX]
-    seniors = [p.age for p in passengers if p.age >= SENIOR_MIN]
-    if adults == 0 and not seniors and youth:        # Virail chce aspoň jednoho dospělého
-        youth.sort()
-        youth.pop()
-        adults = 1
-    return {"adult_pax": str(max(adults, 0)),
-            "youth_pax": ",".join(f"{a}.0" for a in youth) or "_",
-            "senior_pax": ",".join(f"{a}.0" for a in seniors) or "_"}
+def passengers(group: tuple[Passenger, ...]) -> list[dict[str, Any]]:
+    """Cestující pro Kombo podle věku (skupiny SNCF)."""
+    out = []
+    for p in group:
+        if p.age < 4:
+            kind = "Infant"
+        elif p.age < 12:
+            kind = "Child"
+        elif p.age < 28:
+            kind = "Young"
+        elif p.age >= 60:
+            kind = "Senior"
+        else:
+            kind = "Adult"
+        out.append({"ageGroup": kind, "discountCards": [], "reducedMobility": False,
+                    "hasWheelchair": False, "hasMobilityCard": False, "onLap": kind == "Infant"})
+    if out and not any(p["ageGroup"] in ("Adult", "Senior", "Young") for p in out):
+        out[0].update(ageGroup="Adult", onLap=False)      # bez dospělého Kombo neprodá
+    return out
 
 
 def pick_city(place: str, items: list[dict[str, Any]]) -> dict[str, Any]:
     """Město z našeptávače: přesná shoda jména, pak shoda prvního slova, pak nejpodobnější."""
     wanted = normalize(place)
-    first = normalize(place.replace(",", " ").replace("-", " ").split()[0]) if place.strip() else wanted
-    with_stations = [i for i in items if i.get("stations")] or items
+    words = place.replace(",", " ").replace("-", " ").split()
+    first = normalize(words[0]) if words else wanted
     for target in (wanted, first):
-        for item in with_stations:
+        for item in items:
             if normalize(str(item.get("n") or "")) == target:
                 return item
-    idx = best_match(place, [str(i.get("n") or "") for i in with_stations])
-    return with_stations[idx if idx is not None else 0]
+    idx = best_match(place, [str(i.get("n") or "") for i in items])
+    return items[idx if idx is not None else 0]
 
 
-def to_journey(item: dict[str, Any]) -> Journey | None:
+def to_journey(trip: dict[str, Any], deps: dict[str, dict[str, Any]], link: str) -> Journey | None:
+    stations, companies = deps.get("stations") or {}, deps.get("companies") or {}
+    cities = deps.get("cities") or {}
+
+    def zone(station_id: Any) -> str:
+        city = (stations.get(str(station_id)) or {}).get("cityId")
+        return str((cities.get(str(city)) or {}).get("timeZone") or "Europe/Paris")
+
     legs = []
-    for seg in item.get("segments") or []:
-        dep, arr = _time(seg.get("departure_datetime")), _time(seg.get("arrival_datetime"))
-        if dep is None or arr is None:
-            return None
-        carrier = str(seg.get("carrier") or "").strip()
-        transport = str(seg.get("transport") or "")
-        bus = transport == "bus" or any(w in carrier.lower() + " " for w in BUS_WORDS)
-        origin, destination = _station(seg.get("departure_name")), _station(seg.get("arrival_name"))
-        legs.append(Leg(origin=origin, destination=destination, departure=dep, arrival=arr,
-                        mode=Mode.BUS if bus else Mode.TRAIN, carrier=carrier or "SNCF",
-                        line=carrier or ("bus" if bus else "vlak"),
-                        stops=[Stop(name=origin, departure=dep), Stop(name=destination, arrival=arr)]))
+    for sub in trip.get("subTrips") or []:
+        for seg in sub.get("segments") or []:
+            dep = _time(seg.get("departureTime"), zone(seg.get("departureStationId")))
+            arr = _time(seg.get("arrivalTime"), zone(seg.get("arrivalStationId")))
+            if dep is None or arr is None:
+                return None
+            company = companies.get(str(seg.get("companyId"))) or {}
+            carrier = str(company.get("displayName") or "")
+            bus = company.get("transportType") == "bus" or "autocar" in carrier.lower()
+            origin = str((stations.get(str(seg.get("departureStationId"))) or {}).get("name") or "")
+            destination = str((stations.get(str(seg.get("arrivalStationId"))) or {}).get("name") or "")
+            legs.append(Leg(origin=origin, destination=destination, departure=dep, arrival=arr,
+                            mode=Mode.BUS if bus else Mode.TRAIN, carrier=carrier or "SNCF",
+                            line=train_name(seg.get("transportNumber"), carrier),
+                            stops=[Stop(name=origin, departure=dep), Stop(name=destination, arrival=arr)]))
     if not legs or not any(leg.mode is Mode.TRAIN for leg in legs):
         return None
-    link = next((((s.get("deeplink") or {}).get("url")) for s in item.get("segments") or []
-                 if (s.get("deeplink") or {}).get("url")), None)
-    return Journey(provider="SNCF", legs=legs, fare_status=FareStatus.UNKNOWN, deep_link=link or BASE)
+    return Journey(provider="SNCF", legs=legs, fare_status=FareStatus.UNKNOWN, deep_link=link)
 
 
-def primary_source(item: dict[str, Any]) -> str:
-    sources = (item.get("metadata") or {}).get("sources") or []
-    best = next((s for s in sources if s.get("primary")), sources[0] if sources else {})
-    return str(best.get("datasource") or item.get("datasource") or "Virail")
+def train_name(number: Any, carrier: str) -> str:
+    """„TER 17777 operated by SNCF VOYAGEURS 1187“ → „TER 17777“; holé číslo doplní dopravcem."""
+    text = str(number or "").split(" operated by ")[0].replace(" N°", "").strip()
+    if not text:
+        return carrier or "vlak"
+    return f"{carrier} {text}" if text.isdigit() and carrier else text
 
 
-def item_price(item: dict[str, Any]) -> Decimal | None:
-    sources = (item.get("metadata") or {}).get("sources") or []
-    best = next((s for s in sources if s.get("primary")), None)
-    if best is not None and best.get("price"):
-        return Decimal(str(best["price"]))
-    prices = [s.get("price") for s in item.get("segments") or []]
-    if not prices or prices[0] in (None, 0):
-        return None
-    return sum((Decimal(str(p)) for p in prices if p), Decimal(0))
+def trip_prices(trip: dict[str, Any]) -> tuple[Decimal | None, Decimal | None]:
+    """(cena dopravce, cena u Komba s poplatkem) v eurech za celou skupinu."""
+    subs = [((s.get("bestPrice") or {}).get("amount")) for s in trip.get("subTrips") or []]
+    carrier = sum((Decimal(int(a)) for a in subs), Decimal(0)) / 100 if subs and None not in subs else None
+    total = (trip.get("bestPrice") or {}).get("amount")
+    kombo = Decimal(int(total)) / 100 if total is not None else None
+    return carrier if carrier is not None else kombo, kombo
 
 
-def item_currency(item: dict[str, Any]) -> str:
-    for seg in item.get("segments") or []:
-        if seg.get("currency"):
-            return str(seg["currency"])
-    return "EUR"
-
-
-def _station(name: Any) -> str:
-    """„Lyon, Lyon-Part-Dieu“ → „Lyon-Part-Dieu“ (Kombo píše před nádraží město)."""
-    text = str(name or "").strip()
-    city, _, station = text.partition(", ")
-    return station if station and normalize(station).startswith(normalize(city).split(" ")[0]) else text
-
-
-def _time(value: Any) -> dt.datetime | None:
+def _time(value: Any, zone: str = "Europe/Paris") -> dt.datetime | None:
+    """Kombo píše místní čas nádraží, ale s „Z“ – to zahodíme a přidáme zónu města."""
     if not isinstance(value, str):
         return None
     try:
-        parsed = dt.datetime.fromisoformat(value)
+        parsed = dt.datetime.fromisoformat(value.rstrip("Z")[:19])
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=DEFAULT_TZ)
+    try:
+        tz = ZoneInfo(zone)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo("Europe/Paris")
+    return parsed.replace(tzinfo=tz)

@@ -27,7 +27,7 @@ rozhraní.
 - Zahraniční:
   [ÖBB](#öbb) · [ZSSK](#zssk) · [PKP (Koleo)](#pkp-koleo) · [MÁV](#máv) ·
   [DB](#db--deutsche-bahn) · [NS](#ns--nizozemské-dráhy) ·
-  [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [SNCF](#sncf-přes-virail) · [Renfe](#renfe--španělské-dráhy) ·
+  [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [SNCF](#sncf-přes-kombo) · [Renfe](#renfe--španělské-dráhy) ·
   [Eurostar](#eurostar) · [European Sleeper](#european-sleeper) ·
   [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
   [HŽPP](#hžpp--chorvatské-dráhy)
@@ -128,7 +128,7 @@ dopravce.
 | CFR | `cfr.py` | HTML formuláře | konec v Rumunsku (jen vnitrostátně) | dospělý/dítě → skupina, RON | ověřeno živě |
 | SŽ | `sz.py` | HTML formuláře e-shopu | jen po Slovinsku | skupina, EUR | ověřeno živě |
 | HŽPP | `hzpp.py` | JSON API e-shopu | jen po Chorvatsku | skupina (děti jako dospělí), EUR | ověřeno živě |
-| SNCF | `sncf.py` | JSON API srovnávače Virail | konec ve Francii | 1 osoba, EUR (skupina jen orientačně) | API ověřeno živě, pak rate limit |
+| SNCF | `sncf.py` | JSON API prodejce Kombo | konec ve Francii | skupina, EUR | ověřeno živě |
 | Italo | – | – | – | – | nezapojeno (Akamai) |
 
 ---
@@ -763,37 +763,39 @@ Děti do 6 let se nepočítají (jedou zdarma).
 
 ---
 
-## SNCF (přes Virail)
+## SNCF (přes Kombo)
 
-**Soubor:** `providers/sncf.py` · **Typ:** JSON API srovnávače virail.com · **Klíč:** žádný
+**Soubor:** `providers/sncf.py` · **Typ:** JSON API prodejce kombo.co · **Klíč:** žádný
 
-SNCF ani Trainline se z programu ptát nedají (DataDome, viz
-[Nezapojení dopravci](#nezapojení-dopravci)). Srovnávač **Virail** ale
-ukazuje vlaky SNCF (TGV INOUI, OUIGO, TER, Intercités, Lyria) i s cenami,
-které zjistily agregátory **Kombo** a **Omio**, a jeho API captchu nemá.
+SNCF Connect ani Trainline se z programu ptát nedají (DataDome, viz
+[Nezapojení dopravci](#nezapojení-dopravci)). **Kombo** je oficiální
+prodejce jízdenek SNCF (TGV INOUI, OUIGO, TER, Intercités, Lyria) a jeho
+web volá API bez captchy.
 
 **Postup:**
-1. `GET /api/legacy-autocomplete/v2/search?q=…&locale_code=en_us` najde
-   město (`k` = „a.<geonames id>“, `c` = země).
-2. `GET /api/v1/search/transport?departure&arrival&date&adult_pax&youth_pax&senior_pax&transports=train&currency=EUR`
-   spustí hledání na jejich serveru. Stejný dotaz se opakuje každých 6 s,
-   dokud `status` není `success` (nejvýš 60 s); průběžné výsledky se
-   ukazují hned.
-3. Každý výsledek má `segments` (typ vlaku, nádraží, časy s časovou zónou,
-   cena, odkaz na nákup) a `metadata.sources` (kdo cenu zjistil).
+1. `GET place.kombo.co/search?term=…&locale=en` najde město (`i` = id,
+   `c` = země).
+2. `POST search.kombo.co/search` s městy, datem a cestujícími (věkové
+   skupiny `Infant` 0–3, `Child` 4–11, `Young` 12–27, `Adult`, `Senior`
+   60+) vrátí `key`.
+3. `GET search.kombo.co/search/trips?key=…&lastIndex=…` se opakuje, dokud
+   `percentageDone` není 100 (obvykle 2–5 s). Nádraží, města a dopravci
+   jsou v `dependencies`.
+
+**Cena:** v centech **za celou skupinu** (ověřeno: 2 dospělí = 2×,
+dospělý + dítě 8 let na TGV INOUI = 1,5×). `subTrips[].bestPrice` je cena
+dopravce (jako na sncf-connect.com) – tu bereme. `trip.bestPrice` je cena
+u Komba s poplatkem ~18 %, ta je v poznámce.
 
 **Pozor:**
-- **Rate limit.** Po několika hledáních vrací Virail HTTP 429
-  `{"status":"error","message":"rate_limited"}` – z datacentra i desítky
-  minut. Proto se ptáme jen na cesty, které začínají nebo končí ve Francii,
-  ne na dílčí úseky hacků, a výsledek se 20 minut drží v cache.
-- **Cena je od agregátoru**, ne přímo od SNCF, a může být mírně stará.
-  Spoj nese poznámku, odkaz vede na nákup u Komba / Omia.
-- **Skupina neověřena.** Cestující se posílají (věky mládeže 0–25
-  a seniorů 60+ jako „8.0,12.0“), ale ověřit, že cena je za všechny,
-  kvůli rate limitu nešlo. U více cestujících je cena jen v poznámce.
-- Bez čísel vlaků a mezizastávek, hledá se mezi městy (Paříž = všechna
-  nádraží). Vrací i jiné dopravce po Francii (Frecciarossa Paříž – Lyon).
+- **Časy mají „Z“, ale jsou místní** (TGV 6611 z Paříže v 11:00 má
+  „11:00:00.000Z“). Zóna se bere z města nádraží.
+- Hledá se mezi městy (Paříž = všechna nádraží). Kombo vrací i autobusy –
+  spoje bez vlaku zahazujeme. Necháváme i jiné vlaky po Francii
+  (Frecciarossa Paříž – Lyon).
+- Ptá se jen u cest, které začínají nebo končí ve Francii.
+- Srovnávač Virail ukazuje stejná data, ale po pár hledáních vrací rate
+  limit 429 – proto Kombo napřímo.
 
 ---
 
@@ -815,7 +817,7 @@ návštěvník), a to i ze skutečného prohlížeče. Omio a Rail Europe vrací
 už na úvodní stránce.
 
 Obcházet captchu nebudeme, proto se vlaky SNCF hledají přes
-[Virail](#sncf-přes-virail).
+[Kombo](#sncf-přes-kombo).
 
 ---
 
