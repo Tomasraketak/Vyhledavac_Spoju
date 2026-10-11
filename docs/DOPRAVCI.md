@@ -27,8 +27,11 @@ rozhraní.
 - Zahraniční:
   [ÖBB](#öbb) · [ZSSK](#zssk) · [PKP (Koleo)](#pkp-koleo) · [MÁV](#máv) ·
   [DB](#db--deutsche-bahn) · [NS](#ns--nizozemské-dráhy) ·
-  [Trenitalia](#trenitalia)
-- [Nezapojení dopravci (SNCF)](#nezapojení-dopravci)
+  [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [Renfe](#renfe--španělské-dráhy) ·
+  [Eurostar](#eurostar) · [European Sleeper](#european-sleeper) ·
+  [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
+  [HŽPP](#hžpp--chorvatské-dráhy)
+- [Nezapojení dopravci (SNCF, Italo)](#nezapojení-dopravci)
 - [Jak přidat dopravce](#jak-přidat-dopravce)
 
 ---
@@ -118,7 +121,15 @@ dopravce.
 | DB | `db.py` | API int.bahn.de (+ prohlížeč) | konec v DE/NL/BE/FR/CH/DK/LU | skupina, EUR | stanice živě; spoje z datacentra blokovány |
 | NS | `ns.py` | API ns.nl | konec v Nizozemsku | skupina, EUR (jen NL) | ověřeno živě |
 | Trenitalia | `trenitalia.py` | API lefrecce.it | konec v Itálii | skupina, EUR (jen IT) | ověřeno živě |
+| OUIGO | `ouigo.py` | JSON API (FR, ES) | konec ve FR/BE nebo ES | skupina, EUR | ověřeno živě |
+| Renfe | `renfe.py` | formulář + DWR | konec ve Španělsku | dospělý → dopočet skupiny, EUR | ověřeno živě |
+| Eurostar | `eurostar.py` | GraphQL | oba konce v síti Eurostaru | skupina, EUR | ověřeno živě |
+| European Sleeper | `european_sleeper.py` | JSON API | obě stanice na jeho trase | skupina, EUR | ověřeno živě |
+| CFR | `cfr.py` | HTML formuláře | konec v Rumunsku (jen vnitrostátně) | dospělý/dítě → skupina, RON | ověřeno živě |
+| SŽ | `sz.py` | HTML formuláře e-shopu | jen po Slovinsku | skupina, EUR | ověřeno živě |
+| HŽPP | `hzpp.py` | JSON API e-shopu | jen po Chorvatsku | skupina (děti jako dospělí), EUR | ověřeno živě |
 | SNCF | – | – | – | – | nezapojeno (DataDome) |
+| Italo | – | – | – | – | nezapojeno (Akamai) |
 
 ---
 
@@ -518,6 +529,234 @@ dospělého** bez slevy. Pro skupinu se sčítá:
 - Slevové karty (CartaFreccia) se neuplatňují.
 - Ptá se jen, když aspoň jeden konec leží v Itálii.
 
+## OUIGO
+
+**Soubor:** `providers/ouigo.py` · **Typ:** JSON API `mdw.api-fr.ouigo.com/api` (Francie) a `mdw02.api-es.ouigo.com/api` (Španělsko) · **Klíč:** JWT z `Token/login` s údaji webové aplikace (stojí v JavaScriptu e-shopu, není to uživatelský účet)
+
+**Postup:**
+1. `POST Token/login` → token na 2–3 h (cache do vypršení). Dál hlavičky
+   `Authorization: Bearer …` a `Content-Language: fr-FR` / `es-ES`.
+2. `GET Data/GetStations` – stanice se skupinami měst („PT1“ Paris toutes
+   gares, „LY1“, „MT1“ Madrid – Todas) a `connected_stations`. Bez spojení
+   se hledání neposílá. Cache 7 dní.
+3. `POST Sale/journeysearch` – `{"outbound_date", "origin", "destination",
+   "passengers": [{"type": "A"}, …]}`. Vrací spoje celého dne, i
+   s přestupem (Barcelona → Sevilla přes Madrid).
+
+**Cena:** `price` = nejlevnější nabídka (OUIGO Essentiel/Esencial) **za celou
+skupinu**:
+- Francie: `A` od 12 let, `C` dítě do 11 let (8 €), do 4 let „Toupti“ bez
+  místa zdarma;
+- Španělsko: `A` od 14 let, `C` 4–13 let (7 €), `B` 0–3 roky (0 €).
+
+`full: true` = vyprodáno.
+
+**Pozor:**
+- Francie (+ Brusel) a Španělsko jsou oddělené sítě. Mezi nimi OUIGO
+  nejezdí, na Madrid – Paříž se neptá.
+- Údaje aplikace se mohou s novou verzí webu změnit. Najdete je v bundlu
+  `/assets/index-*.js` (ventas) nebo `core-chunk-*.js` (ventes).
+- Cloudflare Turnstile chrání jen nákup, hledání ho nepotřebuje.
+- API vrací celý den, časové okno filtruje program.
+
+## Renfe – Španělské dráhy
+
+**Soubor:** `providers/renfe.py` · **Typ:** formulář + DWR (Java RPC) na `venta.renfe.com/vol` · **Klíč:** žádný, jen session cookie
+
+**Postup:**
+1. `estacionesEstaticas.js` z renfe.com – statický seznam ~1 400 stanic
+   (kódování ISO-8859-1, cache 7 dní).
+   - Kód `cdgoEstacion` je číslo stanice, nebo skupina města („MADRI“ =
+     MADRID (TODAS)).
+   - `cdgoAdmon`: 0071 = Španělsko, 0087 = Francie, 0094 = Portugalsko.
+2. `POST buscarTren.do` – formulář hledání. Datum `dd/mm/rrrr`,
+   `adultos_` 14+, `ninos_` 4–13, `ninosMenores` 0–3. Hledání se uloží do
+   serverové session.
+3. `dwr/call/plaincall/__System.generateId.dwr` – ID DWR session.
+4. `dwr/call/plaincall/trainEnlacesManager.getTrainsList.dwr` – spoje
+   celého dne včetně přestupů, cena `tarifaMinima` a tarify (Básico,
+   Elige, Prémium…). Odpověď je JavaScript, převádí ji `parse_dwr`.
+
+**Cena:** API vrací cenu **za jednoho dospělého**. Při 4 a více osobách už
+v ní je skupinový tarif „4 o más“. Pro skupinu se dopočítává podle
+pravidel Renfe:
+- od 14 let plná cena;
+- děti 4–13 let −40 %;
+- AVLO: dítě pevně 5 €;
+- do 4 let zdarma.
+
+U přestupu AVE + AVLO s dětmi je cena jen orientační: uloží se do `raw`
+s poznámkou, jako cena spoje se nebere.
+
+**Pozor:**
+- **DWR ignoruje parametry** a vrací spoje posledního hledání ze session.
+  Každé hledání je proto POST formuláře + DWR dotaz a souběžná hledání
+  řadí zámek.
+- Prodává jen vlaky Renfe (ne OUIGO ani iryo). Do Francie jen AVE
+  Internacional (Barcelona – Lyon, Madrid – Marseille), do Paříže ne.
+- Dětské slevy jsou dopočtené z pravidel Renfe, ne z API (neověřeno
+  nákupem).
+- Hledá se jen den odjezdu, okno přes půlnoc nepokračuje.
+- Web chystá nový prodejní systém, pak se postup změní.
+
+## Eurostar
+
+**Soubor:** `providers/eurostar.py` · **Typ:** GraphQL `site-api.eurostar.com/gateway` · **Klíč:** žádný
+
+Eurostar od roku 2023 zahrnuje i bývalý Thalys. Jezdí do Londýna, Paříže,
+Lille, Bruselu, Amsterdamu, Rotterdamu, Kolína nad Rýnem, Cách,
+Düsseldorfu, Essenu a Dortmundu. S přípoji SNCF/SNCB prodává i Lyon,
+Antverpy, Ženevu a další.
+
+**Postup:**
+1. `query getStations` – ~240 prodávaných stanic (cache 7 dní): `uic`,
+   anglický název, město, země.
+   - Zadání se hledá podle názvu, pak podle města. České názvy (Londýn,
+     Paříž, Brusel, Kolín nad Rýnem) převádí tabulka aliasů.
+   - U města má přednost stanice Eurostaru (Paříž = Gare du Nord).
+2. `query NewBookingSearch` → `journeySearch(outboundDate, origin,
+   destination, adults, youths, children, seniors, infants, currency: EUR)`
+   – spoje celého dne s úseky a nabídkami po třídách.
+
+**Cena:** `fares[].prices.total` = cena pro **celou skupinu** v dané třídě
+(Standard, Plus, Premier), v EUR. Věkové skupiny:
+- do 3 let zdarma bez místa;
+- 4–11 let děti, 12–25 mládež, 26–59 dospělí, od 60 senioři.
+
+Vyprodaná třída má `prices: null`.
+
+**Pozor:**
+- **Časy jsou místní** (Londýn v britském čase) a `isoDate` se „Z“ není
+  UTC. Časové pásmo se určuje podle UIC kódu.
+- API vrací celý den bez ohledu na hodinu. Okno filtruje program a přes
+  půlnoc se zeptá i na další den.
+- Ceny se berou v EUR: v GBP API u některých přípojů cenu nevrátí.
+- Spojené soupravy chodí dvakrát s jiným číslem (9339/9439).
+- Ptá se jen, když oba konce leží v síti Eurostaru (GB, FR, BE, NL,
+  Porýní). Praha → Paříž se přeskočí bez dotazu.
+
+## European Sleeper
+
+**Soubor:** `providers/european_sleeper.py` · **Typ:** JSON API `europeansleeperprod-api.azurewebsites.net/api` · **Klíč:** ne
+
+E-shop `booking.europeansleeper.eu` je vlastní (Next.js), ne Bileto.
+Stanice a trasy jsou v modulu staticky (ověřeno z `GET /api/constants`,
+říjen 2026):
+- Praha – Ústí – Děčín – Drážďany – Berlín – Amersfoort – Amsterdam –
+  Rotterdam – Antverpy – Brusel;
+- Brusel – Kolín – Curych – Milán;
+- Paříž – Brusel – Berlín.
+
+Když obě stanice neleží na stejné trase, program se vůbec neptá.
+
+**Postup:**
+1. `POST /api/search/trains` – jízdy na několik dní kolem data. V den, kdy
+   vlak nejede, je `trip: null`. Praha → Amsterdam jede (říjen 2026) v úterý,
+   čtvrtek a neděli v 18:00.
+2. `POST /api/search/availability` – kategorie míst (sedadlo, lehátko,
+   lůžko, celé kupé) a tarify Easy/Good/Flex Night.
+
+**Cena:** za **celou skupinu** v EUR. Dospělý od 12 let, dítě 4–11 let,
+do 3 let zdarma bez vlastního místa. Cena spoje je nejlevnější prodejná
+kategorie a v popisku je, která (např. „lehátko (kupé pro 5), Easy
+Night“). Ostatní kategorie jsou mezi nabídkami.
+
+**Pozor:**
+- Vnitrostátně v Česku (Praha – Děčín), Nizozemsku, Belgii, Francii,
+  Švýcarsku a Itálii se neprodává, po Německu ano.
+- Nejvýš 5 cestujících na rezervaci, větší skupině se cena neukáže.
+- „Celé kupé“ má cenu za kupé (pro 4–5 lidí bývá nejlevnější). Kupé jen
+  pro ženy se jako cena spoje nebere.
+- Vlak se označuje „ES 452“. Jiní dopravci ho mohou psát jinak, pak se
+  duplicitní spoje nesloučí.
+
+## CFR Călători – Rumunské dráhy
+
+**Soubor:** `providers/cfr.py` · **Typ:** HTML formuláře `bilete.cfrcalatori.ro` (antiforgery token) · **Klíč:** ne
+
+Umí jen **vnitrostátní spoje po Rumunsku**. Mezinárodní e-shop
+(`bileteinternationale.cfrcalatori.ro`) chrání vyhledávání Cloudflare
+Turnstile a ten neobcházíme.
+
+**Postup:**
+1. `GET /ro-RO/Itineraries` – ~1 700 stanic (`availableStations`
+   v JavaScriptu stránky, cache 14 dní).
+2. `GET /ro-RO/Rute-trenuri/{Odkud}/{Kam}?DepartureDate=dd.mm.yyyy&MinutesInDay=…`
+   – skrytý formulář s `ConfirmationKey` a `__RequestVerificationToken`.
+3. `POST /ro-RO/Itineraries/GetItineraries` – HTML se spoji (vlaky,
+   přestupy, zastávky) a formulářem ceny u každého.
+4. `POST /api/ro-RO/Itineraries/Price` – cena 2. třídy v lei.
+
+**Cena:** endpoint vrací cenu za **jednoho** cestujícího. Program se ptá
+zvlášť za dospělého (od 10 let) a dítě (5–9 let) a násobí počtem. Do 5 let
+zdarma bez místa. Rumunské slevy (student, senior, TrenPlus) neuplatňujeme.
+
+**Pozor:**
+- Časy jsou rumunské (o hodinu víc než v Praze). Program je převádí.
+- Hledá se jen jeden den od zadané hodiny. Ceny jen u prvních 16 spojů.
+- Lehátka a lůžka se nenaceňují, jen sedadlo 2. třídy.
+- Odpověď `ReCaptchaFailed` znamená blokaci (captchu neřešíme).
+- Kurz RON bere program z ČNB. Záložní kurz je 4,95 Kč.
+
+## SŽ – Slovinské dráhy
+
+**Soubor:** `providers/sz.py` · **Typ:** HTML formuláře e-shopu `eshop.sz.si` · **Klíč:** žádný (stačí cookie relace)
+
+Web potniski.sz.si je za Cloudflare a výsledky chrání výzva Turnstile, tu
+neobcházíme. Prodejní e-shop **eshop.sz.si** ale odpovídá obyčejným
+požadavkům.
+
+**Postup:**
+1. `POST /Home/TravelAutocomplete` – našeptávač stanic (interní ID
+   e-shopu, cache 30 dní).
+2. `POST /Home/FilterSingle` – formulář jednosměrné jízdenky na celý den.
+   Posílá se **dvakrát**: `IcMcVc=false` (regionální vlaky a náhradní
+   autobusy) a `IcMcVc=true` (jen spoje s vlakem IC/ICS/EC/MV). Výsledky
+   se sloučí.
+3. Z HTML se čte cena spoje a rozpis úseků (nástup, vlak, výstup).
+
+**Cena:** za celou skupinu v EUR, 2. třída:
+- dospělí od 15 let plné jízdné;
+- děti 6–14 let poloviční;
+- do 6 let zdarma.
+
+U IC/ICS/EC je v ceně příplatek. Slevy (senioři, mládež) neuplatňujeme.
+
+**Pozor:**
+- E-shop prodává **jen vnitrostátní jízdenky**. Na cesty do zahraničí se
+  SŽ neptá.
+- `IcMcVc=true` neznamená „i IC vlaky“, ale „jen spoje s IC vlakem“. Bez
+  druhého dotazu chybí buď rychlé, nebo regionální spoje.
+- Odpověď chodí i jako Brotli, proto posíláme
+  `Accept-Encoding: gzip, deflate`.
+- „Vlak“ `BUS 60606` je náhradní autobus. Upozornění e-shopu se přidá ke
+  spoji jako poznámka.
+
+## HŽPP – Chorvatské dráhy
+
+**Soubor:** `providers/hzpp.py` · **Typ:** JSON API e-shopu `prodaja.hzpp.hr/hzpp-sales-middleware-web` · **Klíč:** žádný (hlavičky `X-device-type`, `deviceType: WEB`, `Language: hr`)
+
+**Postup:**
+1. `GET stations` – ~500 chorvatských stanic (cache 7 dní). Hledá se
+   lokálně, město znamená „Glavni kol.“, česká jména (Záhřeb) se převádějí.
+2. `GET journeys-with-details/busInfo?…&transportChanges=DIRECT|ALL` –
+   spoje celého dne, přímé i s přestupy. Spoje, které jiný spoj předjede,
+   se zahodí.
+
+**Cena:** `Tickets[].FinalPrice` v eurocentech za **všech N cestujících**
+(běžné jízdné), 2. třída. Obsahuje slevu za online nákup i případnou akci.
+Děti do 6 let se nepočítají (jedou zdarma).
+
+**Pozor:**
+- E-shop prodává **jen vnitrostátní jízdenky**. Na cesty do zahraničí se
+  HŽPP neptá.
+- Dětské jízdné online není. Děti 6–11 let program počítá jako dospělé, takže
+  cena je horní odhad a spoj nese poznámku.
+- `transportChanges=ALL` na dlouhých tratích (Záhřeb → Split) končí po
+  ~2 min chybou 504. Program se ptá jednou s limitem 40 s. Když to selže,
+  zůstanou přímé vlaky a poznámka.
+- API nevrací mezizastávky.
+
 ---
 
 ## Nezapojení dopravci
@@ -534,6 +773,27 @@ dospělého** bez slevy. Pro skupinu se sčítá:
 Obejít captchu nejde a nebylo by to fér, proto SNCF zapojené není.
 Francouzské vlaky uvidíte v jízdním řádu ÖBB (HAFAS). Ceny tras přes
 Německo do Francie (Paříž – Frankfurt ICE/TGV) zná DB.
+
+---
+
+### Italo (Itálie)
+
+Web `biglietti.italotreno.com` volá `api-biglietti.italotreno.com/api/v1/`.
+Stanice (`stations`) fungují bez přihlášení. Hledání spojů (`POST booking`)
+ale vyžaduje anonymní token (`BIGSessionToken`) z
+`POST biglietti.italotreno.com/api/login`, a ten chrání Akamai Bot Manager:
+- přímý dotaz dostane 403 „Access Denied“;
+- prohlížeč (Playwright) se na italotreno.com z datacentra vůbec nepřipojí.
+
+Obcházet ochranu nebudeme. Z domácího připojení by přihlášení možná
+prošlo, ale odpověď hledání se nedala ověřit, proto Italo zapojené není.
+Vlaky Italo v Itálii zatím neuvidíte; Trenitalia prodává jen své vlaky.
+
+### Mezinárodní e-shopy CFR a SŽ
+
+Mezinárodní prodej CFR (`bileteinternationale.cfrcalatori.ro`) chrání
+Cloudflare Turnstile. Web potniski.sz.si (jízdní řád SŽ) taky. Zapojené
+jsou proto jen vnitrostátní e-shopy.
 
 ---
 

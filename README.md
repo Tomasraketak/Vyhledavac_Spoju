@@ -211,7 +211,15 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **DB** | `providers/db.py` | JSON API int.bahn.de (+ prohlížeč) | ✅ skupina³ | ✅ | konec v DE/NL/BE/FR/CH/DK/LU | stanice ověřeny, spoje³ |
 | **NS** | `providers/ns.py` | JSON API plánovače ns.nl | ✅ jen po NL | ✅ | konec v Nizozemsku | ověřeno živě |
 | **Trenitalia** | `providers/trenitalia.py` | JSON API lefrecce.it | ✅ jen po Itálii⁴ | ne | konec v Itálii | ověřeno živě |
+| **OUIGO** | `providers/ouigo.py` | JSON API (Francie i Španělsko) | ✅ skupina | ne | konec ve FR/BE nebo ES | ověřeno živě |
+| **Renfe** | `providers/renfe.py` | formulář + DWR venta.renfe.com | ✅⁵ | ne | konec ve Španělsku | ověřeno živě |
+| **Eurostar** | `providers/eurostar.py` | GraphQL site-api.eurostar.com | ✅ skupina | ne | oba konce v síti Eurostaru | ověřeno živě |
+| **European Sleeper** | `providers/european_sleeper.py` | JSON API e-shopu | ✅ skupina | ne | obě stanice na jeho trase | ověřeno živě |
+| **CFR** | `providers/cfr.py` | HTML formuláře bilete.cfrcalatori.ro | ✅⁵ | ✅ | konec v Rumunsku, jen vnitrostátně | ověřeno živě |
+| **SŽ** | `providers/sz.py` | HTML e-shopu eshop.sz.si | ✅ skupina | ✅ | jen po Slovinsku | ověřeno živě |
+| **HŽPP** | `providers/hzpp.py` | JSON API prodaja.hzpp.hr | ✅⁶ | ne | jen po Chorvatsku | ověřeno živě |
 | SNCF | – | – | – | – | – | nezapojeno: hledání chrání captcha DataDome |
+| Italo | – | – | – | – | – | nezapojeno: přihlášení chrání Akamai |
 
 ¹ E-shop ÖBB blokuje IP adresy serveroven, takže ceny ÖBB šlo při vývoji
 otestovat jen proti nahraným odpovědím. Z domácího připojení by měly
@@ -222,10 +230,14 @@ spoje ne (ani v prohlížeči). Z domácího připojení by měl projít; zpraco
 odpovědi je podle formátu db-vendo-client.
 ⁴ U mezinárodních spojů vrací Trenitalia jen orientační cenu nebo cenu za
 italskou část trasy – ta se jako cena spoje nebere.
+⁵ Dopravce vrací cenu za jednoho cestujícího; cena skupiny se dopočítává
+podle jeho pravidel (děti, mládež).
+⁶ Dětské jízdné online není – děti 6–11 let se počítají jako dospělí (horní
+odhad, spoj nese poznámku).
 
 Ve výchozím nastavení běží všichni dopravci bez prohlížeče: RegioJet,
-FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, Leo Express
-a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
+FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, OUIGO, Renfe,
+Eurostar, European Sleeper, CFR, SŽ, HŽPP, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
 Česku nezdržují. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
 dat* nebo přes `--providers`.
 
@@ -295,7 +307,8 @@ za dospělého a upozorní na to.
 ### Jednotliví dopravci
 
 Postup u každého dopravce (RegioJet, FlixBus, ÖBB, ČD, ZSSK, OneTicket,
-Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia), včetně
+Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia, OUIGO, Renfe,
+Eurostar, European Sleeper, CFR, SŽ, HŽPP), včetně
 chyb, na které jsme narazili, je v **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 
 ---
@@ -314,7 +327,7 @@ vyhledavac/
 ├── data/            stations.json.gz – sestavuje tools/build_stations.py
 ├── registry.py      registr pluginů
 ├── engine.py        orchestrace, izolace chyb, průběžné výsledky
-├── providers/       dopravci      (15 – viz docs/DOPRAVCI.md)
+├── providers/       dopravci      (22 – viz docs/DOPRAVCI.md)
 ├── filters/         filtry        (11 vestavěných)
 └── hacks/           travel hacky  (split_ticket, hidden_city)
 ```
