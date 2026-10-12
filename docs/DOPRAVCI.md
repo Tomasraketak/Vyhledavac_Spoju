@@ -115,6 +115,7 @@ dopravce.
 | Bileto | `bileto.py` | JSON API | jen po ČR | skupina, CZK | ověřeno živě |
 | Leo Express | `leo.py` | GraphQL API | jen jeho stanice | skupina, CZK | ověřeno živě |
 | IDS | `ids_idos.py`, `idos.py` | IDOS + tarify IDS | jeden IDS / zastávka bez nádraží | skupina, z tarifu | ověřeno živě |
+| Transitous | `transitous_jr.py`, `transitous.py` | JSON API (data CIS JŘ) | na přání; záloha IDS | bez cen | ověřeno živě |
 | ÖBB | `obb.py`, `_hafas.py`, `_oebb_shop.py` | HAFAS + e-shop API | ne po Česku | skupina, EUR | jízdní řád živě; e-shop z datacentra blokován |
 | ZSSK | `zssk.py` | prohlížeč | ne po Česku | 1 osoba, EUR | ověřeno živě |
 | PKP | `pkp.py` | Koleo API | konec v Polsku | 1 dospělý, PLN | ověřeno živě |
@@ -348,6 +349,45 @@ neznají.
   u řidiče nebo v automatu.
 - Je-li IDS cena vlakem ČD od 80 Kč na osobu, zkusí se i jízdenka ČD.
   Levnější kombinace spoj z IDS nahradí.
+- **Dopravce:** IDOS u každého úseku uvádí provozovatele (`span.owner` –
+  „ČSAD AUTOBUSY České Budějovice a.s.“, „České dráhy, a.s.“), program ho
+  ukazuje u úseku.
+- **Citlivost IDOS na počet dotazů** (měřeno 12. 10. 2026 z datacentra):
+  40 hledání po sobě bez pauzy za 17 s prošlo všech 40 (HTTP 200, žádná
+  captcha). Limit jsme nenarazili; program se přesto ptá s rozestupem
+  0,7 s, nejvýš 2 stránky výsledků a detaily spojů drží 24 h v cache.
+- **Záloha Transitous:** když IDOS odpoví blokací, limitem (429) nebo
+  chybou, vezmou se spoje z [Transitous](#transitous--jízdní-řády-bez-cen)
+  (stejná data CIS JŘ). Zastávky a licence linek jsou už ve spoji, detail
+  z IDOS se nestahuje; spoj nese poznámku „Spoj z Transitous“.
+
+## Transitous – jízdní řády bez cen
+
+**Soubory:** `providers/transitous_jr.py`, `transitous.py` · **Typ:** JSON API api.transitous.org · **Klíč:** ne
+
+Otevřený evropský plánovač (MOTIS) nad veřejnými jízdními řády. Pro Česko
+má celostátní data CIS JŘ (všechny autobusy z JDF, vlaky z CZPTT) a data
+IDS – tedy totéž co IDOS. Ceny nezná.
+
+**Postup:**
+1. `GET /api/v1/geocode?text=…&language=cs` – zastávka se stejným jménem
+   (`cz-JDF-merged_jdf:stop:33720` = „Domanín,Vrchy“), jinak obec jako
+   souřadnice.
+2. `GET /api/v5/plan?fromPlace&toPlace&time` – spojení, `nextPageCursor`
+   pro další stránku. Úsek má dopravce (`agencyName`), linku
+   (`routeShortName`), licenci a spoj (`tripShortName` „340100 7“, u vlaku
+   „R 865“) a mezizastávky s časy (UTC).
+
+**Kdy se ptá:** samostatný dopravce „Transitous“ jen na přání (ve výchozím
+výběru není). IDS ho použije sám jako zálohu, když IDOS nejde.
+
+**Pozor:**
+- Data jsou sloučená z více zdrojů – stejný vlak přijde z CZPTT, ZSSK
+  i KORDIS. Spojení se slučují podle odjezdu, příjezdu a první linky.
+- Pro obec (Třeboň) začíná spojení na nejbližších zastávkách, ne vždy na
+  té, kterou zvolí IDOS (06:30 Táboritská × 06:28 aut. nádr.).
+- Komunitní služba – posíláme User-Agent s odkazem na projekt a ptáme se
+  střídmě.
 
 ---
 

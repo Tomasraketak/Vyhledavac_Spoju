@@ -31,8 +31,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from .. import idos, railnet, stations
-from ..errors import StationNotFoundError, TransientProviderError
+from .. import idos, railnet, stations, transitous
+from ..errors import BlockedError, RateLimitedError, StationNotFoundError, TransientProviderError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..registry import PROVIDERS
 from .base import HttpProvider
@@ -122,6 +122,25 @@ class IdsIdosProvider(HttpProvider):
     async def search(self, query: SearchQuery) -> list[Journey]:
         if not self._worth_asking(query):
             raise StationNotFoundError(self.name, "spoj mezi nádražími najdou jiní dopravci")
+        try:
+            connections = await self._idos(query)
+        except (BlockedError, RateLimitedError, TransientProviderError) as exc:
+            # IDOS nejde (limit, výpadek) – stejná spojení z otevřených dat přes Transitous
+            self.note(f"IDOS neodpověděl ({exc.message}) – spoje z Transitous (data CIS JŘ).")
+            connections = await transitous.search(self.client, self.cache, self.name, query.origin,
+                                                  query.destination, query.departure, query.window_end)
+        journeys = []
+        for conn in connections:
+            try:
+                journey = await self._priced(query, conn)
+            except TransientProviderError as exc:
+                log.debug("IDS: detail spoje: %s", exc.message)
+                continue
+            if journey is not None:
+                journeys.append(journey)
+        return journeys
+
+    async def _idos(self, query: SearchQuery) -> list[idos.IdosConnection]:
         connections: list[idos.IdosConnection] = []
         when = query.departure
         for _ in range(PAGES):
@@ -138,16 +157,7 @@ class IdsIdosProvider(HttpProvider):
             when = max(c.departure for c in new) + dt.timedelta(minutes=1)
             if when > query.window_end:
                 break
-        journeys = []
-        for conn in connections:
-            try:
-                journey = await self._priced(query, conn)
-            except TransientProviderError as exc:
-                log.debug("IDS: detail spoje: %s", exc.message)
-                continue
-            if journey is not None:
-                journeys.append(journey)
-        return journeys
+        return connections
 
     async def _detail(self, url: str) -> str:
         cached = self.cache.get(self.name, f"detail:{url}")
@@ -182,13 +192,19 @@ class IdsIdosProvider(HttpProvider):
                     found = line_systems(licence or leg.licence, tagged)
                     systems = found if found is not None else None
                     raw_stops = idos.parse_stops(page) or raw_stops
+                elif leg.inline_stops:      # spoj z Transitous: linka podle licence z JDF
+                    found = line_systems(leg.licence, set()) if leg.licence else None
+                    systems = found if found is not None else None
+                    raw_stops = leg.inline_stops
                 ok = systems is None or bool(systems)
                 rail = False
             else:
                 systems = train_systems(leg.train_label)       # IC/Ex jen IDESKA
                 ok = systems != set() and "České dráhy" in leg.carrier
                 rail = True
-                if ok and leg.detail_url:       # zastávky vlaku – jen v nich smí být lom jízdenky
+                if ok and leg.inline_stops:
+                    raw_stops = leg.inline_stops
+                elif ok and leg.detail_url:       # zastávky vlaku – jen v nich smí být lom jízdenky
                     try:
                         raw_stops = idos.parse_stops(await self._detail(leg.detail_url)) or raw_stops
                     except TransientProviderError:
@@ -227,6 +243,8 @@ class IdsIdosProvider(HttpProvider):
 
         journey = Journey(provider=self.name, legs=legs, fare_status=FareStatus.UNKNOWN,
                           deep_link=conn.share_url or idos.results_url())
+        source = "IDOS" if conn.share_url or any(leg.detail_url for leg in conn.legs) \
+            else "Transitous (data CIS JŘ)"
         plans = self._plans(query, infos)
         whole = [plan for plan in plans if all(seg["kind"] == "ids" for seg in plan)]
         if whole:
@@ -237,7 +255,8 @@ class IdsIdosProvider(HttpProvider):
                                             tariff=tickets)]
             journey.fare_status = FareStatus.PRICED
             journey.notes.append(f"🎫 Jízdenky IDS: {tickets} – cena podle tarifu systému; koupíte je "
-                                 "v aplikaci systému, u řidiče nebo v automatu. Spoj z IDOS.")
+                                 "v aplikaci systému, u řidiče nebo v automatu. "
+                                 f"Spoj z {source}.")
             # Delší cesta vlakem ČD: jízdenka ČD (se slevou, akční) může vyjít
             # levněji než IDS – hack idos_complete ji zkusí, porovná a levnější nabídne.
             if total >= TRAIN_CHECK_FROM * len(query.passengers):
@@ -248,7 +267,7 @@ class IdsIdosProvider(HttpProvider):
         first = plans[0]
         priced = [seg for seg in first if seg["kind"] == "ids"]
         missing = ", ".join(f"{seg_name(legs, seg)}" for seg in first if seg["kind"] == "buy")
-        journey.notes.append("Spoj z IDOS. " + (f"Jízdenky IDS: {describe(legs, priced)}. " if priced else "")
+        journey.notes.append(f"Spoj z {source}. " + (f"Jízdenky IDS: {describe(legs, priced)}. " if priced else "")
                              + f"Cenu úseku {missing} IDS nezná – je potřeba jízdenka dopravce.")
         journey.raw = {"plans": plans}
         return journey

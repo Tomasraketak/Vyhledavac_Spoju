@@ -206,6 +206,7 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **Arriva** | `providers/arriva.py` | JSON API e-shopu shop.arriva.cz | ✅ skupina | ✅ | jen po ČR | ověřeno živě |
 | **Leo Express** | `providers/leo.py` | GraphQL API leoexpress.com | ✅ skupina | ✅ | jen jeho stanice | ověřeno živě |
 | **IDS** | `providers/ids_idos.py` + `idos.py` | spoje z IDOS, cena z tarifu IDS | ✅² | ✅ | jeden IDS nebo zastávka bez nádraží | ověřeno živě |
+| **Transitous** | `providers/transitous_jr.py` + `transitous.py` | otevřená data CIS JŘ (záloha za IDOS) | ne | ✅ | jen na přání | ověřeno živě |
 | **PKP** | `providers/pkp.py` | JSON API Koleo (koleo.pl) | ✅ 1 dospělý | ✅ | konec v Polsku | ověřeno živě |
 | **MÁV** | `providers/mav.py` | JSON API e-shopu jegy.mav.hu | ✅ skupina | ne | konec v Maďarsku | ověřeno živě |
 | **DB** | `providers/db.py` | JSON API int.bahn.de (+ prohlížeč) | ✅ skupina³ | ✅ | konec v DE/NL/BE/FR/CH/DK/LU | stanice ověřeny, spoje³ |

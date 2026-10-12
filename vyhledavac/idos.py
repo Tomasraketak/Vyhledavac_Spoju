@@ -33,6 +33,8 @@ class IdosLeg:
     arrival: dt.datetime
     detail_url: str = ""
     stops: list[str] = field(default_factory=list)   # celá projetá trasa (z detailu)
+    # projeté zastávky (jméno, příjezd, odjezd), když je zná už zdroj spojení (Transitous)
+    inline_stops: list[tuple[str, str, str]] = field(default_factory=list)
 
     @property
     def is_bus(self) -> bool:
