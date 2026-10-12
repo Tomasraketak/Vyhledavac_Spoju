@@ -32,6 +32,7 @@ FALLBACK_RATES: dict[str, Decimal] = {
     "NOK": Decimal("2.15"),
     "SEK": Decimal("2.20"),
     "DKK": Decimal("3.39"),
+    "RSD": Decimal("0.216"),
 }
 
 CACHE_NS = "fx"
@@ -89,7 +90,8 @@ class CurrencyConverter:
         if currency == "CZK":
             return amount
         rates = self._rates or FALLBACK_RATES
-        rate = rates.get(currency)
+        # ČNB nevede všechny měny (srbský dinár) – pak nouzový kurz
+        rate = rates.get(currency) or FALLBACK_RATES.get(currency)
         if rate is None:
             log.debug("neznámá měna %s", currency)
             return None

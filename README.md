@@ -222,6 +222,10 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **Vy** | `providers/vy.py` | JSON API vy.no (plánovač Entur) | ✅ skupina | ✅ | konec v Norsku | ověřeno živě |
 | **DSB** | `providers/dsb.py` | JSON API e-shopu dsb.dk | ✅ skupina | ne | konec v Dánsku | ověřeno živě |
 | **SJ** | `providers/sj.py` | JSON API sj.se | ✅ skupina | ✅ | konec ve Švédsku | ověřeno živě |
+| **BDŽ** | `providers/bdz.py` | jízdní řád razpisanie.bdz.bg s ceníkem | ✅ skupina | ✅ | jen po Bulharsku | ověřeno živě |
+| **CP** | `providers/cp.py` | JSON API api-gateway.cp.pt | ✅⁵ | ✅ | jen po Portugalsku | ověřeno živě |
+| **Srbijavoz** | `providers/srbijavoz.py` | JSON API eKarta | ✅ skupina | ✅ | jen po Srbsku | ověřeno živě |
+| **SBB** | `providers/sbb.py` | jízdní řád transport.opendata.ch | ne (blokováno) | ✅ | na přání | jízdní řád ověřen |
 | **SNCF** | `providers/sncf.py` | JSON API prodejce Kombo | ✅⁷ skupina | ne | konec ve Francii | ověřeno živě |
 | Italo | – | – | – | – | – | nezapojeno: přihlášení chrání Akamai |
 
@@ -243,7 +247,7 @@ prodejce Kombo. Cena je cena dopravce (u Komba navíc jeho poplatek).
 
 Ve výchozím nastavení běží všichni dopravci bez prohlížeče: RegioJet,
 FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
-Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
+Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ, BDŽ, CP, Srbijavoz, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
 Česku nezdržují. Bileto a Arriva se naopak ptají jen na cesty po Česku. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
 dat* nebo přes `--providers`.
 
@@ -314,7 +318,7 @@ za dospělého a upozorní na to.
 
 Postup u každého dopravce (RegioJet, FlixBus, ÖBB, ČD, ZSSK, OneTicket,
 Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
-Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ), včetně
+Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ, BDŽ, CP, Srbijavoz), včetně
 chyb, na které jsme narazili, je v **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 
 ---

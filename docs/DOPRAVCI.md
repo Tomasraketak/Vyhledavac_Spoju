@@ -31,7 +31,8 @@ rozhraní.
   [Eurostar](#eurostar) · [European Sleeper](#european-sleeper) ·
   [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
   [HŽPP](#hžpp--chorvatské-dráhy) · [Vy](#vy--norské-dráhy) · [DSB](#dsb--dánské-dráhy) ·
-  [SJ](#sj--švédské-dráhy)
+  [SJ](#sj--švédské-dráhy) · [BDŽ](#bdž--bulharské-dráhy) · [CP](#cp--portugalské-dráhy) ·
+  [Srbijavoz](#srbijavoz--srbské-dráhy) · [SBB](#sbb--švýcarské-dráhy-jen-jízdní-řád)
 - [Nezapojení dopravci (Italo, Trainline, SNCF Connect)](#nezapojení-dopravci)
 - [Jak přidat dopravce](#jak-přidat-dopravce)
 
@@ -133,6 +134,10 @@ dopravce.
 | Vy | `vy.py` | JSON API vy.no | konec v Norsku | skupina, NOK | ověřeno živě |
 | DSB | `dsb.py` | JSON API dsb.dk | konec v Dánsku (jen vnitrostátní ceny) | skupina, DKK | ověřeno živě |
 | SJ | `sj.py` | JSON API sj.se | konec ve Švédsku | skupina, SEK | ověřeno živě |
+| BDŽ | `bdz.py` | HTML jízdního řádu razpisanie.bdz.bg | jen po Bulharsku | z ceníku (skupina), EUR | ověřeno živě |
+| CP | `cp.py` | JSON API api-gateway.cp.pt | jen po Portugalsku | dospělý z API, děti dopočítané, EUR | ověřeno živě |
+| Srbijavoz | `srbijavoz.py` | JSON API eKarta | jen po Srbsku | skupina, RSD | ověřeno živě |
+| SBB | `sbb.py` | transport.opendata.ch | konec ve Švýcarsku (na přání) | bez cen | jízdní řád ověřen |
 | SNCF | `sncf.py` | JSON API prodejce Kombo | konec ve Francii | skupina, EUR | ověřeno živě |
 | Italo | – | – | – | – | nezapojeno (Akamai) |
 
@@ -878,6 +883,80 @@ od 18 dospělý. Senior 67+ se posílá s kategorií `senior-citizen` (−50 %).
 - SJ prodává i průběžné jízdenky s jinými dopravci (Mälartåg, Öresundståg,
   Vy Bus4You) a do Osla, Kodaně a Narviku.
 - `NO_DEPARTURE` = spoj se neprodává, `FULLY_BOOKED` = vyprodáno.
+
+---
+
+## Cena spoj po spoji (ZSSK, SJ, CFR, PKP, IDS, BDŽ)
+
+Dopravci, u kterých cena znamená zvláštní dotaz nebo průchod nákupem pro
+**každý spoj**, oceňují jen první spoje: nejvýš **3 spoje** a jen do
+**4 h 15 min** od zadaného odjezdu – co nastane dřív (`price_scope`
+v `providers/base.py`). Spoje za tím se neukazují, takže výsledky těchto
+dopravců mají vždy cenu. U ZSSK lze počet změnit volbou `price_limit`.
+
+## BDŽ – Bulharské dráhy
+
+**Soubor:** `providers/bdz.py` · **Typ:** HTML jízdního řádu razpisanie.bdz.bg · **Klíč:** CSRF token ze stránky
+
+E-shop tickets.bdz.bg ukáže cenu jen přihlášenému
+(`api/Ticket/GetTicket?onlyPrice=true` → 401). Veřejný jízdní řád ale má
+u každého spoje ceník.
+
+**Postup:**
+1. `GET /bg/{odkud}/{kam}/{DD.MM.RRRR}` – spoje dne; stanice jsou slugy
+   („sofia“) ze seznamu `window.stationsData`. Karta spoje má
+   `data-price-index` = klíč do `BDTJSONItemsPriceAPI.trains`.
+2. `POST /bg/route/…` a `POST /bg/price/…` s vlaky spoje (hlavička
+   `X-CSRF-Token`) – trasa se zastávkami a ceník (plné, dítě 7–10, skupina
+   3–6 osob, místenka).
+
+**Cena:** skládáme ze ceníku – děti do 7 let zdarma, 7–10 let dětské,
+3–6 dospělých skupinová cena, u vlaku s povinnou místenkou + místenka.
+BDŽ cenu označuje za orientační, spoj nese poznámku. Bulharsko platí eurem.
+
+## CP – Portugalské dráhy
+
+**Soubor:** `providers/cp.py` · **Typ:** JSON API api-gateway.cp.pt · **Klíč:** veřejné klíče z `/fe-config.json`
+
+**Postup:**
+1. `GET www.cp.pt/fe-config.json` – adresa `travelApiUrl` a klíče webu
+   (`X-Api-Key`, `x-cp-connect-id`, `x-cp-connect-secret`).
+2. `GET travel-api/stations` – stanice („94-30007“ = Lisboa Santa Apolónia).
+3. `POST travel-api/journeys` – spoje celého dne se zastávkami a cenou
+   (`basePrices`, `priceType` 1 = za osobu).
+
+**Cestující:** děti 4–12 let −50 % (dopočítané), do 4 let zdarma; senioři
+jako dospělí (sleva jen s dokladem).
+
+**Pozor:** konfigurace obsahuje slovo „recaptcha“ – čte se jako text, jinak
+by ji detekce blokace odmítla. Časy jsou lisabonské (o hodinu méně).
+
+## Srbijavoz – Srbské dráhy
+
+**Soubor:** `providers/srbijavoz.py` · **Typ:** JSON API eKarta (webapi1.srbvoz.rs) · **Klíč:** ne
+
+**Postup:**
+1. `GET eKarta/api/stanica/StaniceGetAll_MPS` – stanice (`sifra`).
+2. `GET eKarta/api/listavozova/ListaVozova_Web?stanicaod&stanicado&datum=RRRR-M-D&brojputnika=n&razred=2`
+   – vlaky dne se zastávkami a cenou **za n cestujících** (`cenau` =
+   jízdné `cenao` + příplatek `cenad`), v dinárech.
+
+**Pozor:** eKarta prodává jen některé vlaky – rychlovlaky Soko Bělehrad –
+Novi Sad v ní nejsou (prázdný seznam). Jen přímé vlaky. Děti 4–15 let
+−50 % z jízdného dopočítáváme. Dinár ČNB nevede – používá se nouzový kurz.
+
+## SBB – Švýcarské dráhy (jen jízdní řád)
+
+**Soubor:** `providers/sbb.py` · **Typ:** JSON API transport.opendata.ch · **Klíč:** ne
+
+**Ceny SBB nejdou:** web sbb.ch volá GraphQL `graphql.www.sbb.ch` (dotazy
+`Trips`, `TripPrices`), ale AWS CloudFront z datacentra vrací 403 „Request
+blocked“ všemu, i prohlížeči. Kombo ani Trainline švýcarské vnitrostátní
+jízdenky nemají; oficiální cenové API (OJP Fare) chce registraci a klíč.
+
+Jízdní řád (`/v1/connections`) je veřejný – spoje se zastávkami
+a nástupišti, bez ceny a s poznámkou. Dopravce proto **není ve výchozím
+výběru**. Vlaky do Švýcarska s cenou najdou ÖBB, DB a SNCF (Lyria).
 
 ---
 
