@@ -1044,7 +1044,7 @@
     // (Starší verze si „známé“ dopravce uložila dřív, než zapnula PKP, Leo Express
     // a IDS – proto nový klíč a jednorázové zapnutí všech dopravců přidaných od té doby.)
     const known = store.get('providersKnown2', null);
-    const added = ['Bileto', 'Arriva', 'PKP', 'MÁV', 'DB', 'NS', 'Trenitalia', 'OUIGO', 'SNCF', 'Renfe', 'Eurostar',
+    const added = ['Bileto', 'Arriva', 'PKP', 'MÁV', 'DB', 'NS', 'Trenitalia', 'OUIGO', 'SNCF', 'Vy', 'DSB', 'SJ', 'Renfe', 'Eurostar',
       'EuropeanSleeper', 'CFR', 'SŽ', 'HŽPP', 'LeoExpress', 'IDS'];
     if (saved) meta.providers.filter(p => p.default && (Array.isArray(known) ? !known.includes(p.name) : added.includes(p.name)))
       .forEach(p => S.providersOn.add(p.name));

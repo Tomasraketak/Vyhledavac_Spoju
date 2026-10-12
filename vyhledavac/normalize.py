@@ -39,12 +39,17 @@ _ALIASES: dict[str, set[str]] = {
 }
 
 
+#: Písmena, která se na „písmeno + diakritiku“ nerozloží (København, Łódź, Straße).
+_LETTERS = str.maketrans({"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "ß": "ss",
+                          "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ı": "i", "þ": "th", "ð": "d"})
+
+
 @lru_cache(maxsize=8192)
 def strip_accents(text: str) -> str:
     """Odstraní diakritiku. 'Vídeň' -> 'Viden'."""
     if not text:
         return ""
-    decomposed = unicodedata.normalize("NFD", text)
+    decomposed = unicodedata.normalize("NFD", text.translate(_LETTERS))
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 
 

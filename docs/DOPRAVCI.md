@@ -30,7 +30,8 @@ rozhraní.
   [Trenitalia](#trenitalia) · [OUIGO](#ouigo) · [SNCF](#sncf-přes-kombo) · [Renfe](#renfe--španělské-dráhy) ·
   [Eurostar](#eurostar) · [European Sleeper](#european-sleeper) ·
   [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
-  [HŽPP](#hžpp--chorvatské-dráhy)
+  [HŽPP](#hžpp--chorvatské-dráhy) · [Vy](#vy--norské-dráhy) · [DSB](#dsb--dánské-dráhy) ·
+  [SJ](#sj--švédské-dráhy)
 - [Nezapojení dopravci (Italo, Trainline, SNCF Connect)](#nezapojení-dopravci)
 - [Jak přidat dopravce](#jak-přidat-dopravce)
 
@@ -128,6 +129,9 @@ dopravce.
 | CFR | `cfr.py` | HTML formuláře | konec v Rumunsku (jen vnitrostátně) | dospělý/dítě → skupina, RON | ověřeno živě |
 | SŽ | `sz.py` | HTML formuláře e-shopu | jen po Slovinsku | skupina, EUR | ověřeno živě |
 | HŽPP | `hzpp.py` | JSON API e-shopu | jen po Chorvatsku | skupina (děti jako dospělí), EUR | ověřeno živě |
+| Vy | `vy.py` | JSON API vy.no | konec v Norsku | skupina, NOK | ověřeno živě |
+| DSB | `dsb.py` | JSON API dsb.dk | konec v Dánsku (jen vnitrostátní ceny) | skupina, DKK | ověřeno živě |
+| SJ | `sj.py` | JSON API sj.se | konec ve Švédsku | skupina, SEK | ověřeno živě |
 | SNCF | `sncf.py` | JSON API prodejce Kombo | konec ve Francii | skupina, EUR | ověřeno živě |
 | Italo | – | – | – | – | nezapojeno (Akamai) |
 
@@ -760,6 +764,80 @@ Děti do 6 let se nepočítají (jedou zdarma).
   ~2 min chybou 504. Program se ptá jednou s limitem 40 s. Když to selže,
   zůstanou přímé vlaky a poznámka.
 - API nevrací mezizastávky.
+
+---
+
+## Vy – Norské dráhy
+
+**Soubor:** `providers/vy.py` · **Typ:** JSON API webu vy.no · **Klíč:** žádný
+
+**Postup:**
+1. `GET /api/location/places/v2/autosuggest?query=…` – místa z registru
+   Entur (`NSR:StopPlace:…`). Celý objekt místa se posílá dál beze změny.
+2. `POST /api/global-itinerary/travel-planner/search` – spoje (plánovač
+   Entur) s mezizastávkami a dopravcem (Vy, SJ Nord, Go-Ahead, autobusy
+   Vy). Další stránka: `FIND_JOURNEY_SCROLL_LATER`.
+3. `POST /api/offer/offer` s `itineraryIds` – `minimumPrice` **za celou
+   skupinu** (v øre).
+
+**Cestující:** cenu určuje věk – do 5 let zdarma, 6–17 let dětská cena,
+od 18 dospělý. Senior 67+ se posílá s kategorií `senior-citizen` (−50 %).
+
+**Pozor:**
+- API chrání **AWS WAF**: občas vrátí `202` s hlavičkou
+  `x-amzn-waf-action: challenge`. Výzvu neřešíme, jen to zkusíme znovu;
+  když trvá, hlásí se blokace.
+- Spoje do Švédska (Resrobot) vy.no neprodává – `BOOKABLE_ON_EXTERNAL_SITE`
+  s cenou 0, tu nebereme.
+- Itinerář platí krátce – ceny se žádají hned po hledání.
+
+## DSB – Dánské dráhy
+
+**Soubor:** `providers/dsb.py` · **Typ:** JSON API e-shopu dsb.dk · **Klíč:** krátkodobý `x-api-proof`
+
+**Postup:**
+1. `GET /api/domestic/v1/proof/` – token na ~2 minuty (hlavička
+   `x-api-proof`). Bez něj API vrací 401.
+2. `GET /api/domestic/v1/location/?input={"searchText": …}` – stanice.
+3. `GET …/search/?input=…` – spoje **i s cenami** pro celou skupinu
+   (Standardbillet, Orange, Orange Fri); `next` stránkuje (max ~6 spojů na
+   stránku).
+
+**Cestující:** `TT_CHILD_0_11`, `TT_CHILD_12_15`, `TT_YOUNG` (16–25),
+`TT_ADULT`, `TT_SENIOR` (67+). Pravidlo „dospělý veze zdarma dvě děti do
+11 let“ uplatňuje API samo.
+
+**Pozor:**
+- Bez hlavičky `Origin: https://www.dsb.dk` vrací 403.
+- E-shop prodává jen vnitrostátní jízdenky. Øresundståg do Malmö ukáže bez
+  ceny, Německo nezná.
+- Našeptávač je velkorysý („Kodaň“ najde ulici Kodansvej) – bereme jen
+  zastávky začínající hledaným slovem, přednostně vlakové.
+
+## SJ – Švédské dráhy
+
+**Soubor:** `providers/sj.py` · **Typ:** JSON API `prod-api.adp.sj.se` · **Klíč:** veřejný klíč z JS konfigurace webu
+
+**Postup:**
+1. Klíč `Ocp-Apim-Subscription-Key` se jednou denně přečte z
+   `/assets/sjse-container/env-*.js` (záloha z října 2026).
+2. `GET config` – všech ~6 500 stanic (kód UIC; země podle prefixu 74/76/86/80).
+3. `POST search` → `departureSearchId`, `passengerListId`;
+   `GET departures/search/{id}` – spoje celého dne bez cen.
+4. `GET departures/{id}/offers?passengerListId=…` – cena jednoho spoje
+   **za celou skupinu**; bereme nejlevnější 2. třídu (u nočních vlaků
+   i lůžko).
+5. Mezizastávky z provozního API (`trafficinfo-api/v2/rest/segments`).
+
+**Cestující:** `CHILD_AND_YOUTH` 0–25 (s věkem), `ADULT` 26–64, `SENIOR`
+65+. Děti do 6 let s doprovodem jedou zdarma na klíně a neposílají se.
+
+**Pozor:**
+- Ceny se zjišťují spoj po spoji (jako na webu) – jedno hledání je
+  ~40 požadavků. Jízdní řád se ukáže hned, ceny dobíhají.
+- SJ prodává i průběžné jízdenky s jinými dopravci (Mälartåg, Öresundståg,
+  Vy Bus4You) a do Osla, Kodaně a Narviku.
+- `NO_DEPARTURE` = spoj se neprodává, `FULLY_BOOKED` = vyprodáno.
 
 ---
 

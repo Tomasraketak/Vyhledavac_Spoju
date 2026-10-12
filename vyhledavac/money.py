@@ -29,6 +29,9 @@ FALLBACK_RATES: dict[str, Decimal] = {
     "CHF": Decimal("27.00"),
     "USD": Decimal("23.00"),
     "RON": Decimal("4.95"),
+    "NOK": Decimal("2.15"),
+    "SEK": Decimal("2.20"),
+    "DKK": Decimal("3.39"),
 }
 
 CACHE_NS = "fx"

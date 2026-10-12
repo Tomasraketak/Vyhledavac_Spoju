@@ -218,6 +218,9 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **CFR** | `providers/cfr.py` | HTML formuláře bilete.cfrcalatori.ro | ✅⁵ | ✅ | konec v Rumunsku, jen vnitrostátně | ověřeno živě |
 | **SŽ** | `providers/sz.py` | HTML e-shopu eshop.sz.si | ✅ skupina | ✅ | jen po Slovinsku | ověřeno živě |
 | **HŽPP** | `providers/hzpp.py` | JSON API prodaja.hzpp.hr | ✅⁶ | ne | jen po Chorvatsku | ověřeno živě |
+| **Vy** | `providers/vy.py` | JSON API vy.no (plánovač Entur) | ✅ skupina | ✅ | konec v Norsku | ověřeno živě |
+| **DSB** | `providers/dsb.py` | JSON API e-shopu dsb.dk | ✅ skupina | ne | konec v Dánsku | ověřeno živě |
+| **SJ** | `providers/sj.py` | JSON API sj.se | ✅ skupina | ✅ | konec ve Švédsku | ověřeno živě |
 | **SNCF** | `providers/sncf.py` | JSON API prodejce Kombo | ✅⁷ skupina | ne | konec ve Francii | ověřeno živě |
 | Italo | – | – | – | – | – | nezapojeno: přihlášení chrání Akamai |
 
@@ -239,7 +242,7 @@ prodejce Kombo. Cena je cena dopravce (u Komba navíc jeho poplatek).
 
 Ve výchozím nastavení běží všichni dopravci bez prohlížeče: RegioJet,
 FlixBus, ÖBB, Bileto, Arriva, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
-Eurostar, European Sleeper, CFR, SŽ, HŽPP, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
+Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ, Leo Express a IDS. Zahraniční se ale ptají jen na cesty do své země, takže hledání po
 Česku nezdržují. Bileto a Arriva se naopak ptají jen na cesty po Česku. ČD, ZSSK a OneTicket (prohlížeč) zapnete v panelu *Zdroje
 dat* nebo přes `--providers`.
 
@@ -310,7 +313,7 @@ za dospělého a upozorní na to.
 
 Postup u každého dopravce (RegioJet, FlixBus, ÖBB, ČD, ZSSK, OneTicket,
 Bileto, Arriva, Leo Express, IDS, PKP, MÁV, DB, NS, Trenitalia, OUIGO, SNCF, Renfe,
-Eurostar, European Sleeper, CFR, SŽ, HŽPP), včetně
+Eurostar, European Sleeper, CFR, SŽ, HŽPP, Vy, DSB, SJ), včetně
 chyb, na které jsme narazili, je v **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 
 ---
