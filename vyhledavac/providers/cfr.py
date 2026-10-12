@@ -35,7 +35,7 @@ Na co si dát pozor:
 * Časy jsou rumunské (EET/EEST, o hodinu víc než v Praze).
 * Hledá se jen jeden den od zadané hodiny (prodej nejvýš 30 dní dopředu).
 * Odpověď na hledání má i 2 MB HTML – ceny zjišťujeme jen pro spoje v okně
-  (nejvýš ``MAX_PRICED``).
+  (jen první 3 spoje do 4:15 h od odjezdu, ``price_scope``).
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ from ..errors import BlockedError, StationNotFoundError, TransientProviderError
 from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
-from .base import HttpProvider
+from .base import HttpProvider, PRICE_SCOPE_COUNT, price_scope
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ SEARCH = f"{BASE}/ro-RO/Itineraries/GetItineraries"
 PRICE = f"{BASE}/api/ro-RO/Itineraries/Price"
 STATIONS_TTL = 14 * 24 * 3600
 PRICE_TTL = 30 * 60
-MAX_PRICED = 16
+MAX_PRICED = PRICE_SCOPE_COUNT
 ADULT, CHILD = "102", "101"
 #: Nouzový kurz, když ČNB kurz RON chybí (nouzový lístek RON nezná).
 RON_CZK_FALLBACK = Decimal("4.95")
@@ -152,11 +152,10 @@ class CfrProvider(HttpProvider):
             journey = self.to_journey(item, url, date)
             if journey is not None and query.departure <= journey.departure <= query.window_end:
                 journeys.append(journey)
+        journeys = price_scope(journeys, query, MAX_PRICED)     # cena = dotaz na každý spoj
         if journeys:
             self.publish(journeys)
-            await self._prices(journeys[:MAX_PRICED], query, url)
-            if len(journeys) > MAX_PRICED:
-                self.note(f"ceny jen u prvních {MAX_PRICED} spojů")
+            await self._prices(journeys, query, url)
         return journeys
 
     def to_journey(self, item: dict[str, Any], url: str, date: str) -> Journey | None:

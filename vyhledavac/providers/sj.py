@@ -48,7 +48,7 @@ Na co si dát pozor:
   Osla, Kodaně, Narviku (a v létě nočním vlakem do Hamburku a Berlína).
   Zahraniční konec stačí, druhý musí ležet ve Švédsku.
 * Ceny se ptáme spoj po spoji (jako web) – jen u spojů v časovém okně,
-  nejvýš ``MAX_OFFERS``. Jízdní řád se mezitím ukáže přes ``publish``.
+  jen u prvních 3 spojů do 4:15 h od odjezdu (``price_scope``). Jízdní řád se mezitím ukáže přes ``publish``.
 * ``available: false`` s ``departureStatus`` ``NO_DEPARTURE`` = spoj SJ
   neprodává (ještě není v prodeji nebo nejede), ``FULLY_BOOKED`` = vyprodáno.
 * Cena je v SEK včetně případného poplatku za rezervaci („Booking fee“) cizího
@@ -74,7 +74,7 @@ from ..errors import ProviderError, StationNotFoundError, TransientProviderError
 from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
-from .base import HttpProvider
+from .base import HttpProvider, PRICE_SCOPE_COUNT, price_scope
 
 log = logging.getLogger(__name__)
 
@@ -88,7 +88,7 @@ FALLBACK_KEYS = {"booking": "d6625619def348d38be070027fd24ff6",
 KEY_TTL = 24 * 3600
 STATIONS_TTL = 7 * 24 * 3600
 #: Nejvýš tolik spojů se ptáme na cenu (jeden požadavek na spoj).
-MAX_OFFERS = 40
+MAX_OFFERS = PRICE_SCOPE_COUNT
 MAX_PERSONS = 9
 #: Prefix kódu UIC → země.
 UIC_COUNTRY = {"74": "SE", "76": "NO", "86": "DK", "80": "DE", "81": "AT", "84": "NL", "88": "BE",
@@ -199,12 +199,12 @@ class SjProvider(HttpProvider):
                 if query.departure <= journey.departure <= query.window_end:
                     seen.add(journey.journey_id)
                     pending.append((journey, list_id))
-        pending.sort(key=lambda p: p[0].departure)
+        # cena = dotaz na každý spoj zvlášť – jen první spoje (price_scope)
+        scope = {id(j) for j in price_scope([j for j, _ in pending], query, MAX_OFFERS)}
+        pending = sorted((p for p in pending if id(p[0]) in scope), key=lambda p: p[0].departure)
         journeys = [j for j, _ in pending]
         self.publish(journeys)
-        if len(pending) > MAX_OFFERS:
-            self.note(f"ceny SJ jen u prvních {MAX_OFFERS} spojů")
-        await asyncio.gather(*(self._price(j, list_id) for j, list_id in pending[:MAX_OFFERS]),
+        await asyncio.gather(*(self._price(j, list_id) for j, list_id in pending),
                              self._stops(journeys))
         return journeys
 

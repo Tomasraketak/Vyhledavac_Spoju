@@ -56,7 +56,8 @@ def test_dsb_kobenhavn_odense(monkeypatch):
 
 def test_sj_stockholm_goteborg(monkeypatch):
     found = run(sj.SjProvider, "sj_stockholm_goteborg.json.gz", query("Stockholm", "Göteborg"), monkeypatch)
-    assert len(found) >= 30
+    assert len(found) == 3          # cena dotazem na každý spoj – jen první 3 (price_scope)
+    assert all(j.fare_status is FareStatus.PRICED for j in found)
     first = found[0]
     assert first.departure.strftime("%H:%M") == "07:14" and first.legs[0].line == "SJ Regional 163"
     assert first.fare_status is FareStatus.PRICED and first.fares[0].currency == "SEK"
@@ -82,3 +83,16 @@ def test_vy_offer_passengers():
     body = vy.offer_body(["x"], q)
     assert [p["age"] for p in body["passengers"]] == [40, 70, 3]
     assert body["passengers"][1]["categories"] == [{"type": "senior-citizen"}]
+
+
+def test_price_scope_three_or_4h15():
+    from vyhledavac.models import Journey, Leg
+    from vyhledavac.providers.base import price_scope
+
+    def j(h, m=0):
+        t = dt.datetime(2026, 10, 15, h, m, tzinfo=DEFAULT_TZ)
+        return Journey(provider="x", legs=[Leg(origin="a", destination="b", departure=t,
+                                               arrival=t + dt.timedelta(hours=1), mode=Mode.TRAIN)])
+    q = query("Stockholm", "Göteborg")                      # odjezd od 7:00
+    assert [x.departure.hour for x in price_scope([j(9), j(7, 30), j(8), j(10)], q)] == [7, 8, 9]
+    assert [x.departure.hour for x in price_scope([j(7, 30), j(11, 20), j(12)], q)] == [7]

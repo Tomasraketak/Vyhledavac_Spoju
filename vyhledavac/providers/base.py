@@ -269,6 +269,22 @@ class BrowserProvider(Provider):
             self._session = None
 
 
+#: Dopravci, kteří cenu zjišťují spoj po spoji (proklikem / dotazem na každý
+#: spoj), oceňují jen první spoje: nejvýš ``PRICE_SCOPE_COUNT`` a jen do
+#: ``PRICE_SCOPE_AHEAD`` od zadaného odjezdu – co nastane dřív. Spoje za tím
+#: se neukazují vůbec (bez ceny by jen překážely), takže výsledek je vždy s cenou.
+PRICE_SCOPE_COUNT = 3
+PRICE_SCOPE_AHEAD = dt.timedelta(hours=4, minutes=15)
+
+
+def price_scope(journeys: Sequence[Journey], query: SearchQuery,
+                count: int = PRICE_SCOPE_COUNT) -> list[Journey]:
+    """Spoje, u kterých se má zjistit cena: první ``count`` v okně 4:15 h."""
+    until = query.departure + PRICE_SCOPE_AHEAD
+    ordered = sorted((j for j in journeys if j.departure <= until), key=lambda j: (j.departure, j.arrival))
+    return ordered[:max(count, 1)]
+
+
 def _is_sane(journey: Journey) -> bool:
     """Zahodí zjevně vadné spoje, aby se nedostaly do řazení."""
     if not journey.legs:

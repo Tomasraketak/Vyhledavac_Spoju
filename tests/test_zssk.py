@@ -82,7 +82,6 @@ async def test_funnel_prices_first_n_and_says_so():
     assert calls == [0, 1]
     assert js[0].price == Decimal("19.44") * 25 and js[0].fare_status is FareStatus.PRICED
     assert js[2].price is None
-    assert any("prvních 2" in n for n in notes)
 
 
 @pytest.mark.asyncio
@@ -137,7 +136,7 @@ async def test_each_price_is_published_as_soon_as_it_is_known():
 
 @pytest.mark.asyncio
 async def test_prices_run_concurrently_in_isolated_contexts():
-    p = provider(price_workers=3)
+    p = provider(price_workers=3, price_limit=6)
     session = _Session()
     running, peak, pages = 0, 0, set()
 
@@ -161,7 +160,7 @@ async def test_prices_run_concurrently_in_isolated_contexts():
 
 @pytest.mark.asyncio
 async def test_prices_are_not_shared_between_connections():
-    p = provider(price_workers=2)
+    p = provider(price_workers=2, price_limit=4)
 
     async def funnel(page, journey, query):
         return Decimal(str(5 + index(journey)))
@@ -234,7 +233,7 @@ def test_station_suggestion_must_match_the_query():
 async def test_route_not_sold_online_stops_early():
     from vyhledavac.providers.zssk import _NotSellable
 
-    p = provider(price_workers=2)
+    p = provider(price_workers=2, price_limit=4)
     calls = []
 
     async def funnel(page, journey, query):

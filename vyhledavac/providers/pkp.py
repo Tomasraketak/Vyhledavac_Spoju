@@ -27,7 +27,7 @@ from ..errors import StationNotFoundError, TransientProviderError
 from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
-from .base import HttpProvider
+from .base import HttpProvider, PRICE_SCOPE_COUNT, price_scope
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ API = f"{BASE}/api/v2/main"
 HEADERS = {"X-KOLEO-Version": "1", "X-KOLEO-Client": "Nuxt-1", "Accept": "application/json"}
 STATIONS_TTL = 30 * 24 * 3600
 PLACE_TTL = 30 * 24 * 3600
-MAX_PRICED = 10
+MAX_PRICED = PRICE_SCOPE_COUNT
 
 
 @PROVIDERS.register()
@@ -97,7 +97,8 @@ class PkpProvider(HttpProvider):
             journey = to_journey(raw, names, brands)
             if journey is not None and journey.departure <= query.window_end:
                 journeys.append(journey)
-        priced = [j for j in journeys if j.raw.get("purchasable")][:MAX_PRICED]
+        journeys = price_scope(journeys, query, MAX_PRICED)     # cena = dotaz na každý spoj
+        priced = [j for j in journeys if j.raw.get("purchasable")]
         await asyncio.gather(*(self._price(j) for j in priced))
         if len(query.passengers) > 1 and priced:
             self.note("Koleo: cena je za jednoho dospělého (normální jízdné)")

@@ -6,7 +6,8 @@ autobusů a MHD. Tenhle „dopravce“ tedy:
 
 1. Zeptá se jen, když obě místa leží ve stejném integrovaném systému,
    který umíme spočítat (zóny míst z databáze zastávek).
-2. Načte z IDOS spojení (``vyhledavac.idos``, nejvýš 2 stránky po 3).
+2. Načte z IDOS spojení (``vyhledavac.idos``) – oceňuje první 3 spoje do
+   4:15 h od odjezdu (cena potřebuje detail každého spoje).
 3. U každého úseku ověří, že platí jízdenka IDS: vlak ČD kategorie Os/Sp/R
    (Ex/IC jen IDESKA na vybraných tratích, EC/railjet ne), autobus/MHD jen linka zařazená do systému – podle
    detailu spoje v IDOS („linka 300 [IDESKA]“) nebo seznamu linek z JDF
@@ -35,7 +36,7 @@ from .. import idos, railnet, stations, transitous
 from ..errors import BlockedError, RateLimitedError, StationNotFoundError, TransientProviderError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..registry import PROVIDERS
-from .base import HttpProvider
+from .base import PRICE_SCOPE_AHEAD, PRICE_SCOPE_COUNT, HttpProvider
 
 log = logging.getLogger(__name__)
 
@@ -129,6 +130,10 @@ class IdsIdosProvider(HttpProvider):
             self.note(f"IDOS neodpověděl ({exc.message}) – spoje z Transitous (data CIS JŘ).")
             connections = await transitous.search(self.client, self.cache, self.name, query.origin,
                                                   query.destination, query.departure, query.window_end)
+        # cena = detail každého spoje (zóny, linka) – jen první spoje jako u ostatních
+        until = query.departure + PRICE_SCOPE_AHEAD
+        connections = sorted((c for c in connections if c.departure <= until),
+                             key=lambda c: (c.departure, c.arrival))[:PRICE_SCOPE_COUNT]
         journeys = []
         for conn in connections:
             try:
@@ -144,6 +149,8 @@ class IdsIdosProvider(HttpProvider):
         connections: list[idos.IdosConnection] = []
         when = query.departure
         for _ in range(PAGES):
+            if len(connections) >= PRICE_SCOPE_COUNT:
+                break
             page = await self.client.get_text(idos.results_url(),
                                               params=idos.params(query.origin, query.destination, when),
                                               referer=self.referer)

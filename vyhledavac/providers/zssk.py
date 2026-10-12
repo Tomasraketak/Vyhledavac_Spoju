@@ -18,7 +18,7 @@ na to nečekalo:
 * žádné pevné prodlevy: čeká se na odpověď našeptávače či JSF požadavku,
   výchozí cestující (dospělý bez slevy) se nepřeklikává a na seznam se
   vrací otevřením ``/search`` (ZSSK si hledání pamatuje, ~1 s),
-* trychtýř pokrývá prvních ``price_limit`` spojů (výchozí 10) v časovém
+* trychtýř pokrývá prvních ``price_limit`` spojů (výchozí 3, nejvýš 4:15 h od odjezdu) v časovém
   rozpočtu ``price_budget`` (výchozí 110 s); selhání u jednoho spoje
   ostatní neshodí.
 
@@ -50,7 +50,7 @@ from ..models import (
     Stop,
 )
 from ..registry import PROVIDERS
-from .base import BrowserProvider
+from .base import BrowserProvider, PRICE_SCOPE_COUNT, price_scope
 
 log = logging.getLogger(__name__)
 
@@ -95,7 +95,9 @@ class ZsskProvider(BrowserProvider):
         page = await session.new_page()
         try:
             await self._open_list(session, page, query)
-            journeys = await self._parse_list(page, query)
+            # cena se zjišťuje průchodem nákupu spoj po spoji – jen první spoje
+            journeys = price_scope(await self._parse_list(page, query), query,
+                                   int(self.options.get("price_limit", PRICE_SCOPE_COUNT)))
 
             # Ceny jsou hlavní smysl celého vyhledávače, takže trychtýř je
             # zapnutý ve výchozím stavu. Vypnout: options={"deep_prices": False}.
@@ -278,7 +280,7 @@ class ZsskProvider(BrowserProvider):
           (klidně v jiném kontextu). Kontext, který selže dvakrát po sobě,
           končí – další pokusy by jen pálily čas.
         """
-        limit = int(self.options.get("price_limit", 10))
+        limit = int(self.options.get("price_limit", PRICE_SCOPE_COUNT))
         pending = [j for j in journeys if j.price is None][:limit]
         if not pending:
             return
@@ -354,9 +356,6 @@ class ZsskProvider(BrowserProvider):
                       "ZSSK online neprodává (lůžkový vůz či místenka) – cenu ověřte u pokladny")
         if priced + offline < len(pending):
             self.note(f"ceny ZSSK se podařilo zjistit u {priced} z {len(pending) - offline} spojů")
-        if len(journeys) > limit:
-            self.note(f"ceny ZSSK zjišťuji jen u prvních {limit} spojů – každá "
-                      "cena znamená projít nákupní formulář")
 
     async def _ensure_list(self, session, page, query: SearchQuery) -> None:
         """Vrátí stránku na seznam spojů – v nejhorším novým hledáním.
