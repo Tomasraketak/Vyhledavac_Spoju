@@ -76,11 +76,19 @@ def test_srbijavoz_child_discount():
     assert total == Decimal(2512 - 2341 / 2 / 2).quantize(Decimal("1"))
 
 
-def test_sbb_timetable_only(monkeypatch):
+def test_sbb_prices_from_old_timetable(monkeypatch):
     found = run(sbb.SbbProvider, "sbb_zurich_bern.json.gz", query("Curych", "Bern", 8), monkeypatch)
-    assert found and all(j.fare_status is FareStatus.UNKNOWN and j.notes for j in found)
-    direct = next(j for j in found if len(j.legs) == 1)
-    assert direct.legs[0].origin == "Zürich HB" and direct.legs[0].destination == "Bern"
+    assert found and all(j.fare_status is FareStatus.PRICED for j in found)
+    ic = next(j for j in found if j.legs[0].line == "IC 8")
+    assert ic.legs[0].origin == "Zürich HB" and ic.legs[0].destination == "Bern"
+    assert ic.fares[0].currency == "CHF" and ic.fares[0].amount == Decimal("53.00")   # 2 × 26.50 s Halbtaxem
+    assert "Halbtax" in ic.notes[0]
+
+
+def test_sbb_group_price():
+    total, tariff = sbb.group_price(Decimal("26.50"), (Passenger(age=40), Passenger(age=10), Passenger(age=4)),
+                                    saver=True)
+    assert total == Decimal("79.50") and "úsporná" in tariff and "zdarma" in tariff
 
 
 @pytest.mark.parametrize("cls", [bdz.BdzProvider, cp.CpProvider, srbijavoz.SrbijavozProvider, sbb.SbbProvider])

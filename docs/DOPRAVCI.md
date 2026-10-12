@@ -32,7 +32,7 @@ rozhraní.
   [CFR](#cfr-călători--rumunské-dráhy) · [SŽ](#sž--slovinské-dráhy) ·
   [HŽPP](#hžpp--chorvatské-dráhy) · [Vy](#vy--norské-dráhy) · [DSB](#dsb--dánské-dráhy) ·
   [SJ](#sj--švédské-dráhy) · [BDŽ](#bdž--bulharské-dráhy) · [CP](#cp--portugalské-dráhy) ·
-  [Srbijavoz](#srbijavoz--srbské-dráhy) · [SBB](#sbb--švýcarské-dráhy-jen-jízdní-řád)
+  [Srbijavoz](#srbijavoz--srbské-dráhy) · [SBB](#sbb--švýcarské-dráhy)
 - [Nezapojení dopravci (Italo, Trainline, SNCF Connect)](#nezapojení-dopravci)
 - [Jak přidat dopravce](#jak-přidat-dopravce)
 
@@ -137,7 +137,7 @@ dopravce.
 | BDŽ | `bdz.py` | HTML jízdního řádu razpisanie.bdz.bg | jen po Bulharsku | z ceníku (skupina), EUR | ověřeno živě |
 | CP | `cp.py` | JSON API api-gateway.cp.pt | jen po Portugalsku | dospělý z API, děti dopočítané, EUR | ověřeno živě |
 | Srbijavoz | `srbijavoz.py` | JSON API eKarta | jen po Srbsku | skupina, RSD | ověřeno živě |
-| SBB | `sbb.py` | transport.opendata.ch | konec ve Švýcarsku (na přání) | bez cen | jízdní řád ověřen |
+| SBB | `sbb.py` | opendata.ch + starý jízdní řád sbb.ch | konec ve Švýcarsku | z ceny s Halbtaxem ×2, CHF | ověřeno živě |
 | SNCF | `sncf.py` | JSON API prodejce Kombo | konec ve Francii | skupina, EUR | ověřeno živě |
 | Italo | – | – | – | – | nezapojeno (Akamai) |
 
@@ -945,18 +945,39 @@ by ji detekce blokace odmítla. Časy jsou lisabonské (o hodinu méně).
 Novi Sad v ní nejsou (prázdný seznam). Jen přímé vlaky. Děti 4–15 let
 −50 % z jízdného dopočítáváme. Dinár ČNB nevede – používá se nouzový kurz.
 
-## SBB – Švýcarské dráhy (jen jízdní řád)
+## SBB – Švýcarské dráhy
 
-**Soubor:** `providers/sbb.py` · **Typ:** JSON API transport.opendata.ch · **Klíč:** ne
+**Soubor:** `providers/sbb.py` · **Typ:** JSON API transport.opendata.ch + HTML starého jízdního řádu sbb.ch · **Klíč:** ne
 
-**Ceny SBB nejdou:** web sbb.ch volá GraphQL `graphql.www.sbb.ch` (dotazy
-`Trips`, `TripPrices`), ale AWS CloudFront z datacentra vrací 403 „Request
-blocked“ všemu, i prohlížeči. Kombo ani Trainline švýcarské vnitrostátní
-jízdenky nemají; oficiální cenové API (OJP Fare) chce registraci a klíč.
+Nový web sbb.ch (GraphQL `graphql.www.sbb.ch`) je za AWS CloudFront
+a z datacentra vrací 403 všemu. **Starý jízdní řád** sbb.ch (JSF/PrimeFaces)
+ale odpovídá a ukazuje u spojů cenu „od“.
 
-Jízdní řád (`/v1/connections`) je veřejný – spoje se zastávkami
-a nástupišti, bez ceny a s poznámkou. Dopravce proto **není ve výchozím
-výběru**. Vlaky do Švýcarska s cenou najdou ÖBB, DB a SNCF (Lyria).
+**Postup:**
+1. `GET transport.opendata.ch/v1/connections` – spoje se zastávkami
+   a nástupišti (komunitní API nad daty SBB).
+2. `GET www.sbb.ch/en/buying/pages/fahrplan/fahrplan.xhtml?von&nach&datum&zeit&an=false&suche=true`
+   – stránka se spoji a formulářem `shopForm`. Jména stanic bereme švýcarská
+   z kroku 1 („Curych“ by sbb.ch vyložil jako Chur).
+3. `POST` na `action` formuláře jako PrimeFaces Ajax
+   (`javax.faces.source=shopForm_ladeAbPreiseRC`, `partial.render` = id prvků
+   s třídou `updatableForAbPreis`, hlavičky `Faces-Request: partial/ajax`,
+   `X-Requested-With`, `Accept: application/xml…`, `Sec-Fetch-Mode: cors` –
+   bez nich přijde stránka bez cen). Odpověď: „Tickets from CHF 26.50“,
+   u úsporných „Supersaver ticket available“.
+4. Ceny se ke spojům přiřadí podle času odjezdu a příjezdu.
+
+**Cena:** sbb.ch anonymně ukazuje cenu **s polovičním předplatným Halbtax**
+(Curych → Bern od CHF 26.50, plné jízdné kolem CHF 53–56). Halbtax je
+přesně 50 %, proto dospělý = 2 × cena „od“, dítě 6–15 let = cena „od“, do
+6 let zdarma. Platí to i pro úsporné jízdenky. Spoj nese poznámku s původní
+cenou s Halbtaxem.
+
+**Pozor:**
+- Ceny jsou jen pro 5–6 spojů od zadaného času; spoje bez ceny se
+  neukazují. Když se ceny nenačtou vůbec, zůstane jízdní řád s poznámkou.
+- Dál do nákupu nejdeme – tlačítko nákupu chrání reCAPTCHA.
+- Stránka je JSF: když se změní id prvků `shopForm_…`, ceny se nenačtou.
 
 ---
 
