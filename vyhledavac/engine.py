@@ -75,6 +75,9 @@ class SearchEngine:
         self._leg_locks: dict[tuple, asyncio.Lock] = {}
         #: Dopravci, kteří při hledání úseků hlásili blokaci – dál se jich neptáme.
         self._leg_blocked: set[str] = set()
+        #: Prodejci, které hack výslovně chce (``only``), i když je uživatel nezapnul
+        #: (ČD přes prohlížeč ve výchozím výběru není) – jen pro dotazy hacků.
+        self._helpers: dict[str, Provider] = {}
         self._skipped: set[str] = set()
 
     # ---- tovární metody ------------------------------------------------------
@@ -267,7 +270,7 @@ class SearchEngine:
             # start prohlížeče by trval déle než celé hledání.
             skipped = self._skipped | self._leg_blocked
             sellers = [
-                p for p in self.providers
+                p for p in [*self.providers, *self._helpers_for(only, allow_browser)]
                 if p.provides_prices and p.name not in skipped
                 and (allow_browser or not (p.needs_browser and self.skip_browser_in_hacks))
                 and (p.name in (only or ()) or (not only and getattr(p, "hack_legs", True)))
@@ -288,9 +291,22 @@ class SearchEngine:
             self._leg_cache[key] = journeys
             return journeys
 
+    def _helpers_for(self, only: Sequence[str] | None, allow_browser: bool) -> list[Provider]:
+        """Pomocní prodejci pro hack: ti z ``only``, kteří v hledání chybí."""
+        have = {p.name for p in self.providers}
+        missing = [n for n in only or () if n not in have and n in PROVIDERS]
+        out = []
+        for name in missing:
+            if name not in self._helpers:
+                if PROVIDERS.get(name).needs_browser and not allow_browser:
+                    continue
+                self._helpers[name] = build_providers([name], cache=self.cache, converter=self.converter)[0]
+            out.append(self._helpers[name])
+        return out
+
     async def aclose(self) -> None:
         await asyncio.gather(
-            *(p.aclose() for p in self.providers), return_exceptions=True
+            *(p.aclose() for p in [*self.providers, *self._helpers.values()]), return_exceptions=True
         )
 
     async def __aenter__(self) -> "SearchEngine":

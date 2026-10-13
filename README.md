@@ -151,6 +151,7 @@ python -m vyhledavac Praha Brno --only-priced  # jen spoje se známou cenou
 python -m vyhledavac Bratislava Košice --providers ZSSK --card sk_free
 python -m vyhledavac Praha Brno --json        # strojově čitelný výstup
 python -m vyhledavac Třeboň Lublaň --hacks idos_complete --trace   # vypisuje, jak hledá lomy jízdenek
+python -m vyhledavac Rijeka Olomouc --trains --hacks idos_complete  # jen vlaky (IDOS „vlaky“, plánovač RAIL)
 
 # webové rozhraní (otevře prohlížeč)
 python -m vyhledavac.web
@@ -185,6 +186,17 @@ dopravců se ptá, co odpověděli a co vybral:
 ```
 
 (`#1` = první spoj – spoje se oceňují souběžně.)
+
+**Přestupy mezi jízdenkami se počítají se skutečným časem** (`transfer.py`).
+Když jízdenka od jiného prodejce přijede jinam, než odkud jede další kus
+(FlixBus na Berlin Südkreuz, vlak z Berlin Hbf), program se zeptá
+Transitous na cestu mezi nádražími v tu hodinu (MHD i pěšky) a přičte
+3 min rezervy – Südkreuz → Hbf vyšlo 22 min, Praha hl.n. → Holešovice
+20 min, Budapest-Keleti → Nyugati 26 min. V Praze a Brně platí tabulka
+přestupů MHD, ve stejné stanici (jen jinak zapsané: „Linz/Donau Hbf“ =
+„Linz Hbf“, „S+U Berlin Hauptbahnhof“ = „Berlin Hbf“) přestup podle
+jízdního řádu, a když cestu zjistit nejde, počítá se opatrně 40 min.
+V trasování je to řádek `⇄`.
 
 Značky: `▶` spoj, `?` dotaz na prodejce, `✓` nalezená jízdenka, `✗` nic,
 `✂` zkoušený lom, `⚖` porovnání, `–` kus, který nikdo neprodává (bez dotazu),

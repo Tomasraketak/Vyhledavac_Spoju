@@ -32,7 +32,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from .. import idos, railnet, stations, transitous
+from .. import geo, idos, railnet, stations, transitous
 from ..errors import BlockedError, RateLimitedError, StationNotFoundError, TransientProviderError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import normalize, same_place
@@ -183,13 +183,16 @@ class IdsIdosProvider(HttpProvider):
         for _ in range(PAGES):
             if len(connections) >= PRICE_SCOPE_COUNT:
                 break
-            page = await self.client.get_text(idos.results_url(),
+            page = await self.client.get_text(idos.results_url(_combination(query)),
                                               params=idos.params(origin, destination, when),
                                               referer=self.referer)
             batch = [c for c in idos.parse_results(page, when.astimezone(query.departure.tzinfo).date())
                      if c.departure >= query.departure - dt.timedelta(minutes=1)]
-            new = [c for c in batch if all(c.departure != o.departure or c.legs[0].line != o.legs[0].line
-                                           for o in connections)]
+            new = []
+            for c in batch:          # IDOS někdy vypíše tentýž spoj dvakrát
+                if all(c.departure != o.departure or c.legs[0].line != o.legs[0].line
+                       for o in connections + new):
+                    new.append(c)
             if not new:
                 break
             connections.extend(new)
@@ -360,7 +363,8 @@ class IdsIdosProvider(HttpProvider):
                 or not conn.handle or not conn.conn_id:
             return None
         try:
-            response = await self.client.request("POST", idos.OFFER, params={"callback": "cb"},
+            response = await self.client.request("POST", idos.ajax_url("GetPriceOffer", _combination(query)),
+                                                 params={"callback": "cb"},
                                                  data=idos.offer_data(conn), referer=self.referer,
                                                  expect_json=False)
         except TransientProviderError as exc:
@@ -378,6 +382,15 @@ class IdsIdosProvider(HttpProvider):
                 trace(f"IDOS: jízdenku {price} Kč na {start} → {end} nejde přiřadit k úsekům spoje")
                 return None
             spans.append((a, b))
+        abroad = [(a, b) for a, b in spans
+                  if "CZ" not in (geo.country_of(legs[a].origin), geo.country_of(legs[b].destination))]
+        if abroad:
+            # jízdenka i na kus celý v cizině (Salzburg → Lublaň): cenu z IDOS tam
+            # nebereme – ocení ho dopravci té země (cena platí pro všechny části)
+            trace(f"IDOS: jízdenka {price:.0f} Kč zahrnuje i kus v cizině ("
+                  + ", ".join(f"{legs[a].origin} → {legs[b].destination}" for a, b in abroad)
+                  + ") – nepoužiji, ocení dopravci")
+            return None
         trace(f"IDOS nabízí jízdenku {price:.0f} Kč na " + ", ".join(
             f"{legs[a].origin} → {legs[b].destination}" for a, b in spans))
         plan: list[dict] = []
@@ -430,6 +443,11 @@ class IdsIdosProvider(HttpProvider):
             if plan not in unique:
                 unique.append(plan)
         return unique
+
+
+def _combination(query: SearchQuery) -> str:
+    """Jízdní řády IDOS: jen vlaky (``--trains``), jinak vše."""
+    return idos.TRAINS if query.trains_only else idos.ALL
 
 
 def with_walks(legs: list[Leg], conn: idos.IdosConnection) -> list[Leg]:

@@ -171,3 +171,57 @@ def test_idos_price_offer():
     assert idos.parse_offer('cb({"price":null,"errorMsg":"nelze"});') == (None, None)
     conns = idos.parse_results(page("idos_international.html.gz"), DAY)
     assert conns[0].handle and conns[0].conn_id and conns[0].conn_id != conns[1].conn_id
+
+
+# ---- skutečné přestupy mezi jízdenkami ----------------------------------------------
+def test_same_station_spellings():
+    from vyhledavac.transfer import same_station
+
+    assert same_station("Linz/Donau Hbf", "Linz Hbf")
+    assert same_station("Wien Hbf (Bahnsteige 3-12)", "Wien Hauptbahnhof")
+    assert same_station("S+U Berlin Hauptbahnhof", "Berlin Hbf")
+    assert same_station("Bad Ischl Bahnhof (Zugang Bahnsteig 1)", "Bad Ischl")
+    assert not same_station("Berlin Südkreuz", "Berlin Hbf")
+    assert not same_station("Praha hl.n.", "Praha-Holešovice")
+    assert not same_station("České Budějovice", "České Budějovice, aut.nádr.")
+    assert not same_station("Budapest-Keleti", "Budapest-Nyugati")
+
+
+def test_reachable_uses_real_transfer(monkeypatch):
+    import asyncio
+
+    from vyhledavac import transfer
+
+    async def fake(a, b, when):
+        return dt.timedelta(minutes=22)               # Südkreuz → Hbf S-Bahnem
+
+    monkeypatch.setattr(transfer, "transfer_time", fake)
+    run = lambda *args: asyncio.run(idos_complete._reachable(*args))
+    assert not run(at(10), "Berlin Südkreuz", "Berlin Hbf", at(10, 15))      # dřív stačilo 10 min
+    assert run(at(10), "Berlin Südkreuz", "Berlin Hbf", at(10, 25))
+    assert run(at(10), "Wien Hbf", "Wien Hauptbahnhof", at(10, 2))            # tatáž stanice
+    assert not run(at(10), "Wien Hbf", "Wien Hauptbahnhof", at(10, 2), idos_complete.TRANSFER_SAME)
+
+
+def test_lonely_namesake_is_not_a_border():
+    stops = [Stop("Zagreb Glavni kolodvor", departure=at(10, 28)), Stop("Savski Marof", at(10, 50), at(10, 51)),
+             Stop("Dobova", at(11, 5), at(11, 9)), Stop("Sevnica", at(11, 40), at(11, 43)),
+             Stop("Blanca", at(11, 50), at(11, 51)), Stop("Sava", at(12, 20), at(12, 21)),
+             Stop("Litija", at(12, 34), at(12, 35)), Stop("Ljubljana", arrival=at(13, 7))]
+    rer = Leg("Zagreb Glavni kolodvor", "Ljubljana", at(10, 28), at(13, 7), mode=Mode.TRAIN, line="RER 432",
+              stops=stops)
+    assert idos_complete._split_points([rer]) == [(0, 1), (0, 2)]                # jen Savski Marof | Dobova
+
+
+def test_home_country_sellers():
+    from vyhledavac.registry import load_plugins
+
+    load_plugins()
+    rer = [Leg("Zagreb Glavni kolodvor", "Ljubljana", at(10, 28), at(13, 7), mode=Mode.TRAIN, line="RER 432")]
+    plain, _ = idos_complete.sellers_for("Záhřeb", "Lublaň", rer, {"HR", "SI"})
+    assert "ÖBB" in plain and "MÁV" not in plain                  # MÁV jen z/do Maďarska
+    ec = [Leg("Kraków Główny", "Wien Hauptbahnhof", at(13, 52), at(19, 49), mode=Mode.TRAIN, line="EC 207",
+              stops=[Stop("Kraków Główny", departure=at(13, 52)), Stop("Bohumín", at(16, 30), at(16, 34)),
+                     Stop("Břeclav", at(18, 38), at(18, 40)), Stop("Wien Hauptbahnhof", arrival=at(19, 49))])]
+    plain, browser = idos_complete.sellers_for("Krakov", "Vídeň", ec, {"PL", "AT"})
+    assert "ÖBB" in plain and browser == ["ČD"]                    # ČD prodá i vlak přes Česko

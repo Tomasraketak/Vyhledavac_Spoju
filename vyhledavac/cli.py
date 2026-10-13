@@ -14,7 +14,7 @@ import sys
 from typing import Any, Sequence
 
 from .engine import SearchEngine
-from .models import DEFAULT_TZ, DiscountCard, Passenger, SearchQuery, SearchResult
+from .models import DEFAULT_TZ, DiscountCard, Mode, Passenger, SearchQuery, SearchResult
 from .registry import FILTERS, HACKS, PROVIDERS, load_plugins
 
 DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva", "PKP", "MÁV", "DB", "NS", "Trenitalia",
@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="vypsat dostupné dopravce, filtry a hacky")
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="podrobnější log (-vv pro ladění)")
+    parser.add_argument("--trains", action="store_true",
+                        help="jen vlaky (čistě vlakové spojení, bez autobusů)")
     parser.add_argument("--trace", action="store_true",
                         help="vypisovat úvahy: kde se zkouší lomy jízdenek, u kterých dopravců, co vyšlo")
     return parser
@@ -107,6 +109,8 @@ def build_filters(args: argparse.Namespace) -> list[Any]:
         spec.append(("max_transfers", {"limit": args.max_transfers}))
     if args.max_duration is not None:
         spec.append(("max_duration", {"hours": args.max_duration}))
+    if getattr(args, "trains", False):
+        spec.append(("only_modes", {"modes": ["train"]}))
     spec.append("drop_sold_out")
     spec.append("deduplicate")
     if not args.no_backfill:
@@ -261,6 +265,7 @@ async def run(args: argparse.Namespace) -> int:
         passengers=(build_passenger(args),),
         window=dt.timedelta(hours=args.window),
         max_results=args.limit,
+        modes=frozenset({Mode.TRAIN}) if args.trains else None,
     )
 
     engine = SearchEngine.build(

@@ -135,6 +135,7 @@ class DsbProvider(HttpProvider):
     provides_stops = True
     currency = "DKK"
     countries = DSB_COUNTRIES
+    home = ("DK",)
     international_only = True
     referer = SHOP
     min_interval = 0.3

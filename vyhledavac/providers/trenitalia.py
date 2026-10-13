@@ -49,6 +49,7 @@ class TrenitaliaProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("IT", "AT", "CH", "FR", "DE", "SI")
+    home = ("IT",)
     international_only = True
     referer = WEB
     min_interval = 0.4

@@ -112,8 +112,18 @@ def pick_foreign(items: list[dict], country: str) -> str | None:
     return None
 
 
-def results_url() -> str:
-    return RESULTS
+#: Jízdní řády IDOS: vše (vlaky, autobusy, MHD), nebo jen vlaky.
+TRAINS = "vlaky"
+ALL = "vlakyautobusymhdvse"
+
+
+def results_url(combination: str = ALL) -> str:
+    return f"{BASE}/{combination}/spojeni/vysledky/"
+
+
+def ajax_url(name: str, combination: str = ALL) -> str:
+    return f"{BASE}/{combination}/Ajax/{name}/" if name == "SearchTimetableObjects" else \
+        f"{BASE}/{combination}/Ajax/{name}"
 
 
 def params(origin: str, destination: str, when: dt.datetime) -> dict[str, str]:

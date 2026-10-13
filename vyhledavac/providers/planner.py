@@ -58,6 +58,24 @@ def _km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return 6371 * 2 * math.asin(math.sqrt(a))
 
 
+def pick_czech(name: str, results: list[dict[str, Any]]) -> str | None:
+    """České místo jen z českých dat (``cz-…``) – „Olomouc“ jinak padne na
+    estonskou zastávku. Přednost má vlaková stanice (CZPTT) jménem obce."""
+    wanted = normalize(name)
+    best, best_key = None, None
+    for r in results:
+        rid = str(r.get("id") or "")
+        if r.get("type") != "STOP" or not rid.startswith("cz-"):
+            continue
+        rname = normalize(str(r.get("name") or ""))
+        if not rname.startswith(wanted.split(" ")[0]):
+            continue
+        key = ("CZPTT" not in rid, rname != wanted and not rname.startswith(wanted + " "), len(rname))
+        if best_key is None or key < best_key:
+            best, best_key = rid, key
+    return best or transitous.pick_place(name, [r for r in results if str(r.get("id") or "").startswith("cz-")])
+
+
 def leg_mode(raw: dict[str, Any]) -> Mode:
     mode = str(raw.get("mode") or "")
     if mode in MODES:
@@ -96,7 +114,7 @@ class PlannerProvider(HttpProvider):
         """Kde v Transitous začít/skončit: u zahraničního města souřadnice středu
         a jako záloha zastávka z dat té země nejblíž středu (ze středu Košic
         Transitous cestu nenajde, ze zastávky ŽSR ano); u českého místa zastávka."""
-        key = f"planner-place4:{normalize(name)}"
+        key = f"planner-place5:{normalize(name)}"
         cached = self.cache.get(self.name, key)
         if cached:
             return list(cached)
@@ -117,7 +135,7 @@ class PlannerProvider(HttpProvider):
         else:
             found = await self.client.get_json(f"{transitous.API}/v1/geocode",
                                                params={"text": name, "language": "cs"}, headers=headers)
-            chosen = transitous.pick_place(name, found or [])
+            chosen = pick_czech(name, found or [])
             if chosen is not None:
                 out.append(chosen)
         if not out:
@@ -135,10 +153,12 @@ class PlannerProvider(HttpProvider):
             tries.append((origins[-1], destinations[-1]))
         data: dict[str, Any] = {}
         for origin, destination in tries:
-            data = await self.client.get_json(f"{transitous.API}/v5/plan", params={
-                "fromPlace": origin, "toPlace": destination, "numItineraries": 6,
-                "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
-                headers={"User-Agent": transitous.USER_AGENT}) or {}
+            params = {"fromPlace": origin, "toPlace": destination, "numItineraries": 6,
+                      "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+            if query.trains_only:
+                params["transitModes"] = "RAIL"          # čistě vlakové spojení
+            data = await self.client.get_json(f"{transitous.API}/v5/plan", params=params,
+                                              headers={"User-Agent": transitous.USER_AGENT}) or {}
             if data.get("itineraries"):
                 break
             trace(f"plánovač: z {origin} do {destination} nic – zkouším zastávky")

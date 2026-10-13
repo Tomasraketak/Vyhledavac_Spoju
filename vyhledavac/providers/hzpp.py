@@ -82,6 +82,7 @@ class HzppProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("HR",)
+    home = ("HR",)
     international_only = True
     referer = WEB
     min_interval = 0.5

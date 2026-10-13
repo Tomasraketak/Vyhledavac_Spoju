@@ -45,6 +45,7 @@ class PkpProvider(HttpProvider):
     label = "PKP a polští dopravci (Koleo)"
     currency = "PLN"
     countries = ("PL", "CZ", "SK", "DE")
+    home = ("PL",)
     international_only = True          # po Česku nemá smysl
     referer = f"{BASE}/"
     min_interval = 0.35

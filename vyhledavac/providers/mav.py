@@ -63,6 +63,7 @@ class MavProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("HU", "AT", "SK", "CZ", "DE", "RO", "HR", "SI", "RS")
+    home = ("HU",)
     international_only = True          # po Česku nemá smysl
     referer = WEB
     min_interval = 0.5

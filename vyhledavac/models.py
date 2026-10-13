@@ -415,6 +415,13 @@ class SearchQuery:
     max_results: int = 60
     # Jak daleko za zadaný čas se ještě hledá.
     window: dt.timedelta = dt.timedelta(hours=12)
+    #: Jen tyto druhy dopravy (``None`` = vše). ``{Mode.TRAIN}`` = čistě vlakové
+    #: spojení – IDOS, plánovač i dopočet jízdenek pak hledají jen vlaky.
+    modes: frozenset | None = None
+
+    @property
+    def trains_only(self) -> bool:
+        return self.modes is not None and set(self.modes) <= {Mode.TRAIN, Mode.WALK}
 
     def __post_init__(self) -> None:
         if self.departure.tzinfo is None:

@@ -78,6 +78,7 @@ class SncfProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("FR", "BE", "CH", "LU", "DE", "IT", "ES")
+    home = ("FR",)
     international_only = True
     hack_legs = False
     referer = WEB + "/"

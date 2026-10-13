@@ -57,6 +57,9 @@ class Provider(abc.ABC):
     min_timeout: ClassVar[float] = 0.0
     #: Země, které dopravce obsluhuje (informativní, pro filtrování fronty).
     countries: ClassVar[tuple[str, ...]] = ()
+    #: Domácí země: jeden konec cesty musí ležet v některé z nich (MÁV prodá
+    #: Vídeň → Budapešť, ale ne Záhřeb → Lublaň). Prázdné = stačí ``countries``.
+    home: ClassVar[tuple[str, ...]] = ()
     #: Oblast pro rozdělení dopravců ve webovém rozhraní ("cz", "central",
     #: "east", "west", "north"); prázdná = podle první země v ``countries``.
     region: ClassVar[str] = ""

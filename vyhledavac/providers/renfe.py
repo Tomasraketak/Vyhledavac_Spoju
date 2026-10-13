@@ -100,6 +100,7 @@ class RenfeProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("ES", "FR", "PT")
+    home = ("ES", "FR")
     international_only = True
     referer = WEB + "/"
     min_interval = 0.5

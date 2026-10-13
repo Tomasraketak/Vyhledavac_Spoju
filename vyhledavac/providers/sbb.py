@@ -72,6 +72,7 @@ class SbbProvider(HttpProvider):
     provides_stops = True
     currency = "CHF"
     countries = ("CH",)
+    home = ("CH",)
     international_only = True
     hack_legs = False
     referer = None

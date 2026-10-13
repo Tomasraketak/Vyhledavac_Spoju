@@ -385,6 +385,9 @@ Ischl“, Třeboň → Lublaň 1 643 Kč celé, Košice → Bordeaux 2 492 Kč n
 „Košice - Praha hl.n.“ a „Praha hl.n. - Offenburg“. Rozpis „jízdenka
 z IDOS + IDS na zbytek (+ dokoupit, co nepokryje)“ se porovná s ostatními.
 Zatím jen pro jednoho dospělého bez slev (cena z IDOS je pro dospělého).
+Jen když se každá část jízdenky dotýká Česka – kus celý v cizině
+(„Salzburg Hbf - Ljubljana“, Kodaň → Amsterdam) ocení dopravci té země;
+spoje IDOS vrací spolehlivě, jeho ceny v cizině ověřené nemáme.
 
 **ODIS** (Moravskoslezský kraj) má kilometrický tarif: jednotlivá
 elektronická jízdenka REGION 10 Kč + 1,50 Kč/km, zvýhodněná (děti 6–15,
@@ -437,8 +440,27 @@ Evropy) – vlaky, FlixBus i MHD s dopravcem každého úseku, bez cen.
    `idos_complete` je ocení po kusech (viz IDS výše): prodejce musí
    obsluhovat všechny země kusu, FlixBus jen autobusy, ČD přes prohlížeč
    jen vlaky; dělí se v přestupech a na hranicích uvnitř vlaku, nejvýš
-   40 dotazů na spoj. Co nikdo neprodá, ukáže se jako spoj s částí cen
-   („◐“) a seznamem úseků, kde cena chybí.
+   40 dotazů na spoj (z toho 6 přes prohlížeč). Co nikdo neprodá, ukáže
+   se jako spoj s částí cen („◐“) a seznamem úseků, kde cena chybí.
+
+Kdo smí prodat kus cesty:
+- dopravce musí obsluhovat všechny země kusu (`countries`) a dopravci
+  s domácí zemí (`home` – MÁV, PKP, NS, SNCF, Trenitalia, Renfe, DSB …)
+  jen kus, který v ní začíná nebo končí (MÁV neprodá Záhřeb → Lublaň);
+- ČD přes prohlížeč i vlak, který Českem jen projíždí (EC Krakov → Vídeň);
+- prodejce, kterého hack chce, se použije i tehdy, když není v seznamu
+  zapnutých dopravců (ČD přes prohlížeč ve výchozím výběru není) – jen
+  pro dotazy hacku (`SearchEngine._helpers_for`).
+
+Hranice uvnitř vlaku se hledá podle zemí zastávek; „ostrůvek“ až tří
+zastávek jiné země mezi dvěma zastávkami téže země je jmenovec odjinud
+(slovinská „Sava“ není italská, „Blanca“ španělská) a lom tam nevznikne.
+Navazující jízdenka se počítá se skutečným časem přestupu (`transfer.py`,
+viz README) – i za lomem, kde jiný spoj přijede jinam nebo později.
+
+Čistě vlakové hledání (`--trains`, `SearchQuery.modes`): IDOS se ptá na
+kombinaci „vlaky“, plánovač s `transitModes=RAIL`, ostatní dopravci se
+odfiltrují na spoje jen vlakem.
 
 Ověření 13. 10. 2026 na cesty 15. 10. od 6:00 (IDOS + plánovač + 20
 dopravců, `--trace`):

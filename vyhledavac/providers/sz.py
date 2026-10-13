@@ -80,6 +80,7 @@ class SzProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("SI",)
+    home = ("SI",)
     international_only = True
     referer = WEB
     min_interval = 0.5

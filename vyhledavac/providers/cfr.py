@@ -103,6 +103,7 @@ class CfrProvider(HttpProvider):
     multi_passenger = True
     currency = "RON"
     countries = ("RO",)
+    home = ("RO",)
     international_only = True
     referer = WEB
     min_interval = 0.35

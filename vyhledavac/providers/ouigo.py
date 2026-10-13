@@ -91,6 +91,7 @@ class OuigoProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("FR", "ES", "BE")
+    home = ("FR", "ES")
     international_only = True
     referer = "https://ventes.ouigo.com/"
     min_interval = 0.4

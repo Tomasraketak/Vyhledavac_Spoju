@@ -56,6 +56,7 @@ class NsProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("NL", "DE", "BE")
+    home = ("NL",)
     international_only = True
     referer = PLANNER
     min_interval = 0.3

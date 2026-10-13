@@ -118,7 +118,8 @@ _COUNTRY_WORDS: dict[str, tuple[str, ...]] = {
 
 #: Značky zemí, které dopravci píší jinak než ISO (ÖBB „Jesenice(SL)“).
 _MARKS = {"SL": "SI", "UK": "GB", "CS": "CZ", "SLO": "SI", "AUT": "AT", "DEU": "DE", "GER": "DE", "CZE": "CZ",
-          "SVK": "SK", "HUN": "HU", "POL": "PL", "ITA": "IT", "HRV": "HR", "CRO": "HR", "SUI": "CH", "CHE": "CH"}
+          "SVK": "SK", "HUN": "HU", "POL": "PL", "ITA": "IT", "HRV": "HR", "CRO": "HR", "SUI": "CH", "CHE": "CH",
+          "SZ": "SI", "HZ": "HR"}       # SZ/HZ = značka drah (Loka(SZ))
 
 
 def marked_country(name: str) -> str | None:
