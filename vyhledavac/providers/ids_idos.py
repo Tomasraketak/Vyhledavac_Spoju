@@ -35,7 +35,9 @@ from typing import Any
 from .. import idos, railnet, stations, transitous
 from ..errors import BlockedError, RateLimitedError, StationNotFoundError, TransientProviderError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
+from ..normalize import normalize, same_place
 from ..registry import PROVIDERS
+from ..trace import trace
 from .base import PRICE_SCOPE_AHEAD, PRICE_SCOPE_COUNT, HttpProvider
 
 log = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ TRAIN_CHECK_FROM = Decimal(80)
 LINES = Path(__file__).resolve().parent.parent / "data" / "ids_lines.json.gz"
 PAGES = 2
 DETAIL_TTL = 24 * 3600
+NAME_TTL = 30 * 24 * 3600
 
 
 @lru_cache(maxsize=1)
@@ -91,7 +94,7 @@ def _place(name: str, rail: bool, near: set[str]):
 @PROVIDERS.register()
 class IdsIdosProvider(HttpProvider):
     name = "IDS"
-    label = "Integrované systémy – vlaky i autobusy z IDOS, cena podle tarifu IDS"
+    label = "IDOS – spoje vlaků a autobusů (i v cizině), cena IDS podle tarifu, zbytek ocení dopravci"
     multi_passenger = True
     currency = "CZK"
     countries = ("CZ",)
@@ -111,12 +114,36 @@ class IdsIdosProvider(HttpProvider):
 
     @staticmethod
     def _worth_asking(query: SearchQuery) -> bool:
-        """IDOS se ptáme vždy, když aspoň jeden konec cesty leží v Česku – i na
-        cesty do ciziny (Domanín → Bad Ischl): IDOS najde celý spoj i s přestupy
-        a dopravci jednotlivých úseků, domácí část ocení IDS a zbytek dokoupí
-        hack ``idos_complete`` u dopravců."""
+        """IDOS se ptáme vždy, když obě místa známe – i na cesty do ciziny
+        (Domanín → Bad Ischl) a po cizině (Stockholm → Amsterdam, Bukurešť →
+        Graz): IDOS zná vlaky celé Evropy, FlixBus i RegioJet a dopravce
+        každého úseku. Domácí část ocení IDS, zbytek dokoupí hack
+        ``idos_complete`` u dopravců."""
         a, b = stations.place(query.origin), stations.place(query.destination)
-        return any(p is not None and not p.country for p in (a, b))
+        return a is not None and b is not None
+
+    async def _idos_name(self, name: str) -> str:
+        """Jméno pro IDOS: české místo beze změny, zahraniční město jednoznačně
+        z našeptávače IDOS („Košice; Slovensko“, „Kraków; Polsko“) – samotné
+        „Košice“ IDOS odmítne jako nejednoznačné."""
+        place = stations.place(name)
+        if place is None or not place.code:
+            return name
+        key = f"idos-name:{normalize(name)}"
+        cached = self.cache.get(self.name, key)
+        if cached:
+            return cached
+        chosen = name
+        for text in dict.fromkeys((place.name, name, place.local)):
+            if not text:
+                continue
+            page = await self.client.get_text(idos.SUGGEST, params=idos.suggest_params(text), referer=self.referer)
+            found = idos.pick_foreign(idos.parse_suggest(page), place.country)
+            if found:
+                chosen = found
+                break
+        self.cache.set(self.name, key, chosen, ttl=NAME_TTL)
+        return chosen
 
     @staticmethod
     def _international(query: SearchQuery) -> bool:
@@ -126,7 +153,7 @@ class IdsIdosProvider(HttpProvider):
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         if not self._worth_asking(query):
-            raise StationNotFoundError(self.name, "IDOS hledá jen cesty z Česka nebo do Česka")
+            raise StationNotFoundError(self.name, "místo IDOS nezná")
         try:
             connections = await self._idos(query)
         except (BlockedError, RateLimitedError, TransientProviderError) as exc:
@@ -152,11 +179,12 @@ class IdsIdosProvider(HttpProvider):
     async def _idos(self, query: SearchQuery) -> list[idos.IdosConnection]:
         connections: list[idos.IdosConnection] = []
         when = query.departure
+        origin, destination = await self._idos_name(query.origin), await self._idos_name(query.destination)
         for _ in range(PAGES):
             if len(connections) >= PRICE_SCOPE_COUNT:
                 break
             page = await self.client.get_text(idos.results_url(),
-                                              params=idos.params(query.origin, query.destination, when),
+                                              params=idos.params(origin, destination, when),
                                               referer=self.referer)
             batch = [c for c in idos.parse_results(page, when.astimezone(query.departure.tzinfo).date())
                      if c.departure >= query.departure - dt.timedelta(minutes=1)]
@@ -278,7 +306,10 @@ class IdsIdosProvider(HttpProvider):
         source = "IDOS" if conn.share_url or any(leg.detail_url for leg in conn.legs) \
             else "Transitous (data CIS JŘ)"
         plans = self._plans(query, infos)
-        whole = [plan for plan in plans if all(seg["kind"] == "ids" for seg in plan)]
+        offer = await self._offer_plan(query, conn, legs, infos)
+        if offer:
+            plans.insert(0, offer)
+        whole = [plan for plan in plans if all(seg["kind"] in ("ids", "offer") for seg in plan)]
         if whole:
             plan = min(whole, key=lambda pl: sum(Decimal(seg["price"]) for seg in pl))
             total = sum((Decimal(seg["price"]) for seg in plan), Decimal(0))
@@ -286,6 +317,15 @@ class IdsIdosProvider(HttpProvider):
             journey.fares = [self.make_fare(total, "CZK", label=" + ".join(dict.fromkeys(seg["system"] for seg in plan)),
                                             tariff=tickets)]
             journey.fare_status = FareStatus.PRICED
+            if any(seg["kind"] == "offer" for seg in plan):
+                journey.notes.append(f"🎫 Jízdenky: {tickets}. Jízdenku z IDOS prodává e-shop IDOS (ČD); "
+                                     f"jízdenky IDS podle tarifu systému. Spoj z {source}.")
+                # zbytek rozpisů zkusí hack idos_complete – lom u jiných dopravců bývá levnější
+                rest = [p for p in plans if any(seg["kind"] == "buy" for seg in p)]
+                if rest:
+                    journey.raw = {"plans": rest}
+                journey.legs = with_walks(legs, conn)
+                return journey
             journey.notes.append(f"🎫 Jízdenky IDS: {tickets} – cena podle tarifu systému; koupíte je "
                                  "v aplikaci systému, u řidiče nebo v automatu. "
                                  f"Spoj z {source}.")
@@ -305,6 +345,53 @@ class IdsIdosProvider(HttpProvider):
         journey.raw = {"plans": plans}
         journey.legs = with_walks(legs, conn)
         return journey
+
+    async def _offer_plan(self, query: SearchQuery, conn: idos.IdosConnection, legs: list[Leg],
+                          infos) -> list[dict] | None:
+        """Rozpis s jízdenkou z e-shopu IDOS (ČD – i na cesty do ciziny).
+
+        IDOS ke spoji řekne cenu a úseky, na které jízdenka platí
+        („Borovany - Bad Ischl“, „České Budějovice - Linz Hbf<br>Salzburg Hbf -
+        Ljubljana“). Zbytek (autobus na nádraží, WESTbahn mezi Linzem a
+        Salzburgem) pokryje tarif IDS nebo ho dokoupí hack u dopravců.
+        Jen pro jednoho dospělého bez slev – jinak by cena z IDOS nebyla jeho."""
+        passengers = query.passengers
+        if len(passengers) != 1 or passengers[0].cards or not 26 <= passengers[0].age < 65 \
+                or not conn.handle or not conn.conn_id:
+            return None
+        try:
+            response = await self.client.request("POST", idos.OFFER, params={"callback": "cb"},
+                                                 data=idos.offer_data(conn), referer=self.referer,
+                                                 expect_json=False)
+        except TransientProviderError as exc:
+            log.debug("IDS: nabídka jízdenky: %s", exc.message)
+            return None
+        price, parts = idos.parse_offer(response.text)
+        if price is None:
+            return None
+        last = len(legs) - 1
+        spans: list[tuple[int, int]] = []
+        for start, end in parts or [(legs[0].origin, legs[-1].destination)]:
+            a = next((k for k in range(last + 1) if same_place(legs[k].origin, start)), None)
+            b = next((k for k in range(last + 1) if same_place(legs[k].destination, end)), None)
+            if a is None or b is None or b < a or (spans and a <= spans[-1][1]):
+                trace(f"IDOS: jízdenku {price} Kč na {start} → {end} nejde přiřadit k úsekům spoje")
+                return None
+            spans.append((a, b))
+        trace(f"IDOS nabízí jízdenku {price:.0f} Kč na " + ", ".join(
+            f"{legs[a].origin} → {legs[b].destination}" for a, b in spans))
+        plan: list[dict] = []
+        pos = 0
+        for n, (a, b) in enumerate(spans):
+            if a > pos:
+                plan += _cover(query, infos, [(k, 0, len(infos[k][0]) - 1) for k in range(pos, a)])
+            plan.append({"kind": "offer", "from": [a, 0], "to": [b, len(infos[b][0]) - 1],
+                         "price": str(price if n == 0 else 0), "system": "IDOS",
+                         "name": "jízdenka z e-shopu IDOS" + (" (platí pro všechny části)" if len(spans) > 1 else "")})
+            pos = b + 1
+        if pos <= last:
+            plan += _cover(query, infos, [(k, 0, len(infos[k][0]) - 1) for k in range(pos, last + 1)])
+        return plan
 
     @staticmethod
     def _trains_bought(query: SearchQuery, infos) -> list[list[dict]]:
@@ -482,4 +569,5 @@ def seg_name(legs: list[Leg], seg: dict) -> str:
 
 def describe(legs: list[Leg], plan: list[dict]) -> str:
     return "; ".join(f"{legs[s['from'][0]].stops[s['from'][1]].name} → {legs[s['to'][0]].stops[s['to'][1]].name}: "
-                     f"{s['system']} ({s['name']}) {Decimal(s['price']):.0f} Kč" for s in plan if s["kind"] == "ids")
+                     f"{s['system']} ({s['name']}) {Decimal(s['price']):.0f} Kč" for s in plan
+                     if s["kind"] in ("ids", "offer"))

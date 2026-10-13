@@ -368,8 +368,23 @@ IREDO, DÚK, IDPK, VDV, IDZK, IDSOK, ODIS). IDS KK zapojený není.
    Budějovic a FlixBus podle IDOS, nebo vlak ČD/ÖBB – porovnáte cenu,
    přestupy i čas.
 
-**Kdy se ptá:** vždy, když aspoň jeden konec cesty leží v Česku (i na
-cesty do ciziny). Ocení se první 3 spoje do 4:15 h.
+**Kdy se ptá:** vždy, když obě místa známe – i na cesty po cizině. IDOS
+zná vlaky celé Evropy, FlixBus i RegioJet (Stockholm → Amsterdam,
+Bukurešť → Graz, Vídeň → Mnichov). Zahraniční město se do IDOS zadá
+jednoznačně podle jeho našeptávače (`Ajax/SearchTimetableObjects`,
+JSONP): „Košice; Slovensko“, „Kraków; Polsko“ – samotné „Košice“ IDOS
+odmítne jako nejednoznačné. Kde IDOS spojení nenajde (Valencie → Turín,
+Kraków → Hamar), zbývá plánovač Transitous. Ocení se první 3 spoje do
+4:15 h.
+
+**Jízdenka z e-shopu IDOS:** IDOS ke spoji nabídne jízdenku
+(`Ajax/GetPriceOffer` s `handle` a `connId` z výsledků) – prodává ji ČD,
+i na cesty do ciziny – a řekne, na které úseky platí
+(`sellablePartsDesc`): Domanín → Bad Ischl 759 Kč na „Borovany - Bad
+Ischl“, Třeboň → Lublaň 1 643 Kč celé, Košice → Bordeaux 2 492 Kč na
+„Košice - Praha hl.n.“ a „Praha hl.n. - Offenburg“. Rozpis „jízdenka
+z IDOS + IDS na zbytek (+ dokoupit, co nepokryje)“ se porovná s ostatními.
+Zatím jen pro jednoho dospělého bez slev (cena z IDOS je pro dospělého).
 
 **ODIS** (Moravskoslezský kraj) má kilometrický tarif: jednotlivá
 elektronická jízdenka REGION 10 Kč + 1,50 Kč/km, zvýhodněná (děti 6–15,

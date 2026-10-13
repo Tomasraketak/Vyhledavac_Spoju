@@ -151,3 +151,23 @@ def test_marked_country():
 
     assert geo.country_of("Rybnik(PL)") == "PL" and geo.country_of("Jesenice(SL)") == geo.country_of("Jesenice(SLO)") == "SI"
     assert not idos_complete._marked_ok("Rybnik(PL)", "CZ") and idos_complete._marked_ok("Jesenice(SL)", "SI")
+
+
+def test_idos_suggest_picks_foreign_city():
+    text = ('cb([{"selectedText":"Košice; Slovensko","description":"obec, Slovensko, okres Košice, vlaky"},'
+            '{"selectedText":"Košice; okres Kutná Hora","description":"obec, okres Kutná Hora, autobusy"},'
+            '{"selectedText":"Amsterdam; Nizozemí","description":"obec, Nizozemí, vlaky, autobusy"}])')
+    items = idos.parse_suggest(text)
+    assert idos.pick_foreign(items, "Slovensko") == "Košice; Slovensko"
+    assert idos.pick_foreign(items, "Nizozemsko") == "Amsterdam; Nizozemí"      # IDOS píše „Nizozemí“
+    assert idos.pick_foreign(items, "Polsko") is None
+
+
+def test_idos_price_offer():
+    price, parts = idos.parse_offer('cb({"price":"2 117   Kč","errorMsg":null,'
+                                    '"sellablePartsDesc":"České Budějovice - Linz Hbf<br>Salzburg Hbf - Ljubljana"});')
+    assert price == Decimal(2117) and parts == [("České Budějovice", "Linz Hbf"), ("Salzburg Hbf", "Ljubljana")]
+    assert idos.parse_offer('cb({"price":"286   Kč","sellablePartsDesc":null});') == (Decimal(286), None)
+    assert idos.parse_offer('cb({"price":null,"errorMsg":"nelze"});') == (None, None)
+    conns = idos.parse_results(page("idos_international.html.gz"), DAY)
+    assert conns[0].handle and conns[0].conn_id and conns[0].conn_id != conns[1].conn_id

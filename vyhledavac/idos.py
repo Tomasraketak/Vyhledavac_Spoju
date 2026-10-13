@@ -15,6 +15,7 @@ import datetime as dt
 import html as htmlmod
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal
 
 from .models import DEFAULT_TZ
 
@@ -62,6 +63,8 @@ class IdosLeg:
 class IdosConnection:
     legs: list[IdosLeg]
     share_url: str = ""
+    handle: int = 0                 # výsledek hledání (session IDOS) – pro nabídku jízdenky
+    conn_id: int = 0
 
     @property
     def departure(self) -> dt.datetime:
@@ -70,6 +73,43 @@ class IdosConnection:
     @property
     def arrival(self) -> dt.datetime:
         return self.legs[-1].arrival
+
+
+SUGGEST = f"{BASE}/vlakyautobusymhdvse/Ajax/SearchTimetableObjects/"
+
+
+def suggest_params(text: str) -> dict[str, str]:
+    """Parametry našeptávače míst (JSONP, jako ho volá formulář IDOS)."""
+    return {"count": "12", "prefixText": text, "positionAccuracy": "", "searchByPosition": "false",
+            "onlyStation": "false", "format": "json", "bindTtIndex": "", "callback": "cb", "_": "1"}
+
+
+def parse_suggest(text: str) -> list[dict]:
+    """Odpověď našeptávače ``cb([...])`` → seznam míst (``selectedText`` = jednoznačné
+    jméno pro hledání, např. „Kraków; Polsko“, ``description`` = „obec, Polsko, vlaky…“)."""
+    import json
+
+    text = (text or "").strip()
+    if "(" not in text or not text.endswith((")", ");")):
+        return []
+    try:
+        data = json.loads(text[text.index("(") + 1:text.rindex(")")])
+    except ValueError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def pick_foreign(items: list[dict], country: str) -> str | None:
+    """Jméno zahraniční obce pro IDOS: „Košice; Slovensko“ (ne Košice u Kutné Hory).
+    ``country`` je český název státu z databáze měst (Nizozemsko × IDOS „Nizozemí“ –
+    stačí shoda prvních pěti písmen)."""
+    stem = country[:5].lower()
+    for item in items:
+        text = str(item.get("selectedText") or "")
+        desc = str(item.get("description") or "").lower()
+        if "; " in text and desc.startswith("obec") and text.rsplit("; ", 1)[1][:5].lower() == stem:
+            return text
+    return None
 
 
 def results_url() -> str:
@@ -102,8 +142,10 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
     boxes = re.split(r'<div id="connectionBox-\d+" class="box connection', page)[1:]
     if not boxes:      # první box nemusí mít id
         boxes = re.split(r'class="box connection detail-box', page)[1:]
+    handle = re.search(r'"handle":(\d+),"connData"', page)
     for box in boxes:
         share = re.search(r'data-share-url="([^"]+)"', box)
+        conn_id = re.search(r"connResult\.showDetail\((\d+)", box)
         legs: list[IdosLeg] = []
         last: dt.datetime | None = None
         for item in re.split(r'<div class="outside-of-popup[^"]*">', box)[1:]:
@@ -131,8 +173,41 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
                                 detail_url=htmlmod.unescape(href.group(1)) if href else "",
                                 walk_before=int(walk.group(1)) if walk else 0))
         if legs:
-            out.append(IdosConnection(legs, htmlmod.unescape(share.group(1)) if share else ""))
+            out.append(IdosConnection(legs, htmlmod.unescape(share.group(1)) if share else "",
+                                      int(handle.group(1)) if handle else 0,
+                                      int(conn_id.group(1)) if conn_id else 0))
     return out
+
+
+OFFER = f"{BASE}/vlakyautobusymhdvse/Ajax/GetPriceOffer"
+
+
+def offer_data(conn: IdosConnection) -> dict[str, str]:
+    """Nabídka jízdenky ke spoji (e-shop IDOS – jízdenky ČD i na cesty do ciziny),
+    pro výchozího cestujícího (dospělý)."""
+    return {"handle": str(conn.handle), "connId": str(conn.conn_id), "passengers": "", "handleThere": "0",
+            "connIdThere": "0", "format": "json"}
+
+
+def parse_offer(text: str) -> tuple[Decimal | None, list[tuple[str, str]] | None]:
+    """``cb({"price":"2 117   Kč","sellablePartsDesc":"Třeboň - Frankfurt(Main)Hbf"…})`` →
+    (cena za celou nabídku, úseky, na které platí; ``None`` = celý spoj)."""
+    import json
+
+    text = (text or "").strip()
+    try:
+        data = json.loads(text[text.index("(") + 1:text.rindex(")")])
+    except ValueError:
+        return None, None
+    digits = re.sub(r"[^0-9,]", "", str(data.get("price") or "")).replace(",", ".")
+    if not digits or data.get("errorMsg"):
+        return None, None
+    parts = None
+    desc = data.get("sellablePartsDesc")
+    if desc:
+        parts = [tuple(p.strip() for p in part.split(" - ", 1)) for part in re.split(r"<br\s*/?>", desc)
+                 if " - " in part]
+    return Decimal(digits), parts
 
 
 def parse_stops(page: str) -> list[tuple[str, str, str]]:

@@ -80,15 +80,16 @@ def test_ids_line_membership():
 
 
 @pytest.mark.asyncio
-async def test_ids_provider_skips_trips_outside_czechia():
+async def test_ids_provider_asks_idos_everywhere():
     from vyhledavac.errors import StationNotFoundError
 
     provider = IdsIdosProvider(cache=MemoryCache())
-    with pytest.raises(StationNotFoundError):
-        await provider.search(SearchQuery(origin="Vídeň", destination="Linec", departure=at(6)))
-    # cesta z Česka (i do ciziny) se na IDOS ptá vždy
-    assert IdsIdosProvider._worth_asking(SearchQuery(origin="Plzeň", destination="Praha", departure=at(6)))
-    assert IdsIdosProvider._worth_asking(SearchQuery(origin="Domanín", destination="Bad Ischl", departure=at(6)))
+    with pytest.raises(StationNotFoundError):        # neznámé místo
+        await provider.search(SearchQuery(origin="Xyzzyqq", destination="Linec", departure=at(6)))
+    # IDOS zná vlaky, FlixBus i RegioJet celé Evropy – ptá se i na cesty po cizině
+    for origin, destination in (("Plzeň", "Praha"), ("Domanín", "Bad Ischl"), ("Vídeň", "Linec")):
+        assert IdsIdosProvider._worth_asking(SearchQuery(origin=origin, destination=destination,
+                                                         departure=at(6)))
 
 
 @pytest.mark.asyncio

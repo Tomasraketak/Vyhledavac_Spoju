@@ -94,8 +94,11 @@ class IdosCompleteHack(TravelHack):
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
                    search: SearchFn) -> list[Journey]:
         todo = [j for j in journeys if j.provider in ROUTE_SOURCES and (j.raw.get("plans") or j.raw.get("unpriced"))]
-        # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu
-        todo.sort(key=lambda j: j.price is not None)
+        # tentýž spoj z IDOS i z plánovače se oceňuje jen jednou (IDOS má přednost)
+        from_idos = {(j.departure, j.arrival) for j in todo if j.provider == "IDS"}
+        todo = [j for j in todo if j.provider == "IDS" or (j.departure, j.arrival) not in from_idos]
+        # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu; IDOS před plánovačem
+        todo.sort(key=lambda j: (j.price is not None, j.provider != "IDS"))
         todo = todo[:MAX_JOURNEYS]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
         # vrátí i vlak v 10:10, další spoj se tedy už ptát nemusí.
@@ -181,7 +184,7 @@ class IdosCompleteHack(TravelHack):
         pieces: list[Journey] = []
         for seg in plan:
             part = _slice(rides, seg["from"], seg["to"])
-            if seg["kind"] in ("local", "ids"):
+            if seg["kind"] in ("local", "ids", "offer"):
                 price = Decimal(seg.get("price") or 0)
                 pieces.append(Journey(provider=seg.get("system") or "MHD", legs=part, fare_status=FareStatus.PRICED,
                                       fares=[Fare(amount=price, currency="CZK", amount_czk=price,
@@ -282,7 +285,7 @@ class IdosCompleteHack(TravelHack):
                                                     label="MHD", tariff="jízdenka MHD na místě – cena "
                                                                         "není započtena")]))
                 continue
-            if seg["kind"] == "ids":
+            if seg["kind"] in ("ids", "offer"):      # tarif IDS / jízdenka z e-shopu IDOS
                 price = Decimal(seg["price"])
                 segments.append(Journey(
                     provider=seg["system"], legs=part, fare_status=FareStatus.PRICED,
@@ -468,7 +471,7 @@ def _plan_text(rides: list[Leg], seg: dict) -> str:
     (k0, i0), (k1, i1) = seg["from"], seg["to"]
     a = rides[k0].stops[i0].name if rides[k0].stops else rides[k0].origin
     b = rides[k1].stops[i1].name if rides[k1].stops else rides[k1].destination
-    if seg["kind"] == "ids":
+    if seg["kind"] in ("ids", "offer"):
         return f"{seg['system']} {a} → {b} {Decimal(seg['price']):.0f} Kč"
     return f"{'MHD' if seg['kind'] == 'local' else 'koupit'} {a} → {b}"
 
