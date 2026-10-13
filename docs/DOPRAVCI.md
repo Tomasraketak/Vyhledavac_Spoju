@@ -136,6 +136,7 @@ dopravce.
 | DSB | `dsb.py` | JSON API dsb.dk | konec v Dánsku/Švédsku, i do sousedních zemí (ceny hlavně vnitrostátní) | skupina, DKK | ověřeno živě |
 | SJ | `sj.py` | JSON API sj.se | Švédsko, Norsko, Dánsko i do sousedních zemí | skupina, SEK | ověřeno živě |
 | BDŽ | `bdz.py` | HTML jízdního řádu razpisanie.bdz.bg | jen po Bulharsku | z ceníku (skupina), EUR | ověřeno živě |
+| TCDD | `tcdd.py` | jízdní řád z IDOS | z/do Turecka | bez ceny (e-shop TCDD chrání captcha) | ověřeno živě |
 | CP | `cp.py` | JSON API api-gateway.cp.pt | jen po Portugalsku | dospělý z API, děti dopočítané, EUR | ověřeno živě |
 | Srbijavoz | `srbijavoz.py` | JSON API eKarta | jen po Srbsku | skupina, RSD | ověřeno živě |
 | SBB | `sbb.py` | opendata.ch + starý jízdní řád sbb.ch | konec ve Švýcarsku | z ceny s Halbtaxem ×2, CHF | ověřeno živě |
@@ -908,6 +909,35 @@ zdarma bez místa. Rumunské slevy (student, senior, TrenPlus) neuplatňujeme.
 - Lehátka a lůžka se nenaceňují, jen sedadlo 2. třídy.
 - Odpověď `ReCaptchaFailed` znamená blokaci (captchu neřešíme).
 - Kurz RON bere program z ČNB. Záložní kurz je 4,95 Kč.
+
+**Mezinárodní jízdenky jinou cestou (zkoušeno 13. 10. 2026):** Turnstile
+neobcházíme; hledali jsme jiné prodejce stejných vlaků bez captchy:
+- **Rumunsko ↔ Maďarsko / Rakousko** prodávají MÁV (Bukurešť → Békéscsaba,
+  Hegyeshalom) a ÖBB (Bukurešť → Hegyeshalom, Parndorf) – hack
+  `idos_complete` je použije sám.
+- **Bulharsko ↔ Rumunsko (Ruse – Giurgiu)** online nikdo: vnitrostátní
+  e-shop CFR Ruse nezná, veřejný ceník BDŽ (razpisanie.bdz.bg) nezná Giurgiu,
+  mezinárodní e-shopy CFR i TCDD chrání Turnstile. Zveřejněné ceny jsou jen
+  pro letní přímý vlak „România“ (Bukurešť – Sofie 33,60 €, Varna 27 €,
+  12. 6.–12. 10. 2026). Úsek proto zůstává bez ceny („kupte na pokladně“).
+
+## TCDD – Turecké dráhy
+
+**Soubor:** `providers/tcdd.py` · **Typ:** jízdní řád z IDOS (vlaky) · **Klíč:** ne
+
+E-shop `ebilet.tcddtasimacilik.gov.tr` volá API
+`web-api-prod-ytp.tcddtasimacilik.gov.tr`. Seznam stanic
+(`cdn-api-prod-ytp…/datas/stations.json`) je volně, ale hledání spojů
+s cenami (`POST /tms/train/train-availability`) vyžaduje token Cloudflare
+Turnstile (`GET /crs/captcha/requirement` → `required: true`, bez tokenu 403).
+Turečtí přeprodejci (enuygun, turna) mají Cloudflare „Just a moment…“.
+
+Proto jen **jízdní řád z IDOS** (YHT Ankara – Istanbul, Konya, Eskişehir,
+Mavi Tren …) v tureckém čase (UTC+3), bez ceny, s odkazem na e-shop TCDD.
+Ptá se jen u cest z Turecka nebo do Turecka. Databáze měst z GeoNames má
+jen evropskou část Turecka – asijská města na železnici TCDD (Ankara, Izmir,
+Konya, Eskişehir, Kayseri, Sivas, Kars …) jsou doplněná ručně
+(`stations.EXTRA_CITIES`).
 
 ## SŽ – Slovinské dráhy
 

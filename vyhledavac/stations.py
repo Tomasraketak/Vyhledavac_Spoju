@@ -204,10 +204,47 @@ EXONYMS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Asijská část Turecka (databáze měst z GeoNames má jen evropské země a Thrákii):
+#: hlavní města na železnici TCDD – jméno, místní jméno, obyvatel, hlavní město, šířka, délka.
+EXTRA_CITIES: list[tuple[str, str, str, int, bool, float, float]] = [
+    ("Ankara", "TR", "Ankara", 5700000, True, 39.9334, 32.8597),
+    ("Izmir", "TR", "İzmir", 3000000, False, 38.4237, 27.1428),
+    ("Bursa", "TR", "Bursa", 2000000, False, 40.1828, 29.0667),
+    ("Adana", "TR", "Adana", 1800000, False, 37.0000, 35.3213),
+    ("Gaziantep", "TR", "Gaziantep", 2100000, False, 37.0662, 37.3833),
+    ("Konya", "TR", "Konya", 1300000, False, 37.8746, 32.4932),
+    ("Kayseri", "TR", "Kayseri", 1100000, False, 38.7312, 35.4787),
+    ("Mersin", "TR", "Mersin", 1000000, False, 36.8121, 34.6415),
+    ("Diyarbakır", "TR", "Diyarbakır", 1100000, False, 37.9144, 40.2306),
+    ("Eskişehir", "TR", "Eskişehir", 800000, False, 39.7767, 30.5206),
+    ("Samsun", "TR", "Samsun", 700000, False, 41.2928, 36.3313),
+    ("Denizli", "TR", "Denizli", 600000, False, 37.7765, 29.0864),
+    ("Malatya", "TR", "Malatya", 500000, False, 38.3552, 38.3095),
+    ("Adapazarı", "TR", "Adapazarı", 500000, False, 40.7569, 30.3781),
+    ("Van", "TR", "Van", 500000, False, 38.5012, 43.3729),
+    ("Erzurum", "TR", "Erzurum", 400000, False, 39.9043, 41.2679),
+    ("Sivas", "TR", "Sivas", 400000, False, 39.7477, 37.0179),
+    ("Elazığ", "TR", "Elazığ", 400000, False, 38.6743, 39.2232),
+    ("Balıkesir", "TR", "Balıkesir", 330000, False, 39.6484, 27.8826),
+    ("Kütahya", "TR", "Kütahya", 250000, False, 39.4167, 29.9833),
+    ("Afyonkarahisar", "TR", "Afyonkarahisar", 250000, False, 38.7507, 30.5567),
+    ("Karaman", "TR", "Karaman", 150000, False, 37.1759, 33.2287),
+    ("Kars", "TR", "Kars", 110000, False, 40.6013, 43.0975),
+    ("Zonguldak", "TR", "Zonguldak", 100000, False, 41.4564, 31.7987),
+    ("Tatvan", "TR", "Tatvan", 70000, False, 38.5066, 42.2816),
+    ("Kapıkule", "TR", "Kapıkule", 1000, False, 41.7167, 26.3500),
+]
+
+
 def _cities(data: dict[str, Any]) -> list[Place]:
     countries = data["countries"]
     out = []
-    for row in data["places"]:
+    rows = list(data["places"])
+    index = {code: i for i, (code, _) in enumerate(countries)}
+    for name, code, local, population, capital, lat, lon in EXTRA_CITIES:
+        if code in index:
+            rows.append([name, index[code], local if local != name else "", population, "", capital, lat, lon])
+    for row in rows:
         name, country_i, local, population, alt, capital = row[:6]
         lat, lon = (row[6], row[7]) if len(row) > 7 else (None, None)
         code, country = countries[country_i]
