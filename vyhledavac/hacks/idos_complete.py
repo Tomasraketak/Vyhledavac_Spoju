@@ -459,7 +459,9 @@ class IdosCompleteHack(TravelHack):
                 trace(f"– prohlížeč ({', '.join(only)}): z/do {' → '.join(c or '?' for c in ends)} "
                       "cenu nedává (zjištěno dřív) – neptám se")
                 continue
-            if not any(_same(o, first, last) for o in cached):
+            # znovu se ptá, dokud tentýž spoj nemá v odpovědích cenu (DSB vrací
+            # Öresundståg bez ceny, SJ ho prodá – ale odpověděl jen na dřívější čas)
+            if not any(_same(o, first, last) and o.price is not None for o in cached):
                 since = first.departure - dt.timedelta(minutes=2)
                 if ready is not None:
                     since = min(since, ready + TRANSFER_SAME)

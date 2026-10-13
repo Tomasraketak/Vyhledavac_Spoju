@@ -217,6 +217,15 @@ stránku s výsledky.
 - Web ČD hledá jen vlaky. Na autobusovou zastávku nebo obec bez nádraží
   („Domanín, Vrchy“) program ČD vůbec nevolá. Jinak by 90 s čekal na
   výsledky, které nepřijdou.
+- Našeptávač zná zahraniční místa česky nebo bez cizí diakritiky (data CIS
+  JŘ: „Gdaňsk“, „Gdansk Glowny“), ne „Gdańsk“. Program zkusí jméno, jak
+  přišlo, pak české jméno z databáze měst, pak bez diakritiky; když
+  našeptávač nenabídne nic, skončí hned („stanici web ČD nezná“). Dřív se
+  bral jakýkoli viditelný seznam (i výběr „ODJEZD/PŘÍJEZD“) a hledání pak
+  90 s čekalo na výsledky.
+- Ze zemí, kde ČD nemá tarif (Švédsko), vrací spoje bez ceny. Hack
+  `idos_complete` si to po první takové odpovědi zapamatuje a na tu zemi se
+  přes prohlížeč dál neptá (každý dotaz ~20 s, jdou po jednom).
 - Po mnoha dotazech z jedné IP vrací ČD stránku bez formuláře. Program to
   hlásí jako dočasnou blokaci.
 
@@ -473,6 +482,17 @@ dopravců, `--trace`):
 | Bukurešť → Graz | FlixBus 2 107 Kč; FlixBus do Vídně + ÖBB 2 001 Kč | 2,5 min |
 | Třeboň → Paříž | ČD do Prahy + FlixBus 2 413 Kč; IDOS do Frankfurtu + SNCF 5 215 Kč | 12 min |
 | Valencie → Turín | Renfe do Barcelony + FlixBus přes Lyon 2 462 Kč | 2 min |
+
+Stres testy čistě vlakem (`--trains --hacks idos_complete --trace`,
+13. 10. 2026 na cesty 15. 10.), města nad 10 tis. obyvatel, trasa přes
+jednu až dvě třetí země. Každý pár se opakoval, dokud nevyšel:
+
+| Cesta (přes) | Co bylo potřeba opravit | Nejlevnější nalezené jízdenky | Doba |
+|---|---|---|---|
+| Rijeka → Olomouc (SI, AT) | falešné „hranice“ (Sava → Itálie, Blanca → Španělsko, „Loka(SZ)“), MÁV ptaný mimo Maďarsko, ÖBB neprodával z Chorvatska | HŽPP do Savského Marofu 236 + ÖBB do Villachu 329 + ÖBB do Olomouce 895 = 1 460 Kč | 6 min |
+| Gdańsk → Budapešť (CZ, SK) | ČD nebyly zapnuté a neznaly „Gdańsk“ (90 s timeout), navazující spoj nestihl odjezd dalšího kusu, ÖBB neprodával z Polska | ÖBB do Vídně 778 + MÁV 585 = 1 363 Kč (4 ze 4 spojů s cenou) | 7 min |
+| Malmö → Vídeň (DK, DE, CZ) | ČD ze Švédska ceny nedává (učení), ÖBB neprodával z Dánska, cache brala spoj bez ceny jako vyřízený | SJ do Kodaně 348 + ČD do Břeclavi 2 490 + ÖBB 239 = 3 078 Kč; noční vlak 7 141 Kč | 7 min |
+| Amsterdam → Bratislava (DE, AT) | prošlo napoprvé | ÖBB do Salcburku 5 927 + ÖBB 1 910 = 7 837 Kč (DB blokovaná) | 5 min |
 
 Úseky v Německu prodává hlavně DB – ze serveru, kde se zkoušelo, je DB
 blokovaná (Akamai), proto tam pomáhaly ÖBB, FlixBus a IDOS. Nejdéle trvají
