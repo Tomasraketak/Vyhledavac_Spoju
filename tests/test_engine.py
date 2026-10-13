@@ -149,3 +149,20 @@ async def test_limit_keeps_the_cheapest_not_an_arbitrary_slice():
     prices = [j.price for j in result.journeys]
     assert prices == sorted(prices)
     assert prices[0] == 300      # skutečně nejlevnější z pětice
+
+
+@pytest.mark.asyncio
+async def test_foreign_provider_gets_local_city_names():
+    seen = {}
+
+    class Recorder(FakeProvider):
+        async def search(self, query):
+            seen[self.name] = (query.origin, query.destination)
+            return []
+
+    foreign, czech = Recorder(), Recorder()
+    foreign.name, czech.name = "Cizí", "Český"
+    czech.czech_names = True
+    query = SearchQuery(origin="Praha", destination="Lublaň", departure=at(8))
+    await SearchEngine([foreign, czech]).search(query, enable_hacks=False)
+    assert seen == {"Cizí": ("Praha", "Ljubljana"), "Český": ("Praha", "Lublaň")}

@@ -51,7 +51,7 @@
   // "Jihomoravský kraj · IDS JMK · zóna 100" – nebo stát u zahraničí.
   // Přesahy: místo patří i do jiného systému ("také IDESKA zóna 932").
   const alsoText = p => Object.entries((p && p.systems) || {}).map(([s, z]) => `také ${s}${z.length ? ' ' + z.join(', ') : ''}`).join(' · ');
-  const placeMeta = p => p ? (p.country ? [p.country] : [p.kraj, p.ids, zonesText(p.zones), alsoText(p)]).filter(Boolean).join(' · ') : '';
+  const placeMeta = p => p ? (p.country ? [p.country, p.local] : [p.kraj, p.ids, zonesText(p.zones), alsoText(p)]).filter(Boolean).join(' · ') : '';
 
   // ---- stav ----------------------------------------------------------------
   const MAX_PAX = 9;
@@ -171,7 +171,7 @@
   }
 
   function placeSub(p) {
-    const parts = [PLACE_KIND[p.kind] ? PLACE_KIND[p.kind].name : ''];
+    const parts = [p.country && p.kind === 'c' ? 'město' : PLACE_KIND[p.kind] ? PLACE_KIND[p.kind].name : ''];
     if (p.obec && p.obec !== p.name) parts.push(p.obec);
     if (p.okres && p.kind === 'c' && p.okres !== p.name && p.kraj !== 'Hlavní město Praha') parts.push(`okres ${p.okres}`);
     parts.push(placeMeta(p));
@@ -622,7 +622,7 @@
       ok: 'var(--color-text)', running: 'var(--color-accent)', error: 'var(--color-accent)', blocked: 'var(--color-accent-700)',
       empty: 'var(--color-neutral-500)', off: 'var(--color-neutral-400)',
     })[st] || 'var(--color-neutral-400)';
-    const chips = S.meta.providers.map(p => {
+    const chip = p => {
       const on = S.providersOn.has(p.name);
       const st = providerStatus(p.name);
       const status = st ? st.status : (on ? 'idle' : 'off');
@@ -633,8 +633,17 @@
       if (!p.prices) notes.push('bez cen');
       const symbol = st && (st.status === 'error' || st.status === 'blocked') ? icon('triangle-alert', 12) : `<span class="dot ${status === 'running' ? 'running' : ''}" style="background:${dotColor(status)}"></span>`;
       return `<button type="button" class="prov" data-act="provider" data-key="${esc(p.name)}" aria-pressed="${on}" title="${esc(p.label)}">${symbol}<strong>${esc(p.name)}</strong>${esc(detail)}${notes.length ? `<span class="note">· ${notes.join(' · ')}</span>` : ''}</button>`;
+    };
+    // Dopravci po oblastech; klik na název oblasti zapne/vypne celou skupinu.
+    const regions = S.meta.regions || [{ key: '', label: '' }];
+    const groups = regions.map(r => {
+      const list = S.meta.providers.filter(p => (p.region || '') === r.key);
+      if (!list.length) return '';
+      const onCount = list.filter(p => S.providersOn.has(p.name)).length;
+      const state = onCount === list.length ? 'true' : onCount ? 'mixed' : 'false';
+      return `<div class="prov-group" role="group" aria-label="${esc(r.label)}"><button type="button" class="prov-region" data-act="prov-region" data-key="${esc(r.key)}" aria-pressed="${state}" title="${state === 'true' ? 'Vypnout' : 'Zapnout'} všechny dopravce: ${esc(r.label)}">${esc(r.label)}<span class="count">${onCount}/${list.length}</span></button><div class="prov-chips">${list.map(chip).join('')}</div></div>`;
     }).join('');
-    $('#providers').innerHTML = `<span class="row-label">Zdroje dat</span>${chips}<span class="prov-links"><button class="btn btn-ghost" type="button" data-act="prov-fast">rychlé</button><button class="btn btn-ghost" type="button" data-act="prov-all">vše</button></span>`;
+    $('#providers').innerHTML = `<div class="prov-head"><span class="row-label">Zdroje dat</span><span class="prov-links"><button class="btn btn-ghost" type="button" data-act="prov-fast">rychlé</button><button class="btn btn-ghost" type="button" data-act="prov-all">vše</button></span></div>${groups}`;
   }
 
   // Diagnostika: jaká verze serveru běží, které zdroje zná a jak dopadlo hledání.
@@ -955,6 +964,11 @@
     'pax-sk'(key) { const p = S.pax[Number(key)]; if (p) p.skFree = !p.skFree; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
     'prov-fast'() { S.providersOn = new Set(S.meta.providers.filter(p => !p.browser).map(p => p.name)); },
+    'prov-region'(key) {
+      const list = S.meta.providers.filter(p => (p.region || '') === key).map(p => p.name);
+      const allOn = list.every(n => S.providersOn.has(n));
+      list.forEach(n => allOn ? S.providersOn.delete(n) : S.providersOn.add(n));
+    },
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },
     disable(key) { S.providersOn.delete(key); toast(`${key} je vypnutý pro další hledání.`); },
     toggle(key) { S.open = S.open === key ? null : key; },

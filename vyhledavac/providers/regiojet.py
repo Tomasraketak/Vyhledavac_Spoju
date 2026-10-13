@@ -66,6 +66,7 @@ class RegioJetProvider(HttpProvider):
     provides_prices = True
     provides_stops = True
     countries = ("CZ", "SK", "AT", "DE", "PL", "HU", "HR", "UA")
+    czech_names = True
     referer = "https://regiojet.cz/"
     min_interval = 0.25
 

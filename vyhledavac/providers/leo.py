@@ -75,6 +75,7 @@ class LeoExpressProvider(HttpProvider):
     multi_passenger = True
     currency = "CZK"
     countries = ("CZ", "SK", "PL")
+    czech_names = True
     referer = WEB
     min_interval = 0.3
 

@@ -66,6 +66,7 @@ class BiletoProvider(HttpProvider):
     multi_passenger = True
     currency = "CZK"
     countries = ("CZ",)
+    czech_names = True
     referer = WEB
     min_interval = 0.2
 

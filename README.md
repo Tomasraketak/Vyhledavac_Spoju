@@ -334,7 +334,8 @@ vyhledavac/
 ├── money.py         kurzy ČNB
 ├── normalize.py     porovnávání názvů stanic (diakritika, aliasy)
 ├── stations.py      databáze zastávek: našeptávač, kraj, IDS, tarifní zóna
-├── data/            stations.json.gz – sestavuje tools/build_stations.py
+├── data/            stations.json.gz – sestavuje tools/build_stations.py,
+│                    cities.json.gz (evropská města) – tools/build_cities.py
 ├── registry.py      registr pluginů
 ├── engine.py        orchestrace, izolace chyb, průběžné výsledky
 ├── providers/       dopravci      (22 – viz docs/DOPRAVCI.md)
@@ -400,8 +401,14 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   s kupónem na Prahu = jízdenka na pásma 1–4 za 48 Kč místo 84 Kč. Kódy zón
   ukazuje našeptávač u zastávek.
 - **Zdroje dat** jsou přepínací čipy se živým stavem (hledám / ceny 3/5… /
-  N spojů · čas / nejezdí tam / chyba / blokováno). *Rychlé* = jen zdroje
-  bez prohlížeče.
+  N spojů · čas / nejezdí tam / chyba / blokováno), rozdělené do oblastí
+  *Česko*, *Střední Evropa* (okolní státy), *Východní*, *Západní* a
+  *Severní Evropa*; klik na název oblasti zapne/vypne celou skupinu.
+  *Rychlé* = jen zdroje bez prohlížeče.
+- **Našeptávač** zná všechny zastávky v Česku a všechna evropská města nad
+  5 000 obyvatel – česky (Mnichov, Lublaň, Kodaň), ale najde je i místním
+  nebo anglickým jménem („munchen“, „copenhagen“). Zahraničním dopravcům
+  program posílá místní jméno (Lublaň → Ljubljana), českým to české.
 - **Výsledky** přibývají průběžně, ceny pomalých dopravců (ZSSK) se
   doplňují do už zobrazených karet. Řazení (nejrychlejší, nejméně přestupů,
   nejlevnější, nejdřívější) a filtry podle dopravců se přepnou okamžitě,
@@ -436,6 +443,7 @@ python tools/build_stations.py            # --refresh = stáhnout zdroje znovu
 
 | Údaj | Zdroj |
 |---|---|
+| evropská města nad 5 000 obyvatel, česká a místní jména (`data/cities.json.gz`, `python tools/build_cities.py`) | [GeoNames](https://www.geonames.org/) (CC BY 4.0) |
 | autobusové zastávky, okres, počet spojů | CIS JŘ – JDF, [portal.cisjr.cz](https://portal.cisjr.cz/pub/jdf/) |
 | vlakové stanice a zastávky, počet vlaků | CIS JŘ – CZPTT, [portal.cisjr.cz](https://portal.cisjr.cz/pub/draha/celostatni/szdc/) |
 | kraj stanic, plné názvy a počty obyvatel obcí | © přispěvatelé [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL), Overpass API |

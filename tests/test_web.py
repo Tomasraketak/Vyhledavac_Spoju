@@ -199,6 +199,22 @@ def test_static_page_and_meta(http):
     assert json.loads(_get(http + "/api/meta")[2])["providers"][0]["name"] == "RegioJet"
 
 
+def test_provider_regions():
+    from vyhledavac.registry import PROVIDERS, load_plugins
+    from vyhledavac.web.server import REGIONS, provider_region
+
+    load_plugins()
+    region = {name: provider_region(cls) for name, cls in PROVIDERS.items()}
+    assert {region[n] for n in ("RegioJet", "ČD", "LeoExpress", "IDS")} == {"cz"}
+    assert {region[n] for n in ("DB", "ÖBB", "ZSSK", "PKP")} == {"central"}
+    assert {region[n] for n in ("MÁV", "CFR", "BDŽ", "Srbijavoz")} == {"east"}
+    assert {region[n] for n in ("SNCF", "SBB", "CP", "EuropeanSleeper")} == {"west"}
+    assert {region[n] for n in ("Vy", "DSB", "SJ")} == {"north"}
+    assert set(region.values()) <= {key for key, _ in REGIONS}
+    assert [label for _, label in REGIONS] == ["Česko", "Střední Evropa", "Východní Evropa",
+                                               "Západní Evropa", "Severní Evropa"]
+
+
 def test_station_suggestions(http):
     status, kind, body = _get(http + "/api/stations?q=" + urllib.parse.quote("brno hl") + "&limit=5")
     data = json.loads(body)

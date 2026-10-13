@@ -132,6 +132,7 @@ class EuropeanSleeperProvider(HttpProvider):
     multi_passenger = True
     currency = "EUR"
     countries = ("CZ", "DE", "NL", "BE", "FR", "CH", "IT")
+    region = "west"
     international_only = True          # Praha – Děčín se neprodává
     referer = WEB
     min_interval = 0.4

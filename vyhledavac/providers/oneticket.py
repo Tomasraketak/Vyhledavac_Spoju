@@ -120,6 +120,7 @@ class OneTicketProvider(BrowserProvider):
     provides_prices = True
     provides_stops = False
     countries = ("CZ",)
+    czech_names = True
     headless = True
 
     def _fare_key(self, passenger: Passenger) -> str:

@@ -114,8 +114,6 @@ _COUNTRY_WORDS: dict[str, tuple[str, ...]] = {
            "bacau", "deva", "alba iulia", "targu mures", "baia mare", "satu mare", "pitesti",
            "mangalia", "episcopia bihor", "rumunsko", "romania"),
 }
-_CZECH_COUNTRY = {"Rakousko": "AT", "Slovensko": "SK", "Německo": "DE", "Maďarsko": "HU",
-                  "Polsko": "PL"}
 
 
 def country_of(name: str) -> str | None:
@@ -130,7 +128,7 @@ def country_of(name: str) -> str | None:
     if place is None:
         return None
     if place.country:
-        return _CZECH_COUNTRY.get(place.country)
+        return place.code or None
     return "CZ"
 
 

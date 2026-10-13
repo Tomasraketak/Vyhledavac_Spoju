@@ -60,6 +60,8 @@ class FlixBusProvider(HttpProvider):
     provides_prices = True
     provides_stops = False
     countries = ("CZ", "SK", "AT", "DE", "PL", "HU", "FR", "IT", "NL", "BE", "ES")
+    czech_names = True
+    region = "central"
     referer = "https://www.flixbus.cz/"
     min_interval = 0.4
 

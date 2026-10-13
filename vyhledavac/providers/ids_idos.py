@@ -95,6 +95,7 @@ class IdsIdosProvider(HttpProvider):
     multi_passenger = True
     currency = "CZK"
     countries = ("CZ",)
+    czech_names = True
     referer = "https://idos.cz/"
     min_interval = 0.7
     hack_legs = False        # na dílčí úseky hacků by IDOS dostával desítky dotazů

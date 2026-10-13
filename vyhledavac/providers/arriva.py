@@ -85,6 +85,7 @@ class ArrivaProvider(HttpProvider):
     multi_passenger = True
     currency = "CZK"
     countries = ("CZ",)
+    czech_names = True
     referer = SHOP
     min_interval = 0.2
 

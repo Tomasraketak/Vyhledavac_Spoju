@@ -1,5 +1,9 @@
 """Databáze zastávek a obcí pro našeptávač a detail spoje.
 
+Zahraniční města (všechna evropská sídla nad 5 000 obyvatel) přidává
+``data/cities.json.gz`` z GeoNames (``tools/build_cities.py``) – česky
+(Mnichov, Lublaň), s místním jménem pro dopravce (München, Ljubljana).
+
 Data sestavuje ``tools/build_stations.py`` z jízdních řádů CIS JŘ (všechny
 vlaky a linkové autobusy v ČR), zastávek PID a IDS JMK a OpenStreetMap.
 U každého místa je kraj, integrovaný dopravní systém a – kde ho systém
@@ -22,22 +26,20 @@ from .normalize import _ALIASES, normalize
 log = logging.getLogger(__name__)
 
 DATA = Path(__file__).parent / "data" / "stations.json.gz"
+CITIES = Path(__file__).parent / "data" / "cities.json.gz"
 
 KIND_LABEL = {"c": "obec", "t": "vlak", "b": "autobus"}
 
-# Zahraniční cíle, které dopravci obsluhují – CIS JŘ je nezná.
+# Zahraniční nádraží, která dopravci od nás obsluhují (města jsou v cities.json.gz).
 _FOREIGN = [
-    ("Vídeň", "Rakousko", "wien|vienna"), ("Wien Hbf", "Rakousko", "viden hl n"),
-    ("Salzburg Hbf", "Rakousko", "salcburk"), ("Linz Hbf", "Rakousko", "linec"),
-    ("Graz Hbf", "Rakousko", "styrsky hradec"), ("Bratislava", "Slovensko", "pressburg"),
-    ("Bratislava hl.st.", "Slovensko", "bratislava hlavna stanica"),
-    ("Košice", "Slovensko", "kassa"), ("Žilina", "Slovensko", ""),
-    ("Mnichov", "Německo", "munchen|munich"), ("Berlín", "Německo", "berlin"),
-    ("Drážďany", "Německo", "dresden"), ("Norimberk", "Německo", "nurnberg|nuremberg"),
-    ("Pasov", "Německo", "passau"), ("Budapešť", "Maďarsko", "budapest"),
-    ("Krakov", "Polsko", "krakow"), ("Varšava", "Polsko", "warszawa|warsaw"),
+    ("Wien Hbf", "AT", "viden hl n"), ("Salzburg Hbf", "AT", "salcburk hl n"),
+    ("Linz Hbf", "AT", "linec hl n"), ("Graz Hbf", "AT", "styrsky hradec hl n"),
+    ("Bratislava hl.st.", "SK", "bratislava hlavna stanica"),
 ]
 _FOREIGN_SCORE = 150_000
+#: Zahraniční město = obyvatelé / CITY_DIVISOR (české obce mají obyvatele + spoje),
+#: takže „Ber“ nabídne Berlín, ale Beroun před Bernem.
+CITY_DIVISOR = 10
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,9 @@ class Place:
     ids_name: str = ""
     zones: tuple[str, ...] = ()
     score: int = 0
-    country: str = ""             # jen u zahraničí
+    country: str = ""             # jen u zahraničí – česky („Německo“)
+    code: str = ""                # kód země u zahraničí („DE“)
+    local: str = ""               # místní jméno pro dopravce („München“), je-li jiné
     # Všechny integrované systémy, do kterých místo patří, i přesahy
     # z jiných krajů: {"IDESKA": ("932",), "PID": ("5",)}.
     systems: dict[str, tuple[str, ...]] = field(default_factory=dict, compare=False)
@@ -62,7 +66,8 @@ class Place:
             "name": self.name, "kind": self.kind, "obec": self.obec or None,
             "okres": self.okres or None, "kraj": self.kraj or None,
             "ids": self.ids or None, "idsName": self.ids_name or None,
-            "zones": list(self.zones), "country": self.country or None,
+            "zones": list(self.zones), "country": self.country or None, "code": self.code or None,
+            "local": self.local or None,
             "systems": {k: list(v) for k, v in self.systems.items() if k != self.ids},
         }
 
@@ -82,7 +87,7 @@ class StationDB:
 
     # ---- načtení ---------------------------------------------------------------
     @classmethod
-    def from_json(cls, data: dict[str, Any]) -> StationDB:
+    def from_json(cls, data: dict[str, Any], cities: dict[str, Any] | None = None) -> StationDB:
         kraje = data["kraje"]
         ids = data["ids"]
         okresy = data["okresy"]
@@ -102,16 +107,30 @@ class StationDB:
                 zones=tuple(z for z in zones.split(",") if z), score=score, keys=keys,
                 systems=systems,
             ))
-        for name, country, alt in _FOREIGN:
+        if cities:
+            places += _cities(cities)
+            names = {code: name for code, name in cities["countries"]}
+        else:
+            names = {}
+        for name, code, alt in _FOREIGN:
             keys = (normalize(name), *(normalize(a) for a in alt.split("|") if a))
-            places.append(Place(name=name, kind="c", country=country, score=_FOREIGN_SCORE, keys=keys))
+            places.append(Place(name=name, kind="t", country=names.get(code, code), code=code,
+                                score=_FOREIGN_SCORE, keys=keys))
         places.sort(key=lambda p: -p.score)
         return cls(places)
 
     @classmethod
-    def load(cls, path: Path = DATA) -> StationDB:
+    def load(cls, path: Path = DATA, cities: Path | None = CITIES) -> StationDB:
         with gzip.open(path, "rt", encoding="utf-8") as fh:
-            return cls.from_json(json.load(fh))
+            data = json.load(fh)
+        extra = None
+        if cities is not None:
+            try:
+                with gzip.open(cities, "rt", encoding="utf-8") as fh:
+                    extra = json.load(fh)
+            except (OSError, ValueError) as exc:
+                log.warning("Databázi zahraničních měst se nepodařilo načíst: %s", exc)
+        return cls.from_json(data, extra)
 
     # ---- našeptávač -------------------------------------------------------------
     def suggest(self, query: str, limit: int = 10) -> list[Place]:
@@ -133,7 +152,7 @@ class StationDB:
                 if key.startswith(q):
                     best = 0
                     break
-                if best > 1 and _all_words(words, key):
+                if best > 1 and words[0] in key and _all_words(words, key):
                     best = 1
             if best == 0:
                 starts.append(place)
@@ -154,6 +173,7 @@ class StationDB:
         for end in range(len(words), 0, -1):
             hits = self.exact.get(" ".join(words[:end])) or self._abbreviated(words[:end])
             if hits:
+                # stejné jméno: rozhodne důležitost (Vídeň u Žďáru < Vídeň v Rakousku)
                 return max(hits, key=lambda p: (p.kind != "b", p.score))
         return None
 
@@ -169,6 +189,17 @@ class StationDB:
                     w == p or (len(w) <= 4 and p.startswith(w)) for w, p in zip(words[1:], parts[1:])):
                 out.append(place)
         return out
+
+
+def _cities(data: dict[str, Any]) -> list[Place]:
+    countries = data["countries"]
+    out = []
+    for name, country_i, local, population, alt, capital in data["places"]:
+        code, country = countries[country_i]
+        keys = (normalize(name), *(a for a in alt.split("|") if a))
+        score = population // CITY_DIVISOR * (2 if capital else 1)
+        out.append(Place(name=name, kind="c", country=country, code=code, local=local, score=score, keys=keys))
+    return out
 
 
 def _all_words(words: list[str], key: str) -> bool:
@@ -222,6 +253,18 @@ def rail_place(name: str) -> Place | None:
     hits = db.exact.get(normalize(name), [])
     trains = [p for p in hits if p.kind == "t"]
     return max(trains, key=lambda p: p.score) if trains else db.info(name)
+
+
+def provider_name(name: str) -> str:
+    """Jméno, kterému rozumí zahraniční dopravce: české exonymum zahraničního
+    města přeloží na místní jméno („Lublaň“ → „Ljubljana“), jinak beze změny."""
+    db = database()
+    if db is None or not name:
+        return name
+    best = db.info(name)
+    if best is None or not best.local or normalize(best.name) != normalize(name):
+        return name
+    return best.local
 
 
 def is_domestic(*names: str) -> bool:

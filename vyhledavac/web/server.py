@@ -260,7 +260,9 @@ class WebApp:
                 "prices": bool(getattr(cls, "provides_prices", True)),
                 "default": not getattr(cls, "needs_browser", False),
                 "countries": list(getattr(cls, "countries", ())),
+                "region": provider_region(cls),
             } for name, cls in PROVIDERS.items()],
+            "regions": [{"key": key, "label": label} for key, label in REGIONS],
             "hacks": [{"name": name, "label": short_label(getattr(cls, "label", name)),
                        "default": name in DEFAULT_HACKS} for name, cls in HACKS.items()],
             "idsSystems": [{"name": name, "example": PASS_EXAMPLES.get(name, "")}
@@ -317,6 +319,28 @@ class WebApp:
         if session.future is not None:
             session.future.cancel()
         session.finish(cancelled=True)
+
+
+#: Skupiny dopravců ve webovém rozhraní, v tomto pořadí.
+REGIONS = [("cz", "Česko"), ("central", "Střední Evropa"), ("east", "Východní Evropa"),
+           ("west", "Západní Evropa"), ("north", "Severní Evropa")]
+_REGION_OF_COUNTRY = {
+    "CZ": "cz", "DE": "central", "AT": "central", "SK": "central", "PL": "central",
+    "HU": "east", "RO": "east", "BG": "east", "RS": "east", "HR": "east", "SI": "east", "UA": "east",
+    "BA": "east", "ME": "east", "MK": "east", "AL": "east", "MD": "east", "GR": "east",
+    "FR": "west", "BE": "west", "NL": "west", "LU": "west", "CH": "west", "IT": "west", "ES": "west",
+    "PT": "west", "GB": "west", "IE": "west",
+    "NO": "north", "SE": "north", "DK": "north", "FI": "north", "IS": "north",
+}
+
+
+def provider_region(cls: Any) -> str:
+    """Oblast dopravce: výslovná ``region``, jinak podle jeho domovské (první) země."""
+    region = getattr(cls, "region", "")
+    if region:
+        return region
+    countries = getattr(cls, "countries", ()) or ("CZ",)
+    return _REGION_OF_COUNTRY.get(countries[0], "west")
 
 
 def parse_query(body: dict[str, Any]) -> SearchQuery:

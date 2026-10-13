@@ -57,6 +57,12 @@ class Provider(abc.ABC):
     min_timeout: ClassVar[float] = 0.0
     #: Země, které dopravce obsluhuje (informativní, pro filtrování fronty).
     countries: ClassVar[tuple[str, ...]] = ()
+    #: Oblast pro rozdělení dopravců ve webovém rozhraní ("cz", "central",
+    #: "east", "west", "north"); prázdná = podle první země v ``countries``.
+    region: ClassVar[str] = ""
+    #: Rozumí české podobě zahraničních měst („Lublaň“)? Ostatním engine
+    #: posílá místní jméno („Ljubljana“), viz ``stations.provider_name``.
+    czech_names: ClassVar[bool] = False
     #: Na cestách jen po Česku se dopravce neptá – vnitrostátní spoje
     #: (a jejich ceny) mají čeští dopravci, dotaz by jen zdržoval.
     international_only: ClassVar[bool] = False

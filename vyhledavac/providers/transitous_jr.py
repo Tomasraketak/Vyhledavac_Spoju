@@ -27,6 +27,7 @@ class TransitousProvider(HttpProvider):
     provides_stops = True
     currency = "CZK"
     countries = ("CZ", "SK", "AT", "DE", "PL")
+    czech_names = True
     hack_legs = False
     referer = None
     min_interval = 0.5

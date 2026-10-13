@@ -123,3 +123,37 @@ def test_from_json_minimal():
 def test_info_understands_timetable_abbreviations(name, expected, kraj):
     place = stations.place(name)
     assert place.name == expected and place.kraj == kraj
+
+
+# ---- zahraniční města (data/cities.json.gz) ------------------------------------
+@pytest.mark.parametrize("typed, expected, code", [
+    ("Mni", "Mnichov", "DE"), ("Lub", "Lublaň", "SI"), ("kodan", "Kodaň", "DK"),
+    ("munchen", "Mnichov", "DE"), ("Lisa", "Lisabon", "PT"), ("Sofi", "Sofie", "BG"),
+    ("osl", "Oslo", "NO"), ("Lon", "Londýn", "GB"), ("Bělehr", "Bělehrad", "RS"),
+])
+def test_foreign_cities_in_czech(db, typed, expected, code):
+    first = db.suggest(typed, 5)[0]
+    assert (first.name, first.code) == (expected, code)
+
+
+def test_foreign_city_does_not_hide_czech_town(db):
+    found = names(db.suggest("Ber", 6))
+    assert "Beroun" in found and found.index("Beroun") < found.index("Bern")
+
+
+def test_provider_name_translates_exonyms():
+    assert stations.provider_name("Lublaň") == "Ljubljana"
+    assert stations.provider_name("Curych") == "Zürich"
+    assert stations.provider_name("Kodaň") == "København"
+    assert stations.provider_name("Vídeň") == "Wien"            # ne obec Vídeň u Žďáru
+    assert stations.provider_name("Praha") == "Praha"
+    assert stations.provider_name("Mnichovo Hradiště") == "Mnichovo Hradiště"
+    assert stations.provider_name("Ljubljana") == "Ljubljana"
+
+
+def test_country_of_any_european_city():
+    from vyhledavac import geo
+
+    assert [geo.country_of(n) for n in ("Lublaň", "Tallinn", "Porto", "Most", "Kodaň")] == \
+        ["SI", "EE", "PT", "CZ", "DK"]
+    assert not stations.is_domestic("Praha", "Vídeň")

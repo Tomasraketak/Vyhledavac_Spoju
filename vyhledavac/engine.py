@@ -19,6 +19,7 @@ Orchestruje dopravce, filtry a travel hacky. Klíčové vlastnosti:
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time
 from decimal import Decimal
@@ -195,7 +196,8 @@ class SearchEngine:
 
             async with self._semaphore:
                 try:
-                    return await asyncio.wait_for(provider.run(query, progress), timeout=limit)
+                    asked = query if getattr(provider, "czech_names", False) else local_query(query)
+                    return await asyncio.wait_for(provider.run(asked, progress), timeout=limit)
                 except asyncio.TimeoutError:
                     log.warning("%s: překročen časový limit %.0fs", provider.name, limit)
                     if latest and latest[0].journeys:
@@ -286,6 +288,16 @@ class SearchEngine:
 
     async def __aexit__(self, *exc: Any) -> None:
         await self.aclose()
+
+
+def local_query(query: SearchQuery) -> SearchQuery:
+    """Dotaz s místními jmény zahraničních měst („Lublaň“ → „Ljubljana“)."""
+    from . import stations
+
+    origin, destination = stations.provider_name(query.origin), stations.provider_name(query.destination)
+    if (origin, destination) == (query.origin, query.destination):
+        return query
+    return dataclasses.replace(query, origin=origin, destination=destination)
 
 
 def drop_priced_duplicates(journeys: list[Journey]) -> list[Journey]:
