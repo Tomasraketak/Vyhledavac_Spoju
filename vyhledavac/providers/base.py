@@ -289,16 +289,15 @@ class BrowserProvider(Provider):
 
 
 #: Dopravci, kteří cenu zjišťují spoj po spoji (proklikem / dotazem na každý
-#: spoj), oceňují jen první spoje: nejvýš ``PRICE_SCOPE_COUNT`` a jen do
-#: ``PRICE_SCOPE_AHEAD`` od zadaného odjezdu – co nastane dřív. Spoje za tím
-#: se neukazují vůbec (bez ceny by jen překážely), takže výsledek je vždy s cenou.
+#: spoj), oceňují jen první ``PRICE_SCOPE_COUNT`` spoje od zadaného odjezdu
+#: (v celém okně hledání, bez časového limitu). Spoje za nimi se neukazují
+#: vůbec (bez ceny by jen překážely), takže výsledek je vždy s cenou.
 PRICE_SCOPE_COUNT = 3
-PRICE_SCOPE_AHEAD = dt.timedelta(hours=4, minutes=15)
 
 
 def price_scope(journeys: Sequence[Journey], query: SearchQuery,
                 count: int = PRICE_SCOPE_COUNT) -> list[Journey]:
-    """Spoje, u kterých se má zjistit cena: první ``count`` v okně 4:15 h."""
+    """Spoje, u kterých se má zjistit cena: první ``count`` od zadaného odjezdu."""
     until = scope_end(query, [j.departure for j in journeys])
     ordered = sorted((j for j in journeys if j.departure <= until), key=lambda j: (j.departure, j.arrival))
     return ordered[:max(count, 1)]
@@ -332,12 +331,9 @@ def local_times(journeys: Sequence[Journey]) -> None:
                     stop.departure = stop.departure.astimezone(zone(stop.name))
 
 
-def scope_end(query: SearchQuery, departures: Sequence[dt.datetime]) -> dt.datetime:
-    """Konec okna 4:15 h – od zadaného odjezdu, nebo od prvního spoje, když
-    první jede až později (Bukurešť → Bratislava jednou denně v 16:00)."""
-    until = query.departure + PRICE_SCOPE_AHEAD
-    first = min((d for d in departures if d >= query.departure), default=query.departure)
-    return until if first <= until else first + PRICE_SCOPE_AHEAD
+def scope_end(query: SearchQuery, departures: Sequence[dt.datetime] = ()) -> dt.datetime:
+    """Do kdy se oceňuje: celé okno hledání (omezení je jen počet spojů)."""
+    return query.window_end
 
 
 def _right_place(journey: Journey, query: SearchQuery) -> bool:

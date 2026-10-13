@@ -19,7 +19,7 @@ Městská doprava na začátku a na konci cesty (tramvaj na nádraží) se z tra
 vypustí – spoj začíná a končí na nádraží. MHD uprostřed (metro mezi nádražími)
 zůstane jako úsek „MHD“ bez ceny (jízdenku koupíte na místě).
 
-Ocení se první 3 spoje do 4:15 h (jako u ostatních dopravců spoj po spoji).
+Ocení se první 3 spoje (jako u ostatních dopravců spoj po spoji).
 """
 
 from __future__ import annotations

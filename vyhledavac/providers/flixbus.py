@@ -199,10 +199,15 @@ class FlixBusProvider(HttpProvider):
         # "total" je bez poplatku platformy, který se u FlixBusu platí vždy.
         # Porovnávat chceme to, co člověk skutečně zaplatí.
         total = price_block.get("total_with_platform_fee", price_block.get("total"))
-        if raw.get("status") in {"sold_out", "unavailable"} or raw.get("available", {}).get("seats") == 0:
+        seats = (raw.get("available") or {}).get("seats")
+        if raw.get("status") in {"sold_out", "unavailable", "full"} or seats == 0:
             status = FareStatus.SOLD_OUT
+        if total is not None and Decimal(str(total)) <= 0:
+            # 0 Kč = spoj se už neprodává (odjel / zrušen / vyprodán), ne jízdenka zdarma
+            total = None
+            if status is FareStatus.PRICED:
+                status = FareStatus.SOLD_OUT
         if total is not None:
-            seats = (raw.get("available") or {}).get("seats")
             fares.append(
                 self.make_fare(
                     Decimal(str(total)),

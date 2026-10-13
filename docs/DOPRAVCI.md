@@ -368,6 +368,18 @@ IREDO, DÚK, IDPK, VDV, IDZK, IDSOK, ODIS). IDS KK zapojený není.
    - Brno → Malacky = ČD/ZSSK celé, jinak Brno → Kúty (ČD) + Kúty →
      Malacky (ZSSK).
 
+   Stejně se ocení i **spoje dopravců bez ceny** s celou trasou (ČD Třeboň →
+   Brašov: do Rumunska ČD neprodá, MÁV z Budapešti ano) a regionální autobus
+   z plánovače, který žádný e-shop neprodá (Třeboň → Budějovice linkou
+   340100): ten dostane cenu podle **tarifu IDS** kraje (IDESKA 49 Kč), když
+   linka v systému jede. Zahraniční místo, které IDOS nezná, IDS nehledá
+   (dřív „Brašov“ vyložil jako Brašovskou uličku v Týně nad Vltavou); IDOS
+   zná cizí města často jen bez diakritiky („Brasov; Rumunsko“).
+
+   Třeboň → Brašov (15. 10. 2026, ověřeno): R 726 + RJ 1035 + D 347 Dacia
+   1830 Kč (IDOS Třeboň → Kelenföld + MÁV dál), autobus + EC 333 + rjx +
+   IC 473 ISTER 2223 Kč (IDESKA 49 + MÁV 1560 + 614), FlixBus přímo 1716 Kč.
+
    Země stanice se určuje podle trasy: „Jesenice“ mezi Villachem a Lublaní
    je slovinská, „Rybník“ ve vlaku z Budějovic česká (ne polský Rybnik).
 
@@ -384,8 +396,7 @@ Bukurešť → Graz, Vídeň → Mnichov). Zahraniční město se do IDOS zadá
 jednoznačně podle jeho našeptávače (`Ajax/SearchTimetableObjects`,
 JSONP): „Košice; Slovensko“, „Kraków; Polsko“ – samotné „Košice“ IDOS
 odmítne jako nejednoznačné. Kde IDOS spojení nenajde (Valencie → Turín,
-Kraków → Hamar), zbývá plánovač Transitous. Ocení se první 3 spoje do
-4:15 h.
+Kraków → Hamar), zbývá plánovač Transitous. Ocení se první 3 spoje.
 
 **Jízdenka z e-shopu IDOS:** IDOS ke spoji nabídne jízdenku
 (`Ajax/GetPriceOffer` s `handle` a `connId` z výsledků) – prodává ji ČD,
@@ -446,7 +457,7 @@ Evropy) – vlaky, FlixBus i MHD s dopravcem každého úseku, bez cen.
 2. MHD a chůze na začátku a konci trasy se vypustí, spoj začíná a končí na
    nádraží. MHD uprostřed (metro mezi pařížskými nádražími, S-Bahn po
    Berlíně, kratší než 12 km) zůstane jako úsek „MHD“ bez ceny.
-3. První 3 spoje do 4:15 h vrátí bez ceny s rozpisem „koupit celé“ a hack
+3. První 3 spoje vrátí bez ceny s rozpisem „koupit celé“ a hack
    `idos_complete` je ocení po kusech (viz IDS výše): prodejce musí
    obsluhovat všechny země kusu, FlixBus jen autobusy, ČD přes prohlížeč
    jen vlaky; dělí se v přestupech a na hranicích uvnitř vlaku, nejvýš
@@ -1077,8 +1088,8 @@ od 18 dospělý. Senior 67+ se posílá s kategorií `senior-citizen` (−50 %).
 ## Cena spoj po spoji (ZSSK, SJ, CFR, PKP, IDS, BDŽ)
 
 Dopravci, u kterých cena znamená zvláštní dotaz nebo průchod nákupem pro
-**každý spoj**, oceňují jen první spoje: nejvýš **3 spoje** a jen do
-**4 h 15 min** od zadaného odjezdu – co nastane dřív (`price_scope`
+**každý spoj**, oceňují jen první **3 spoje** od zadaného odjezdu
+(kdykoli v okně hledání, bez časového limitu; `price_scope`
 v `providers/base.py`). Spoje za tím se neukazují, takže výsledky těchto
 dopravců mají vždy cenu. U ZSSK lze počet změnit volbou `price_limit`.
 

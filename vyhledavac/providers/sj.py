@@ -48,7 +48,7 @@ Na co si dát pozor:
   Osla, Kodaně, Narviku (a v létě nočním vlakem do Hamburku a Berlína).
   Zahraniční konec stačí, druhý musí ležet ve Švédsku.
 * Ceny se ptáme spoj po spoji (jako web) – jen u spojů v časovém okně,
-  jen u prvních 3 spojů do 4:15 h od odjezdu (``price_scope``). Jízdní řád se mezitím ukáže přes ``publish``.
+  jen u prvních 3 spojů od zadaného odjezdu (``price_scope``). Jízdní řád se mezitím ukáže přes ``publish``.
 * ``available: false`` s ``departureStatus`` ``NO_DEPARTURE`` = spoj SJ
   neprodává (ještě není v prodeji nebo nejede), ``FULLY_BOOKED`` = vyprodáno.
 * Cena je v SEK včetně případného poplatku za rezervaci („Booking fee“) cizího

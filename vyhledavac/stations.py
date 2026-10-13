@@ -171,6 +171,15 @@ class StationDB:
         Nejdřív přesná shoda, pak čím dál kratší začátek jména – „Brno, ÚAN
         Zvonařka (stan. 5)“ tak skončí aspoň u obce Brno.
         """
+        head, slash, river = name.partition("/")
+        if slash and river.strip():
+            # rakouský zápis „Braunau/Inn“, „Neumarkt/Wallersee“ = „Braunau am Inn“ …
+            # (samotné „Neumarkt“ je v databázi italská Egna)
+            river = river.split()[0]
+            for joint in ("am", "an der", "in", "im", "ob der", "bei"):
+                hits = self.exact.get(normalize(f"{head} {joint} {river}"))
+                if hits:
+                    return max(hits, key=lambda p: (p.kind != "b", p.score))
         words = [_alias(w) for w in normalize(name).split()]
         for variant in (words, _folded(words)):
             for end in range(len(variant), 0, -1):
@@ -329,6 +338,21 @@ def provider_name(name: str) -> str:
     if not best.local and normalize(name) in {normalize(x) for x in EXONYMS.get(best.name, ())}:
         return best.name              # „Segedín“ → „Szeged“ (v databázi je jen místní jméno)
     return name
+
+
+#: Jak daleko smí stanice dopravce ležet od zadaného města, aby to bylo ono.
+NEAR_KM = 60.0
+
+
+def far_from(name: str, lat: float | None, lon: float | None, km: float = NEAR_KM) -> bool:
+    """Leží stanice dopravce (souřadnice) prokazatelně jinde než zadané město?
+    „Brašov“ → „Braunau/Inn“ je 1000 km vedle. Neznámé souřadnice = nevíme (False)."""
+    from . import geo
+
+    found = place(name)
+    if found is None or found.lat is None or found.lon is None or lat is None or lon is None:
+        return False
+    return geo.km((found.lat, found.lon), (lat, lon)) > km
 
 
 def countries_for(name: str) -> set[str]:

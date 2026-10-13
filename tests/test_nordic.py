@@ -85,7 +85,7 @@ def test_vy_offer_passengers():
     assert body["passengers"][1]["categories"] == [{"type": "senior-citizen"}]
 
 
-def test_price_scope_three_or_4h15():
+def test_price_scope_first_three():
     from vyhledavac.models import Journey, Leg
     from vyhledavac.providers.base import price_scope
 
@@ -95,4 +95,5 @@ def test_price_scope_three_or_4h15():
                                                arrival=t + dt.timedelta(hours=1), mode=Mode.TRAIN)])
     q = query("Stockholm", "Göteborg")                      # odjezd od 7:00
     assert [x.departure.hour for x in price_scope([j(9), j(7, 30), j(8), j(10)], q)] == [7, 8, 9]
-    assert [x.departure.hour for x in price_scope([j(7, 30), j(11, 20), j(12)], q)] == [7]
+    # bez časového limitu – i spoje za víc než 4 h od odjezdu (jen v okně hledání)
+    assert [x.departure.hour for x in price_scope([j(7, 30), j(11, 20), j(12)], q)] == [7, 11, 12]

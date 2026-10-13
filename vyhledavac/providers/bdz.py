@@ -29,7 +29,7 @@ Na co si dát pozor:
 * Ceny jsou orientační („Цената може да се различава…“) – BDŽ samo píše, že
   přesnou cenu řekne pokladna / e-shop. Spoj proto nese poznámku.
 * Cena se zjišťuje dotazem na každý spoj – jen první spoje (``price_scope``:
-  3 spoje, nejvýš 4:15 h od odjezdu). Ke každému dva dotazy (trasa a cena).
+  první 3 spoje od zadaného odjezdu). Ke každému dva dotazy (trasa a cena).
 * Bulharsko platí eurem (od 2026), ceny jsou v EUR.
 * Na stránce nejsou latinkou jména stanic, jen slugy – podle nich hledáme.
 

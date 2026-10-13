@@ -35,7 +35,7 @@ Na co si dát pozor:
 * Časy jsou rumunské (EET/EEST, o hodinu víc než v Praze).
 * Hledá se jen jeden den od zadané hodiny (prodej nejvýš 30 dní dopředu).
 * Odpověď na hledání má i 2 MB HTML – ceny zjišťujeme jen pro spoje v okně
-  (jen první 3 spoje do 4:15 h od odjezdu, ``price_scope``).
+  (jen první 3 spoje od odjezdu, ``price_scope``).
 """
 
 from __future__ import annotations

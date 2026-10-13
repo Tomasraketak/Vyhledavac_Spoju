@@ -407,11 +407,23 @@ class OebbShop:
         stations = [s for s in (data or []) if isinstance(s, dict) and s.get("number")]
         if not stations:
             raise StationNotFoundError(self.provider, f"shop ÖBB nezná stanici {name!r}")
+        from .. import stations as places
         from ..normalize import best_match
 
+        stations = [s for s in stations if not places.far_from(name, *_shop_coords(s))]
         idx = best_match(name, [str(s.get("name") or s.get("meta") or "") for s in stations],
                          threshold=0.3)
-        return stations[idx if idx is not None else 0]
+        if idx is None:
+            # žádné podobné jméno („Vídeň“ × „Wien Hbf“): první návrh, jen když leží
+            # ve stejné zemi – „Brašov“ shop nezná a nabídne „Braunau/Inn“
+            from .. import geo
+
+            first = str(stations[0].get("name") or stations[0].get("meta") or "") if stations else ""
+            asked, got = geo.country_of(name), geo.country_of(first)
+            if not stations or (asked and got and asked != got):
+                raise StationNotFoundError(self.provider, f"shop ÖBB nezná stanici {name!r}")
+            idx = 0
+        return stations[idx]
 
     async def search(self, origin: str, destination: str, when: dt.datetime,
                      *, pages: int = 2) -> list[ShopOffer]:
@@ -473,6 +485,18 @@ class OebbShop:
 
     async def close(self) -> None:
         await self.transport.close()
+
+
+def _shop_coords(station: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Souřadnice stanice ze shopu, pokud je posílá (``latitude``/``longitude``)."""
+    try:
+        lat, lon = station.get("latitude"), station.get("longitude")
+        if lat is None or lon is None:
+            return None, None
+        lat, lon = float(lat), float(lon)
+        return (lat / 1e6, lon / 1e6) if abs(lat) > 1000 else (lat, lon)
+    except (TypeError, ValueError):
+        return None, None
 
 
 def _adult() -> dict[str, Any]:

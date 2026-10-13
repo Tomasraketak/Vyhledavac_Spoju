@@ -25,7 +25,7 @@ import logging
 from .. import geo, idos, stations
 from ..errors import StationNotFoundError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery
-from ..normalize import normalize
+from ..normalize import normalize, strip_accents
 from ..registry import PROVIDERS
 from .base import HttpProvider
 
@@ -62,7 +62,7 @@ class TcddProvider(HttpProvider):
         if cached:
             return cached
         chosen = None
-        for text in dict.fromkeys((place.local or place.name, name, place.name)):
+        for text in dict.fromkeys((place.local or place.name, name, place.name, strip_accents(place.local or place.name))):
             page = await self.client.get_text(idos.ajax_url("SearchTimetableObjects", idos.TRAINS),
                                               params=idos.suggest_params(text), referer=self.referer)
             items = idos.parse_suggest(page)

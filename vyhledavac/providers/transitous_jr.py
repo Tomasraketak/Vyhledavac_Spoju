@@ -35,7 +35,36 @@ class TransitousProvider(HttpProvider):
     async def search(self, query: SearchQuery) -> list[Journey]:
         connections = await transitous.search(self.client, self.cache, self.name, query.origin,
                                               query.destination, query.departure, query.window_end)
-        return [to_journey(conn) for conn in connections]
+        journeys = [to_journey(conn) for conn in connections]
+        return [j for j in (_trim_foreign_ends(j, query) for j in journeys) if j is not None]
+
+
+#: MHD na konci cesty v cizím městě (autobus 23 z nádraží Brašov do čtvrti
+#: Căprioara) – spoj má končit na nádraží / autobusovém nádraží města.
+LOCAL_MINUTES = 30
+
+
+def _is_local(leg: Leg) -> bool:
+    if leg.mode in (Mode.TRAM, Mode.METRO, Mode.WALK):
+        return True
+    return (leg.mode is Mode.BUS and "flix" not in (leg.carrier or "").lower()
+            and leg.duration.total_seconds() <= LOCAL_MINUTES * 60)
+
+
+def _trim_foreign_ends(journey: Journey, query: SearchQuery) -> Journey | None:
+    from .. import geo
+
+    legs = list(journey.legs)
+    if geo.country_of(query.destination) not in (None, "CZ"):
+        while len(legs) > 1 and _is_local(legs[-1]):
+            legs.pop()
+    if geo.country_of(query.origin) not in (None, "CZ"):
+        while len(legs) > 1 and _is_local(legs[0]):
+            legs.pop(0)
+    if not legs:
+        return None
+    journey.legs = legs
+    return journey
 
 
 def to_journey(conn: idos.IdosConnection) -> Journey:

@@ -8,6 +8,7 @@ from typing import Any
 
 from .. import stations
 from ..models import Fare, Journey, Leg, Stop
+from ..normalize import carrier_name
 
 
 def _time(value: dt.datetime | None) -> str | None:
@@ -27,7 +28,7 @@ def leg_to_dict(leg: Leg) -> dict[str, Any]:
     return {
         "mode": leg.mode.value,
         "line": leg.line,
-        "carrier": leg.carrier,
+        "carrier": carrier_name(leg.carrier),
         "from": leg.origin,
         "to": leg.destination,
         "dep": _time(leg.departure),

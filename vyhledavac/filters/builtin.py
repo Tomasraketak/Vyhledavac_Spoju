@@ -187,7 +187,11 @@ class Deduplicate(Filter):
                 if loser.provider != winner.provider:
                     winner.notes.append(f"trasa podle {loser.provider}")
             best[key] = winner
-        return list(best.values())
+        # Spoj bez ceny, ke kterému hack našel jízdenky (tentýž odjezd i příjezd):
+        # stačí ten s cenou – jinak se ve výpisu tentýž spoj ukáže dvakrát.
+        priced_hacks = {(j.departure, j.arrival) for j in best.values() if j.is_hack and j.price is not None}
+        return [j for j in best.values()
+                if j.is_hack or j.price is not None or (j.departure, j.arrival) not in priced_hacks]
 
 
 @FILTERS.register()

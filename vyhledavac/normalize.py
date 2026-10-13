@@ -171,3 +171,36 @@ def best_match(query: str, candidates: list[str], threshold: float = 0.3) -> int
         if score > best_score:
             best_idx, best_score = idx, score
     return best_idx
+
+
+#: Jednotné jméno dopravce pro výpis a filtr: totéž ČD píše IDOS „České dráhy,
+#: a.s.“, Transitous „Ceske Drahy“ a ÖBB „OEBB Personenverkehr AG Kundenservice“.
+_CARRIERS: list[tuple[tuple[str, ...], str]] = [
+    (("ceske drahy", "cd"), "ČD"),
+    (("oebb", "obb", "osterreichische bundesbahnen"), "ÖBB"),
+    (("flixbus", "flixtrain"), "FlixBus"),
+    (("mav", "magyar allamvasutak"), "MÁV"),
+    (("zssk", "zeleznicna spolocnost slovensko"), "ZSSK"),
+    (("regiojet", "student agency"), "RegioJet"),
+    (("leo express",), "Leo Express"),
+    (("deutsche bahn", "db fernverkehr", "db regio", "db"), "DB"),
+    (("cfr calatori", "cfr"), "CFR Călători"),
+    (("arriva",), "Arriva"),
+    (("pkp intercity",), "PKP Intercity"),
+    (("wiener linien",), "Wiener Linien"),
+    (("tcdd",), "TCDD"),
+]
+
+
+def carrier_name(name: str) -> str:
+    """Sjednocené jméno dopravce („České dráhy, a.s.“ → „ČD“); neznámé beze změny."""
+    if not name:
+        return name
+    import re
+
+    name = re.sub(r"\s*\((?:data from|daten von)[^)]*\)", "", name, flags=re.I).strip() or name
+    words = " " + normalize(name.replace("-", " ")) + " "
+    for keys, canonical in _CARRIERS:
+        if any(f" {k} " in words for k in keys):
+            return canonical
+    return name

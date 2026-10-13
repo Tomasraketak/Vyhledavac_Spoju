@@ -6,8 +6,8 @@ autobusů a MHD. Tenhle „dopravce“ tedy:
 
 1. Zeptá se jen, když obě místa leží ve stejném integrovaném systému,
    který umíme spočítat (zóny míst z databáze zastávek).
-2. Načte z IDOS spojení (``vyhledavac.idos``) – oceňuje první 3 spoje do
-   4:15 h od odjezdu (cena potřebuje detail každého spoje).
+2. Načte z IDOS spojení (``vyhledavac.idos``) – oceňuje první 3 spoje od
+   zadaného odjezdu (cena potřebuje detail každého spoje).
 3. U každého úseku ověří, že platí jízdenka IDS: vlak ČD kategorie Os/Sp/R
    (Ex/IC jen IDESKA na vybraných tratích, EC/railjet ne), autobus/MHD jen linka zařazená do systému – podle
    detailu spoje v IDOS („linka 300 [IDESKA]“) nebo seznamu linek z JDF
@@ -35,7 +35,7 @@ from typing import Any
 from .. import geo, idos, railnet, stations, transitous
 from ..errors import BlockedError, RateLimitedError, StationNotFoundError, TransientProviderError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
-from ..normalize import normalize, same_place
+from ..normalize import normalize, same_place, strip_accents
 from ..registry import PROVIDERS
 from ..trace import trace
 from .base import PRICE_SCOPE_COUNT, HttpProvider, scope_end
@@ -141,19 +141,22 @@ class IdsIdosProvider(HttpProvider):
         place = stations.place(name)
         if place is None or not place.code:
             return await self._czech_stop(name) if "," in name else name
-        key = f"idos-name:{normalize(name)}"
+        key = f"idos-name2:{normalize(name)}"
         cached = self.cache.get(self.name, key)
         if cached:
             return cached
-        chosen = name
-        for text in dict.fromkeys((place.name, name, place.local)):
-            if not text:
-                continue
+        chosen = None
+        # IDOS zná cizí místa často jen bez diakritiky („Brasov“; „Brašov“ našeptá
+        # Brašovskou uličku v Týně nad Vltavou)
+        texts = (place.name, name, place.local, strip_accents(place.local or place.name))
+        for text in dict.fromkeys(t for t in texts if t):
             page = await self.client.get_text(idos.SUGGEST, params=idos.suggest_params(text), referer=self.referer)
-            found = idos.pick_foreign(idos.parse_suggest(page), place.country)
-            if found:
-                chosen = found
+            chosen = idos.pick_foreign(idos.parse_suggest(page), place.country)
+            if chosen:
                 break
+        if not chosen:
+            # holé jméno by IDOS vyložil jako české místo – radši nic
+            raise StationNotFoundError(self.name, f"IDOS nezná zahraniční místo {name!r}")
         self.cache.set(self.name, key, chosen, ttl=NAME_TTL)
         return chosen
 

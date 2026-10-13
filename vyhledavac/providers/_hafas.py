@@ -122,8 +122,13 @@ class HafasClient:
         if not locations:
             raise StationNotFoundError(self.provider, f"stanice {name!r} nenalezena")
 
+        from .. import stations
         from ..normalize import best_match
 
+        # stanice stovky km od zadaného města nebereme („Brasov“ ≠ „Braunau/Inn …“)
+        locations = [loc for loc in locations if not stations.far_from(name, *_coords(loc))]
+        if not locations:
+            raise StationNotFoundError(self.provider, f"stanice {name!r} nenalezena (jen jinde se stejným začátkem)")
         names = [str(loc.get("name", "")) for loc in locations]
         idx = best_match(name, names, threshold=0.3)
         chosen = locations[idx if idx is not None else 0]
@@ -156,6 +161,14 @@ class HafasClient:
         if tariff:
             req["trfReq"] = tariff
         return await self.call("TripSearch", req, cfg={"polyEnc": "GPA"})
+
+
+def _coords(loc: dict[str, Any]) -> tuple[float | None, float | None]:
+    """Souřadnice místa z HAFASu (mikrostupně) jako (šířka, délka)."""
+    crd = loc.get("crd") or {}
+    if isinstance(crd.get("x"), int) and isinstance(crd.get("y"), int):
+        return crd["y"] / 1e6, crd["x"] / 1e6
+    return None, None
 
 
 def parse_connections(res: dict[str, Any], provider: str, tz=DEFAULT_TZ) -> list[Journey]:

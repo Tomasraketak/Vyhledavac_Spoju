@@ -247,6 +247,21 @@ def test_search_and_event_stream(http):
     assert events[-1]["done"] and events[-1]["journeys"][0]["price"] == 199.0
 
 
+def test_diagnostics_download(http):
+    status, body = _post(http + "/api/search", {"from": "Třeboň", "to": "Brašov",
+                                                "date": "2026-10-01", "time": "07:00"})
+    url = f"{http}/api/search/{body['id']}/diagnostics.txt?ui=" + urllib.parse.quote("Skrytí dopravci: –")
+    with urllib.request.urlopen(url, timeout=5) as r:
+        text = r.read().decode("utf-8")
+        assert r.headers.get("Content-Type").startswith("text/plain")
+        assert 'filename="diagnostika_Trebon-Brasov_2026-10-01_0700.txt"' in r.headers.get("Content-Disposition")
+    assert "Odkud: Třeboň" in text and "Kam: Brašov" in text
+    assert "== Výsledné spoje (1) ==" in text and "RegioJet" in text and "199 Kč" in text
+    assert "Skrytí dopravci: –" in text and "== Co vrátili dopravci" in text
+    with pytest.raises(urllib.error.HTTPError):
+        _get(f"{http}/api/search/neznamy/diagnostics.txt")
+
+
 def test_search_validation_error_is_readable(http):
     status, body = _post(http + "/api/search", {"from": "", "to": "Brno"})
     assert status == 400 and "odkud" in body["error"]

@@ -26,14 +26,14 @@ def test_hafas_time_with_station_offset():
     assert _parse_time(dt.date(2026, 10, 15), "160000", DEFAULT_TZ, 120).astimezone(DEFAULT_TZ).hour == 16
 
 
-def test_price_scope_starts_at_first_train_when_route_is_sparse():
+def test_price_scope_sparse_route():
     def j(hour):
         t = dt.datetime(2026, 10, 15, hour, tzinfo=DEFAULT_TZ)
         return Journey(provider="x", legs=[Leg(origin="a", destination="b", departure=t,
                                                arrival=t + dt.timedelta(hours=10), mode=Mode.TRAIN)])
     q = SearchQuery("Bukurešť", "Bratislava", dt.datetime(2026, 10, 15, 6, tzinfo=DEFAULT_TZ))
-    # jediný vlak v 15:00 – dřív by se kvůli oknu 4:15 h od 6:00 vůbec neocenil
-    assert [x.departure.hour for x in price_scope([j(15), j(17), j(23)], q)] == [15, 17]
+    # první tři vlaky, ať jedou kdykoli v okně hledání
+    assert [x.departure.hour for x in price_scope([j(18), j(15), j(16), j(17)], q)] == [15, 16, 17]
 
 
 def test_night_train_candidates_amsterdam_bratislava():

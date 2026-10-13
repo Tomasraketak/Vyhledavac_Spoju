@@ -608,7 +608,7 @@
     const n = visibleJourneys().length, total = S.data.journeys.length;
     const hidden = total - n;
     head.innerHTML = `<h2>${esc(q.from)} → ${esc(q.to)}</h2>
-      <div class="meta">${dateT} · odjezd od ${hhmm(q.departure)} · ${n} ${pl(n, 'spojení', 'spojení', 'spojení')}${hidden > 0 ? ` (${hidden} skryto filtry)` : ''}${S.searching ? ' · hledám dál…' : ''}</div>`;
+      <div class="meta">${dateT} · odjezd od ${hhmm(q.departure)} · ${n} ${pl(n, 'spojení', 'spojení', 'spojení')}${hidden > 0 ? ` (${hidden} skryto filtry)` : ''}${S.searching ? ' · hledám dál…' : ''}${S.sid ? ` · <button type="button" class="link-btn" data-act="diag-download" title="Textový soubor se vším o tomto hledání – pošlete ho místo snímků obrazovky">${icon('download', 13)} diagnostika (.txt)</button>` : ''}</div>`;
   }
 
   function providerStatus(name) {
@@ -684,10 +684,35 @@
     return lines.join('\n');
   }
 
+  // Stav rozhraní pro diagnostický soubor (filtry, skryté spoje, chyby v prohlížeči).
+  function uiSummary() {
+    const total = S.data ? S.data.journeys.length : 0;
+    const lines = [
+      `Zobrazeno ${visibleJourneys().length} z ${total} spojení, řazení ${S.sort}, měna ${S.cur}`,
+      `Filtry: druhy ${[...S.modes].join(', ') || '–'}, přestupy ${S.maxT}, jen přímé ${S.direct ? 'ano' : 'ne'}, rezerva +${S.buffer} min, jen s cenou ${S.onlyPriced ? 'ano' : 'ne'}, skrýt dražší i pomalejší ${S.pareto ? 'ano' : 'ne'}, skrýt horší se stejným odjezdem ${S.sameDep ? 'ano' : 'ne'}`,
+      `Skrytí dopravci: ${[...S.off].join(', ') || '–'}`,
+      `Zapnuté zdroje v prohlížeči: ${S.providersOn ? [...S.providersOn].join(', ') : '–'}`,
+      `Prohlížeč: ${navigator.userAgent}`,
+    ];
+    if (S.staleServer) lines.push('POZOR: server byl mezitím vyměněn za jinou verzi.');
+    if (S.clientError) lines.push(`Chyba v prohlížeči: ${S.clientError}`);
+    return lines.join('\n');
+  }
+
+  function downloadDiag() {
+    if (!S.sid) { toast('Nejdřív něco vyhledejte.'); return; }
+    const a = document.createElement('a');
+    a.href = `/api/search/${S.sid}/diagnostics.txt?ui=${encodeURIComponent(uiSummary())}`;
+    a.download = '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
   function renderDiag() {
     const body = $('#diag-body');
     if (!body || !$('#diag').open) return;
-    body.innerHTML = `<pre>${esc(diagText())}</pre><button class="btn btn-ghost" type="button" data-act="diag-copy">kopírovat</button>`;
+    body.innerHTML = `<pre>${esc(diagText())}</pre><button class="btn btn-ghost" type="button" data-act="diag-copy">kopírovat</button>${S.sid ? '<button class="btn btn-ghost" type="button" data-act="diag-download">stáhnout celou diagnostiku hledání (.txt)</button>' : ''}`;
   }
 
   function renderProblems() {
@@ -976,6 +1001,7 @@
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },
     disable(key) { S.providersOn.delete(key); toast(`${key} je vypnutý pro další hledání.`); },
     toggle(key) { S.open = S.open === key ? null : key; },
+    'diag-download'() { downloadDiag(); },
     'diag-copy'() {
       navigator.clipboard.writeText(diagText()).then(() => toast('Diagnostika je ve schránce.'), () => toast('Kopírování se nepovedlo – označte text ručně.'));
     },

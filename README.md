@@ -482,6 +482,14 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   commit), cesta k záznamu serveru, které zdroje server zná a které jsou
   zapnuté, moduly, které se nenačetly, a jak dopadl každý zdroj při
   posledním hledání. Tlačítko *kopírovat* ho dá do schránky.
+- **Diagnostický soubor:** po každém hledání (i během něj) je v hlavičce
+  výsledků odkaz *diagnostika (.txt)* – stáhne textový soubor
+  `diagnostika_Odkud-Kam_datum_čas.txt` se vším o hledání: dotaz a verze
+  programu, stav a chyby každého dopravce, výsledné spoje se všemi úseky,
+  cenami, jízdenkami a poznámkami, co který dopravce vrátil před sloučením,
+  úvahy hacků (lomy jízdenek, dotazy, výsledky), nastavení filtrů na
+  stránce a konec záznamu serveru. Ten stačí poslat místo snímků obrazovky
+  (server: `GET /api/search/<id>/diagnostics.txt`).
 - CZK / EUR, světlý / tmavý motiv, funguje i na mobilu.
 
 Server se sám ukončí, když se stránka 2 minuty neozve (`--idle 0` vypne).
@@ -497,7 +505,8 @@ každý spoj se zkouší celý i rozdělený v přestupech a na hranicích a ka�
 dotaz na dopravce trvá 3–20 s. Proto:
 
 * na jeden spoj nejvýš **120 s nových dotazů** (pak jen z už známých
-  odpovědí) a 40 dotazů, přes prohlížeč (ČD, ZSSK) nejvýš 6;
+  odpovědí) a 40 dotazů, přes prohlížeč (ČD, ZSSK) nejvýš 6; čekání ve
+  frontě na prohlížeč se do těch 120 s nepočítá, celý hack má strop 300 s;
 * začátky několika lomů se ptají **najednou**, ne po jednom;
 * engine pouští až 10 dotazů souběžně (na jeden web nejvýš 4);
 * zablokovaná DB (403 i v prohlížeči) se 3 hodiny neptá – dřív každé hledání

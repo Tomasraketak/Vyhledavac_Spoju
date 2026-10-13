@@ -194,6 +194,15 @@ def country_near(name: str, neighbours: set[str]) -> str | None:
     return found
 
 
+def km(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """Vzdušná vzdálenost dvou bodů (šířka, délka) v km."""
+    import math
+
+    lat1, lon1, lat2, lon2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 6371 * 2 * math.asin(math.sqrt(h))
+
+
 def leaves_czechia(*names: str) -> bool:
     """Leží některé z míst prokazatelně mimo Česko? (Neznámé místo se nepočítá.)"""
     return any(country_of(n) not in (None, "CZ") for n in names)

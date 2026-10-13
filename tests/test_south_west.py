@@ -29,7 +29,7 @@ def run(cls, fixture, q, monkeypatch):
 
 def test_bdz_prices_from_timetable(monkeypatch):
     found = run(bdz.BdzProvider, "bdz_sofia_plovdiv.json.gz", query("Sofie", "Plovdiv", 6), monkeypatch)
-    assert [j.legs[0].line for j in found] == ["BV 1611", "BV 8651"]
+    assert [j.legs[0].line for j in found] == ["BV 1611", "BV 8651", "BV 8651"]   # první 3 spoje, bez časového limitu
     first = found[0]
     assert first.departure.strftime("%H:%M") == "08:22" and len(first.legs[0].stops) > 2
     assert first.fare_status is FareStatus.PRICED and first.fares[0].currency == "EUR"

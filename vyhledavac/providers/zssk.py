@@ -18,7 +18,7 @@ na to nečekalo:
 * žádné pevné prodlevy: čeká se na odpověď našeptávače či JSF požadavku,
   výchozí cestující (dospělý bez slevy) se nepřeklikává a na seznam se
   vrací otevřením ``/search`` (ZSSK si hledání pamatuje, ~1 s),
-* trychtýř pokrývá prvních ``price_limit`` spojů (výchozí 3, nejvýš 4:15 h od odjezdu) v časovém
+* trychtýř pokrývá prvních ``price_limit`` spojů (výchozí 3 od zadaného odjezdu) v časovém
   rozpočtu ``price_budget`` (výchozí 110 s); selhání u jednoho spoje
   ostatní neshodí.
 

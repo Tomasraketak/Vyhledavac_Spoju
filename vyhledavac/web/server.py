@@ -55,6 +55,7 @@ from ..money import get_converter
 from ..registry import HACKS, LOAD_ERRORS, PROVIDERS, load_plugins
 from ..runtime import AsyncRunner, explain, short_label
 from .. import version
+from . import diagnostics
 from .serialize import journey_key, journey_to_dict
 from ._launch import log_path
 
@@ -73,6 +74,7 @@ IDLE_SHUTDOWN = 120.0
 #: přepnutí je pak okamžité a nevyžaduje nové hledání.
 SERVER_FILTERS: list[Any] = [
     ("departure_window", {"hours": 12}),
+    "drop_sold_out",
     "deduplicate",
     "price_backfill",
     ("limit", {"count": 120}),
@@ -423,6 +425,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _download(self, text: str, name: str) -> None:
+        data = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length") or 0)
         if not length:
@@ -452,6 +464,14 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 limit = 10
             return self._json({"q": q, "places": stations.suggest(q, limit)})
+        if path.startswith("/api/search/") and path.endswith("/diagnostics.txt"):
+            session = self._session(path.split("/")[3])
+            if session is None:
+                return self._json({"error": "neznámé hledání (server mezitím restartoval?)"}, 404)
+            params = urllib.parse.parse_qs(self.path.partition("?")[2])
+            ui = (params.get("ui") or [""])[0][:20000]
+            text = diagnostics.report(session, version.describe(), ui, str(log_path()))
+            return self._download(text, diagnostics.filename(session.query))
         if path.startswith("/api/search/") and path.endswith("/events"):
             session = self._session(path.split("/")[3])
             if session is None:

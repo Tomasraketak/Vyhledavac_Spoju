@@ -82,6 +82,10 @@ VARIANT_WAIT = dt.timedelta(hours=3)
 NOT_SELLERS = {"IDS", "Transitous", "Plánovač"}
 #: Zdroj spoje, který se právě oceňuje (souběžně běží víc spojů).
 _SOURCE: contextvars.ContextVar[str] = contextvars.ContextVar("idos_complete_source", default="IDS")
+#: Konec času na spoj (``[monotonic]``, měnitelný): čekání ve frontě na prohlížeč
+#: (ČD) se do něj nepočítá – jinak šest souběžných spojů vyčerpalo čas čekáním.
+_DEADLINE: contextvars.ContextVar[list[float] | None] = contextvars.ContextVar("idos_complete_deadline",
+                                                                              default=None)
 #: Kdo dodává spoje bez ceny s rozpisem jízdenek (``raw["plans"]``).
 ROUTE_SOURCES = {"IDS", "Plánovač"}
 #: Nejvýš tolik dotazů na prodejce na jeden spoj (dlouhá cesta přes 5 zemí).
@@ -93,6 +97,8 @@ BROWSER_TOTAL = 10
 #: Nejvýš tolik sekund nových dotazů na jeden spoj – pak už jen známé odpovědi
 #: (spoj, který nejde ocenit, jinak zkoušel lomy i šest minut).
 JOURNEY_TIME = 120
+#: Strop pro celý hack (i s čekáním na prohlížeč), ať hledání nekončí za 10 minut.
+TOTAL_TIME = 300
 #: Kolik začátků lomu se zeptá najednou (dotazy běží souběžně, ne po jednom).
 PREFETCH = 4
 
@@ -107,11 +113,19 @@ class IdosCompleteHack(TravelHack):
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
                    search: SearchFn) -> list[Journey]:
         todo = [j for j in journeys if j.provider in ROUTE_SOURCES and (j.raw.get("plans") or j.raw.get("unpriced"))]
+        # spoje dopravců s celou trasou, ale bez ceny (ČD Třeboň → Brašov: do Rumunska
+        # neprodá) – po kusech je prodají jiní (ÖBB/MÁV do Budapešti, MÁV dál)
+        priced = {(j.departure, j.arrival) for j in journeys if j.price is not None}
+        known = {(j.departure, j.arrival) for j in todo}
+        for j in sorted(journeys, key=lambda j: j.departure):
+            if _bare_route(j) and (j.departure, j.arrival) not in priced | known:
+                known.add((j.departure, j.arrival))
+                todo.append(j)
         # tentýž spoj z IDOS i z plánovače se oceňuje jen jednou (IDOS má přednost)
         from_idos = {(j.departure, j.arrival) for j in todo if j.provider == "IDS"}
         todo = [j for j in todo if j.provider == "IDS" or (j.departure, j.arrival) not in from_idos]
         # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu; IDOS před plánovačem
-        todo.sort(key=lambda j: (j.price is not None, j.provider != "IDS"))
+        todo.sort(key=lambda j: (j.price is not None, j.provider != "IDS", j.provider not in ROUTE_SOURCES))
         todo = todo[:MAX_JOURNEYS]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
         # vrátí i vlak v 10:10, další spoj se tedy už ptát nemusí.
@@ -130,6 +144,7 @@ class IdosCompleteHack(TravelHack):
         # souběžné stránky prohlížeče nestíhaly časový limit
         self._browser_lock = asyncio.Lock()
         self._browser_left = BROWSER_TOTAL
+        self._hard_stop = time.monotonic() + TOTAL_TIME
         found: list[Journey] = []
         for part in await asyncio.gather(*(one(n, j) for n, j in enumerate(todo, 1))):
             found.extend(part)
@@ -145,7 +160,9 @@ class IdosCompleteHack(TravelHack):
               + " ➔ ".join(f"{leg.line} [{leg.carrier or '?'}]" for leg in rides)
               + f"; {len(plans)} rozpis(y) jízdenek")
         budget = [QUERY_BUDGET, BROWSER_BUDGET]
-        until = time.monotonic() + JOURNEY_TIME
+        until = [time.monotonic() + JOURNEY_TIME]
+        _DEADLINE.set(until)
+        hard_stop = getattr(self, "_hard_stop", until[0])
         asked: set[tuple] = set()
 
         async def limited(q: SearchQuery, **kw):
@@ -153,7 +170,7 @@ class IdosCompleteHack(TravelHack):
                    tuple(sorted(kw.get("only") or ())))
             if key in asked:                 # tentýž dotaz znovu = odpověď z paměti enginu
                 return await search(q, **kw)
-            if time.monotonic() > until:
+            if time.monotonic() > min(until[0], hard_stop):
                 trace(f"⚠ vyčerpán čas na spoj ({JOURNEY_TIME} s) – dál jen z už známých odpovědí")
                 return []
             if budget[0] <= 0:
@@ -511,6 +528,9 @@ class IdosCompleteHack(TravelHack):
                 if lock is not None:
                     async with lock:
                         waited = time.monotonic() - started
+                        deadline_box = _DEADLINE.get()
+                        if deadline_box is not None:
+                            deadline_box[0] += waited      # fronta na prohlížeč není práce na spoji
                         fresh = await search(query.leg_query(origin, destination, since),
                                              allow_browser=allow_browser, only=only)
                 else:
@@ -600,8 +620,68 @@ class IdosCompleteHack(TravelHack):
             return Journey(provider=chosen.provider, legs=list(chosen.legs), fares=list(chosen.fares),
                            fare_status=chosen.fare_status, deep_link=chosen.deep_link,
                            notes=list(chosen.notes), raw={**chosen.raw, "other_route": True})
+        if catchable and not abroad:
+            ids = ids_fare(query, run)
+            if ids is not None:
+                trace(f"✓ tarif {ids.provider}: {ids.price:.0f} Kč (regionální linka v IDS – jízdenka u řidiče / v aplikaci)")
+                return ids
         trace("✗ tentýž spoj nikdo neprodává")
         return None
+
+
+_LICENCE = re.compile(r"\b(\d{6})\b")
+
+
+def ids_fare(query: SearchQuery, run: list[Leg]) -> Journey | None:
+    """Kus po Česku, který žádný e-shop neprodá (regionální autobus z plánovače
+    Třeboň → Budějovice): cena podle tarifu IDS kraje, pokud v něm linka jede.
+
+    Autobus: číslo licence (6 číslic, „340100“) v seznamu linek IDS; vlak:
+    jen ČD a jen kategorie, kde IDS platí (Os, Sp, R; ne EC/RJ)."""
+    from ..hacks.ids_ticket import SYSTEMS, IdsTicketHack, _stop, train_systems
+    from ..providers.ids_idos import line_systems
+
+    allowed = set(SYSTEMS)
+    for leg in run:
+        if leg.mode is Mode.BUS:
+            found = _LICENCE.search(leg.line or "")
+            if found is None:
+                return None
+            systems = line_systems(found.group(1), set())
+            if systems is not None:
+                allowed &= systems
+        elif leg.mode is Mode.TRAIN:
+            if "česk" not in (leg.carrier or "").lower() and "cd" not in normalize(leg.carrier or "").split():
+                return None
+            only = train_systems(leg.line or "")
+            if only is not None:
+                allowed &= only
+        else:
+            return None
+    route = []
+    for leg in run:
+        stops = leg.stops or [Stop(leg.origin, departure=leg.departure), Stop(leg.destination, arrival=leg.arrival)]
+        for n, stop in enumerate(stops):
+            if route and n == 0:
+                continue                     # přestupní zastávka jen jednou
+            stop_time = stop.departure or stop.arrival
+            route.append(_stop(stop.name, time=stop_time))
+            route[-1].rail = leg.mode is Mode.TRAIN
+    if len(route) < 2:
+        return None
+    allowed &= set(route[0].systems) & set(route[-1].systems)
+    minutes = (run[-1].arrival - run[0].departure).total_seconds() / 60
+    hack = IdsTicketHack()
+    fares = [f for f in (hack._ids_fare(query, route, system, 0, len(route) - 1, minutes)
+                         for system in sorted(allowed)) if f is not None]
+    if not fares:
+        return None
+    fare = min(fares, key=lambda f: f.price)
+    return Journey(provider=fare.system, legs=list(run), fare_status=FareStatus.PRICED,
+                   fares=[Fare(amount=fare.price, currency="CZK", amount_czk=fare.price, label=fare.system,
+                               tariff=fare.name)],
+                   notes=[f"Jízdenka {fare.system} ({fare.name}) podle tarifu – koupíte u řidiče, "
+                          "v automatu nebo v aplikaci systému."])
 
 
 def _since(first: Leg, ready: dt.datetime | None) -> dt.datetime:
@@ -918,10 +998,23 @@ def _same(option: Journey, first: Leg, last: Leg) -> bool:
             and abs(option.arrival - last.arrival) <= SAME_ARRIVAL)
 
 
+def _bare_route(journey: Journey) -> bool:
+    """Spoj dopravce bez ceny s víc úseky (ne hack, ne zdroj tras, ne dílčí ÖBB)."""
+    rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+    return (journey.price is None and not journey.is_hack and journey.provider not in NOT_SELLERS
+            and journey.fare_status in (FareStatus.UNKNOWN, FareStatus.NOT_BOOKABLE)
+            and not journey.raw.get("partial") and not journey.raw.get("plans") and len(rides) > 1
+            and all(leg.mode in (Mode.TRAIN, Mode.BUS) for leg in rides))
+
+
 def _plans(journey: Journey) -> list[list[dict]]:
     plans = journey.raw.get("plans")
     if plans:
         return plans
+    if _bare_route(journey):
+        rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+        return [[{"kind": "buy", "from": [0, 0], "to": [len(rides) - 1, max(len(rides[-1].stops), 2) - 1],
+                  "splits": 6}]]
     # starší tvar: celé úseky
     legs = journey.legs
     out: list[dict] = [{"kind": "ids", "from": [a, 0], "to": [b, max(len(legs[b].stops), 2) - 1],
