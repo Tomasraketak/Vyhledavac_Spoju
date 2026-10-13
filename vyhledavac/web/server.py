@@ -64,7 +64,7 @@ STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8765
 #: Hacky zapnuté při prvním spuštění.
 DEFAULT_HACKS = ("split_ticket", "ids_ticket", "idos_complete", "obb_partial", "hub_transfer", "cd_europe_border",
-                 "cd_europe_beyond", "regional_pass")
+                 "cd_europe_beyond", "regional_pass", "night_train")
 #: Po kolika sekundách bez jediného dotazu z prohlížeče se server ukončí.
 IDLE_SHUTDOWN = 120.0
 

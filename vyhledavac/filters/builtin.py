@@ -33,7 +33,13 @@ class DepartureWindow(Filter):
         hours = self.options.get("hours")
         window = dt.timedelta(hours=float(hours)) if hours is not None else query.window
         end = query.departure + window
-        return [j for j in journeys if query.departure <= j.departure <= end]
+        inside = [j for j in journeys if query.departure <= j.departure <= end]
+        if not any(j.price is not None for j in inside):
+            # v okně nic s cenou (Sofie → Segedín: jediný oceněný vlak jede až ve 22:00)
+            # – ukážeme i další půlden, ať uživatel vidí aspoň nejbližší použitelný spoj
+            end += window
+            inside = [j for j in journeys if query.departure <= j.departure <= end]
+        return inside
 
 
 @FILTERS.register()

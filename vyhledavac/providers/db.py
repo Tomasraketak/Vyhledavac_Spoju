@@ -52,6 +52,11 @@ COUNTRIES = {"DE", "NL", "BE", "FR", "CH", "DK", "LU"}
 PRODUCTS = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN", "BUS", "SCHIFF", "UBAHN", "TRAM", "ANRUFPFLICHTIG"]
 
 
+#: Po zjištěné blokaci (403 i v prohlížeči) se DB tak dlouho neptáme.
+BLOCKED_KEY = "blocked"
+BLOCKED_TTL = 3 * 3600
+
+
 @PROVIDERS.register()
 class DbProvider(HttpProvider):
     name = "DB"
@@ -74,6 +79,10 @@ class DbProvider(HttpProvider):
                     params: dict[str, Any] | None = None) -> Any:
         url = f"{API}/{path}"
         headers = {"Accept": "application/json", "Origin": BASE}
+        if self.cache.get(self.name, BLOCKED_KEY):
+            # blokaci si pamatujeme – jinak každé hledání čeká ~25 s na prohlížeč a nový 403
+            raise BlockedError(self.name, "int.bahn.de odmítá dotazy z této IP adresy (zjištěno nedávno) – "
+                                          "DB teď nehledám")
         if self._page is None:
             try:
                 if method == "GET":
@@ -105,6 +114,7 @@ class DbProvider(HttpProvider):
                 return [r.status, await r.text()];
             }""", [url, method, json.dumps(body) if body is not None else None])
         if status == 403:
+            self.cache.set(self.name, BLOCKED_KEY, True, ttl=BLOCKED_TTL)
             raise BlockedError(self.name, "int.bahn.de odmítá dotaz (Akamai „OPS_BLOCKED“) – z této IP "
                                           "adresy DB hledat nejde")
         if status >= 400:

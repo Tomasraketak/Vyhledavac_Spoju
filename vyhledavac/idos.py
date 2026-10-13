@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from . import geo
 from .models import DEFAULT_TZ
 
 BASE = "https://idos.cz"
@@ -112,6 +113,25 @@ def pick_foreign(items: list[dict], country: str) -> str | None:
     return None
 
 
+def pick_stop(items: list[dict], town: str, whole: bool) -> dict | None:
+    """Zastávka nebo stanice v obci ``town`` z našeptávače („Anděl“ – „zastávka
+    (Praha)“, „Praha,,Letňany“ – „zastávka, okres Praha“); adresy ne.
+    ``whole`` = hledalo se celé jméno i s obcí."""
+    from .normalize import normalize
+
+    want = normalize(town)
+    for item in items:
+        text = str(item.get("selectedText") or "")
+        desc = str(item.get("description") or "")
+        if not text or not desc.lower().startswith(("zastávka", "stanice", "část obce")):
+            continue
+        place = re.search(r"\(([^)]+)\)|okres ([^,]+)", desc)
+        where = normalize((place.group(1) or place.group(2)) if place else "")
+        if whole and normalize(text).startswith(want) or where.startswith(want) or want.startswith(where or "-"):
+            return item
+    return None
+
+
 #: Jízdní řády IDOS: vše (vlaky, autobusy, MHD), nebo jen vlaky.
 TRAINS = "vlaky"
 ALL = "vlakyautobusymhdvse"
@@ -126,10 +146,17 @@ def ajax_url(name: str, combination: str = ALL) -> str:
         f"{BASE}/{combination}/Ajax/{name}"
 
 
-def params(origin: str, destination: str, when: dt.datetime) -> dict[str, str]:
+def params(origin: str, destination: str, when: dt.datetime,
+           codes: tuple[str, str] = ("", "")) -> dict[str, str]:
+    """Parametry hledání; ``codes`` = čísla míst z našeptávače (``value``) –
+    nutná u nejednoznačné zastávky („Anděl“ je i v jiných obcích)."""
     when = when.astimezone(DEFAULT_TZ)
-    return {"f": origin, "t": destination, "date": f"{when.day}.{when.month}.{when.year}",
-            "time": f"{when.hour}:{when.minute:02d}"}
+    out = {"f": origin, "t": destination, "date": f"{when.day}.{when.month}.{when.year}",
+           "time": f"{when.hour}:{when.minute:02d}"}
+    for key, code in zip(("fc", "tc"), codes):
+        if code:
+            out[key] = code
+    return out
 
 
 def _text(fragment: str) -> str:
@@ -176,6 +203,9 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
             if dep is None or arr is None:
                 continue
             last = arr
+            # IDOS píše místní čas stanice (Bukurešť 16:00 = 15:00 v Praze)
+            dep = geo.local_time(dep, _text(stations[0][1]))
+            arr = geo.local_time(arr, _text(stations[-1][1]))
             walk = re.search(r'class="walk[^"]*">.*?P[řr]esun\s+(?:asi\s+)?(\d+)\s*min', item, re.S)
             legs.append(IdosLeg(line=line, kind=kind, carrier=_text(owner.group(1)) if owner else "",
                                 origin=_text(stations[0][1]), destination=_text(stations[-1][1]),

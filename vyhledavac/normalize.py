@@ -44,11 +44,24 @@ _LETTERS = str.maketrans({"ø": "o", "Ø": "O", "æ": "ae", "Æ": "AE", "œ": "o
                           "ł": "l", "Ł": "L", "đ": "d", "Đ": "D", "ı": "i", "þ": "th", "ð": "d"})
 
 
+#: Cyrilice (bulharská, srbská, ruská, ukrajinská) – přepis, jak ho píší
+#: dopravci a databáze měst: „Горна Оряховица“ = Gorna Oryahovitsa.
+_CYRILLIC = {
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ж": "zh", "з": "z", "и": "i", "й": "y",
+    "к": "k", "л": "l", "м": "m", "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sht", "ъ": "a", "ь": "y", "ю": "yu",
+    "я": "ya", "ђ": "dj", "ј": "j", "љ": "lj", "њ": "nj", "ћ": "c", "џ": "dz", "є": "ye", "і": "i",
+    "ї": "yi", "ґ": "g", "ы": "y", "э": "e", "ё": "e",
+}
+_LETTERS.update(str.maketrans({**_CYRILLIC, **{k.upper(): v.capitalize() for k, v in _CYRILLIC.items()}}))
+
+
 @lru_cache(maxsize=8192)
 def strip_accents(text: str) -> str:
-    """Odstraní diakritiku. 'Vídeň' -> 'Viden'."""
+    """Odstraní diakritiku, cyrilici přepíše. 'Vídeň' -> 'Viden', 'София' -> 'Sofia'."""
     if not text:
         return ""
+    text = re.sub(r"([иИ])([яЯ])\b", lambda m: "ia" if m.group(1) == "и" else "IA", text)   # София → Sofia
     decomposed = unicodedata.normalize("NFD", text.translate(_LETTERS))
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 

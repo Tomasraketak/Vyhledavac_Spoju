@@ -38,7 +38,7 @@ from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import normalize, same_place
 from ..registry import PROVIDERS
 from ..trace import trace
-from .base import PRICE_SCOPE_AHEAD, PRICE_SCOPE_COUNT, HttpProvider
+from .base import PRICE_SCOPE_COUNT, HttpProvider, scope_end
 
 log = logging.getLogger(__name__)
 
@@ -73,9 +73,20 @@ def line_systems(licence: str, tagged: set[str]) -> set[str] | None:
     return None if licence in data["zoned"] else set()
 
 
-def _place(name: str, rail: bool, near: set[str]):
+def _place(name: str, rail: bool, near: set[str], towns: tuple[str, ...] = ()):
     """Místo podle jména; u stejnojmenných obcí (Domanín u Třeboně × Domanín
-    na Moravě) vyhraje to, které leží ve stejném systému jako sousední zastávky."""
+    na Moravě) vyhraje to, které leží ve stejném systému jako sousední zastávky.
+    Zastávka MHD bez jména obce („Anděl“) se hledá v obcích cesty (``towns``)."""
+    found = _place_by_name(name, rail, near)
+    if towns and (found is None or found.code):
+        for town in towns:
+            local = stations.place(f"{town}, {name}")
+            if local is not None and not local.code:
+                return local
+    return found
+
+
+def _place_by_name(name: str, rail: bool, near: set[str]):
     from ..normalize import normalize
 
     db = stations.database()
@@ -102,6 +113,7 @@ class IdsIdosProvider(HttpProvider):
     referer = "https://idos.cz/"
     min_interval = 0.7
     hack_legs = False        # na dílčí úseky hacků by IDOS dostával desítky dotazů
+    exact_places = True
 
     @staticmethod
     def _common_systems(query: SearchQuery) -> set[str]:
@@ -128,7 +140,7 @@ class IdsIdosProvider(HttpProvider):
         „Košice“ IDOS odmítne jako nejednoznačné."""
         place = stations.place(name)
         if place is None or not place.code:
-            return name
+            return await self._czech_stop(name) if "," in name else name
         key = f"idos-name:{normalize(name)}"
         cached = self.cache.get(self.name, key)
         if cached:
@@ -142,6 +154,31 @@ class IdsIdosProvider(HttpProvider):
             if found:
                 chosen = found
                 break
+        self.cache.set(self.name, key, chosen, ttl=NAME_TTL)
+        return chosen
+
+    async def _czech_stop(self, name: str) -> str:
+        """Zastávka MHD pro IDOS: „Praha, Anděl“ IDOS nezná (našeptá adresu
+        Andělova), zná „Anděl“ (zastávka v Praze) nebo „Praha,,Letňany“."""
+        from .. import city
+
+        key = f"idos-stop2:{normalize(name)}"
+        cached = self.cache.get(self.name, key)
+        if cached:
+            return cached
+        town, _, stop = (p.strip() for p in name.partition(","))
+        chosen = name
+        for text in dict.fromkeys((name, stop, city.abbreviated(stop))):
+            if not text:
+                continue
+            page = await self.client.get_text(idos.SUGGEST, params=idos.suggest_params(text), referer=self.referer)
+            found = idos.pick_stop(idos.parse_suggest(page), town, text is name)
+            if found:
+                chosen = str(found["selectedText"])
+                if found.get("value"):
+                    chosen += CODE_MARK + str(found["value"])
+                break
+        trace(f"IDOS: {name} → {chosen.replace(CODE_MARK, ' #')}")
         self.cache.set(self.name, key, chosen, ttl=NAME_TTL)
         return chosen
 
@@ -162,7 +199,7 @@ class IdsIdosProvider(HttpProvider):
             connections = await transitous.search(self.client, self.cache, self.name, query.origin,
                                                   query.destination, query.departure, query.window_end)
         # cena = detail každého spoje (zóny, linka) – jen první spoje jako u ostatních
-        until = query.departure + PRICE_SCOPE_AHEAD
+        until = scope_end(query, [c.departure for c in connections])
         connections = sorted((c for c in connections if c.departure <= until),
                              key=lambda c: (c.departure, c.arrival))[:PRICE_SCOPE_COUNT]
         journeys = []
@@ -179,12 +216,19 @@ class IdsIdosProvider(HttpProvider):
     async def _idos(self, query: SearchQuery) -> list[idos.IdosConnection]:
         connections: list[idos.IdosConnection] = []
         when = query.departure
-        origin, destination = await self._idos_name(query.origin), await self._idos_name(query.destination)
+        from .. import city
+
+        if city.trip(query.origin, query.destination) is not None:
+            # po městě: přesná zastávka z našeptávače („Ostrava-Poruba“ IDOS jako místo nezná)
+            origin, destination = await self._czech_stop(query.origin), await self._czech_stop(query.destination)
+        else:
+            origin, destination = await self._idos_name(query.origin), await self._idos_name(query.destination)
+        (origin, fc), (destination, tc) = _split_code(origin), _split_code(destination)
         for _ in range(PAGES):
             if len(connections) >= PRICE_SCOPE_COUNT:
                 break
             page = await self.client.get_text(idos.results_url(_combination(query)),
-                                              params=idos.params(origin, destination, when),
+                                              params=idos.params(origin, destination, when, (fc, tc)),
                                               referer=self.referer)
             batch = [c for c in idos.parse_results(page, when.astimezone(query.departure.tzinfo).date())
                      if c.departure >= query.departure - dt.timedelta(minutes=1)]
@@ -226,6 +270,10 @@ class IdsIdosProvider(HttpProvider):
         route_systems: list[dict] = []
         legs: list[Leg] = []
         international = self._international(query)
+        from .. import city
+
+        towns = tuple(dict.fromkeys(c[0] for c in (city.city_of(query.origin), city.city_of(query.destination))
+                                    if c is not None and not c[1]))
         offset: float | None = 0.0          # kilometráž celé cesty (tarif ODIS)
         for leg in conn.legs:
             raw_stops = [(leg.origin, "", ""), (leg.destination, "", "")]
@@ -238,6 +286,8 @@ class IdsIdosProvider(HttpProvider):
                     licence, tagged = idos.parse_line_info(page)
                     found = line_systems(licence or leg.licence, tagged)
                     systems = found if found is not None else None
+                    if systems == set() and leg.is_city:
+                        systems = None         # MHD (metro, tramvaj, městský bus): platí tarif podle zón
                     raw_stops = idos.parse_stops(page) or raw_stops
                     distances = idos.parse_distances(page)
                 elif leg.inline_stops:      # spoj z Transitous: linka podle licence z JDF
@@ -278,7 +328,7 @@ class IdsIdosProvider(HttpProvider):
             last = len(raw_stops) - 1
             prev = leg.departure
             for i, (name, arr, dep) in enumerate(raw_stops):
-                place = _place(name, rail, near)
+                place = _place(name, rail, near, towns)
                 if place is not None and place.systems:
                     near = set(place.systems)
                 zones = {k: v for k, v in (place.systems if place else {}).items() if k in SYSTEMS}
@@ -288,6 +338,8 @@ class IdsIdosProvider(HttpProvider):
                     time = leg.arrival
                 else:
                     time = idos._at(leg.departure.date(), dep or arr, prev)
+                    if time is not None and not leg.inline_stops:
+                        time = geo.local_time(time, name)      # detail IDOS: místní čas
                     prev = time or prev
                 stops.append(RouteStop(idos.display_name(name), time, zones,
                                        place.kraj if place else "",
@@ -443,6 +495,15 @@ class IdsIdosProvider(HttpProvider):
             if plan not in unique:
                 unique.append(plan)
         return unique
+
+
+#: Oddělovač čísla místa z našeptávače IDOS ve jméně („Anděl\x1f301003“).
+CODE_MARK = "\x1f"
+
+
+def _split_code(name: str) -> tuple[str, str]:
+    text, _, code = name.partition(CODE_MARK)
+    return text, code
 
 
 def _combination(query: SearchQuery) -> str:

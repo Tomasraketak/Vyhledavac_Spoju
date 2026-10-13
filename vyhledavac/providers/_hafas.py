@@ -196,8 +196,10 @@ def _parse_sections(
     for section in conn.get("secL") or []:
         dep_node = section.get("dep") or {}
         arr_node = section.get("arr") or {}
-        departure = _parse_time(base_date, dep_node.get("dTimeR") or dep_node.get("dTimeS"), tz)
-        arrival = _parse_time(base_date, arr_node.get("aTimeR") or arr_node.get("aTimeS"), tz)
+        departure = _parse_time(base_date, dep_node.get("dTimeR") or dep_node.get("dTimeS"), tz,
+                                dep_node.get("dTZOffset"))
+        arrival = _parse_time(base_date, arr_node.get("aTimeR") or arr_node.get("aTimeS"), tz,
+                              arr_node.get("aTZOffset"))
         if departure is None or arrival is None:
             continue
         # Přes půlnoc: příjezd nikdy nesmí být před odjezdem.
@@ -209,6 +211,8 @@ def _parse_sections(
         sec_type = section.get("type")
 
         if sec_type == "WALK" or sec_type == "TRSF":
+            if origin == destination:
+                continue          # přestup na stejném nádraží – ve výpisu jen „přesun“ navíc
             legs.append(
                 Leg(
                     origin=origin, destination=destination,
@@ -285,8 +289,10 @@ def _parse_stops(raw_stops, base_date: dt.date, locations, tz) -> list[Stop]:
         name = _loc_name(locations, entry.get("locX"))
         if not name:
             continue
-        arrival = _parse_time(base_date, entry.get("aTimeR") or entry.get("aTimeS"), tz)
-        departure = _parse_time(base_date, entry.get("dTimeR") or entry.get("dTimeS"), tz)
+        arrival = _parse_time(base_date, entry.get("aTimeR") or entry.get("aTimeS"), tz,
+                              entry.get("aTZOffset"))
+        departure = _parse_time(base_date, entry.get("dTimeR") or entry.get("dTimeS"), tz,
+                                entry.get("dTZOffset"))
         stops.append(
             Stop(
                 name=name,
@@ -320,11 +326,13 @@ def _parse_date(value: Any) -> dt.date | None:
         return None
 
 
-def _parse_time(base_date: dt.date, value: Any, tz) -> dt.datetime | None:
+def _parse_time(base_date: dt.date, value: Any, tz, offset: Any = None) -> dt.datetime | None:
     """HAFAS čas je 'HHMMSS', u spojů přes půlnoc 'DDHHMMSS' s posunem dnů.
 
     Právě tenhle posun původní kód neznal – proto se noční spoje počítaly
-    modulem 1440 a vycházely nesmysly.
+    modulem 1440 a vycházely nesmysly. Čas je místní ve stanici; ``offset``
+    (``dTZOffset`` v minutách) říká její posun od UTC – Bukurešť 16:00 je
+    v Praze 15:00.
     """
     if not isinstance(value, str) or not value.isdigit():
         return None
@@ -341,4 +349,6 @@ def _parse_time(base_date: dt.date, value: Any, tz) -> dt.datetime | None:
         )
     except ValueError:
         return None
+    if isinstance(offset, int) and moment.utcoffset() != dt.timedelta(minutes=offset):
+        moment = moment.replace(tzinfo=dt.timezone(dt.timedelta(minutes=offset)))
     return moment + dt.timedelta(days=day_offset)

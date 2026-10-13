@@ -494,6 +494,14 @@ jednu až dvě třetí země. Každý pár se opakoval, dokud nevyšel:
 | Malmö → Vídeň (DK, DE, CZ) | ČD ze Švédska ceny nedává (učení), ÖBB neprodával z Dánska, cache brala spoj bez ceny jako vyřízený | SJ do Kodaně 348 + ČD do Břeclavi 2 490 + ÖBB 239 = 3 078 Kč; noční vlak 7 141 Kč | 7 min |
 | Amsterdam → Bratislava (DE, AT) | prošlo napoprvé | ÖBB do Salcburku 5 927 + ÖBB 1 910 = 7 837 Kč (DB blokovaná) | 5 min |
 
+Další kolo (13. 10. 2026, `--trains`, všechny výchozí hacky):
+
+| Cesta (přes) | Co bylo potřeba opravit | Výsledek | Doba |
+|---|---|---|---|
+| Amsterdam → Bratislava (DE, CZ) 11. 11. | European Sleeper se do kombinací nedostal (nový hack `night_train`) | ES 453 do Prahy 1 219 + RegioJet 429 = **1 648 Kč** (ÖBB 3 295 Kč) | 3,7 min (dřív 7,8) |
+| Bukurešť → Bratislava (HU, AT) | IDOS, MÁV i HAFAS (ÖBB) braly rumunský místní čas jako český (o hodinu vedle); spoje víc než 4 h po zadaném čase se vůbec neoceňovaly | MÁV do Hegyeshalomu 1 234 + ÖBB 132 + 176 = **1 541 Kč**; MÁV přes Szob 1 627 Kč | 2,9 min |
+| Sofie → Segedín (RO) | „Segedín“ databáze neznala, Kombo (SNCF) vracelo letenky Turkish Airlines jako vlak, cyrilice („София“) se ztrácela, vlak ve 22:00 vypadl z okna 12 h | jen částečně: BDŽ do Ruse 274 + CFR Giurgiu → Bukurešť 244 + MÁV do Békéscsaby 959 = 1 477 Kč; **Ruse → Giurgiu online nikdo neprodává** (mezinárodní e-shop CFR chrání Cloudflare Turnstile) | 1 min |
+
 Úseky v Německu prodává hlavně DB – ze serveru, kde se zkoušelo, je DB
 blokovaná (Akamai), proto tam pomáhaly ÖBB, FlixBus a IDOS. Nejdéle trvají
 dotazy na ČD a ZSSK přes prohlížeč.
@@ -854,6 +862,24 @@ Night“). Ostatní kategorie jsou mezi nabídkami.
   pro ženy se jako cena spoje nebere.
 - Vlak se označuje „ES 452“. Jiní dopravci ho mohou psát jinak, pak se
   duplicitní spoje nesloučí.
+- Na cesty mimo jeho stanice (Amsterdam → Bratislava, Brusel → Vídeň) ho
+  zapojí hack `night_train`: noční vlak mezi stanicemi nejblíž začátku a cíli
+  a k tomu dojezd a návaznost od ostatních dopravců (souřadnice stanic jsou
+  v `COORDS`).
+- Ceny se rychle mění s obsazeností: Amsterdam → Praha měsíc předem sedadlo
+  50 €, lehátko 70 €; týden předem jen sedadlo za 170 €.
+
+## MHD – zahraniční města (Transitous)
+
+**Soubory:** `providers/city_transit.py`, `city.py` · **Typ:** JSON API Transitous · **Klíč:** ne
+
+Jen pro cestu po jednom zahraničním městě (česká města hledá IDOS se
+zastávkami z našeptávače a cenou podle tarifu IDS). Zastávky geokodérem
+Transitous v okruhu 25 km od středu města, spojení celé i s pěšími přesuny.
+Cena podle ceníku MHD (`city.FARES`, říjen 2026): Vídeň 3,20 € (Wiener Linien
+od 1. 1. 2026), Bratislava 1,20 € / 1,80 € za 30 / 60 min (IDS BK od
+1. 6. 2025), Budapešť 500 Ft na jednu linku, 600 / 850 Ft za 30 / 90 min
+(BKK od 1. 6. 2025). Děti a senioři podle `city.DISCOUNTS` (zjednodušeně).
 
 ## CFR Călători – Rumunské dráhy
 

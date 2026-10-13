@@ -150,6 +150,36 @@ def country_of(name: str) -> str | None:
     return "CZ"
 
 
+#: Země mimo středoevropský čas. Jízdní řády (IDOS, MÁV, HAFAS) píší čas
+#: místní – odjezd z Bukurešti v 16:00 je v Praze 15:00.
+_ZONES = {"RO": "Europe/Bucharest", "BG": "Europe/Sofia", "GR": "Europe/Athens", "FI": "Europe/Helsinki",
+          "EE": "Europe/Tallinn", "LV": "Europe/Riga", "LT": "Europe/Vilnius", "UA": "Europe/Kyiv",
+          "MD": "Europe/Chisinau", "TR": "Europe/Istanbul", "BY": "Europe/Minsk", "RU": "Europe/Moscow",
+          "GB": "Europe/London", "IE": "Europe/Dublin", "PT": "Europe/Lisbon"}
+
+
+def zone_of(name: str) -> dt.tzinfo:
+    """Časové pásmo stanice (výchozí středoevropské)."""
+    from .models import DEFAULT_TZ
+
+    zone = _ZONES.get(country_of(name) or "")
+    if zone is None:
+        return DEFAULT_TZ
+    try:
+        from zoneinfo import ZoneInfo
+
+        return ZoneInfo(zone)
+    except Exception:  # noqa: BLE001 - Windows bez tzdata: radši středoevropský než pád
+        return DEFAULT_TZ
+
+
+def local_time(moment: dt.datetime, name: str) -> dt.datetime:
+    """Čas z jízdního řádu (místní ve stanici ``name``), zapsaný jako středoevropský,
+    přepočtený na správné pásmo: 16:00 v Bukurešti → 15:00 SELČ."""
+    zone = zone_of(name)
+    return moment.replace(tzinfo=zone) if zone is not moment.tzinfo else moment
+
+
 def country_near(name: str, neighbours: set[str]) -> str | None:
     """Země stanice s ohledem na sousední stanice trasy: „Jesenice“ mezi
     Villachem a Lublaní je slovinská, ne česká obec stejného jména."""

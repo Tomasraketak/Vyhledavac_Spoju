@@ -215,6 +215,8 @@ def to_journey(trip: dict[str, Any], deps: dict[str, dict[str, Any]], link: str)
                 return None
             company = companies.get(str(seg.get("companyId"))) or {}
             carrier = str(company.get("displayName") or "")
+            if company.get("transportType") not in (None, "", "train", "bus"):
+                return None       # Kombo prodává i letenky (Turkish Airlines „TK 1028“) – nejsou vlak
             bus = company.get("transportType") == "bus" or "autocar" in carrier.lower()
             origin = str((stations.get(str(seg.get("departureStationId"))) or {}).get("name") or "")
             destination = str((stations.get(str(seg.get("arrivalStationId"))) or {}).get("name") or "")

@@ -39,8 +39,10 @@ PartialCallback = Callable[[ProviderResult], None]
 
 
 #: Pořadí, ve kterém hacky běží (viz ``SearchEngine.build``).
+#: Zdroje, kterých se engine ptá u cesty po jednom městě (MHD).
+CITY_SOURCES = {"IDS", "MHD", "Transitous"}
 HACK_ORDER = ("idos_complete", "ids_ticket", "obb_partial", "split_ticket", "hub_transfer", "hidden_city",
-              "cd_europe_beyond", "cd_europe_border", "regional_pass")
+              "cd_europe_beyond", "cd_europe_border", "regional_pass", "night_train")
 
 
 class SearchEngine:
@@ -54,7 +56,7 @@ class SearchEngine:
         hacks: Sequence[TravelHack] = (),
         cache: Cache | None = None,
         converter: CurrencyConverter | None = None,
-        concurrency: int = 6,
+        concurrency: int = 10,
         provider_timeout: float = 90.0,
         skip_browser_in_hacks: bool = True,
     ) -> None:
@@ -127,10 +129,18 @@ class SearchEngine:
         await self.converter.load()
 
         result = SearchResult(query=query)
-        self._skipped = self._domestic_skips(query)
+        from . import city
+
+        city_trip = city.trip(query.origin, query.destination)
+        if city_trip is not None:
+            # cesta MHD po jednom městě: dálkoví dopravci by vrátili „Praha → Praha“ nesmysly
+            self._skipped = {p.name for p in self.providers if p.name not in CITY_SOURCES}
+            reason = f"cesta po městě ({city_trip.city}) – ptáme se jen zdrojů MHD"
+        else:
+            self._skipped = self._domestic_skips(query)
+            reason = "cesta je jen po Česku – tento zdroj se ptá jen na zahraničí"
         for name in sorted(self._skipped):
-            skipped = ProviderResult(provider=name, skipped=True,
-                                     error="cesta je jen po Česku – tento zdroj se ptá jen na zahraničí")
+            skipped = ProviderResult(provider=name, skipped=True, error=reason)
             if on_partial is not None:
                 try:
                     on_partial(skipped)
@@ -140,8 +150,13 @@ class SearchEngine:
         direct = await self._run_providers(query, on_partial=on_partial,
                                            on_progress=on_progress, providers=active)
         result.extend(direct)
+        from .trace import trace
 
-        if enable_hacks and self.hacks:
+        slowest = sorted((r for r in direct if r.elapsed), key=lambda r: -r.elapsed)[:4]
+        trace(f"⏱ dopravci: {time.monotonic() - started:.0f} s (nejdéle "
+              + ", ".join(f"{r.provider} {r.elapsed:.0f} s" for r in slowest) + ")")
+
+        if enable_hacks and self.hacks and city_trip is None:
             base = [j for r in direct for j in r.journeys]
             hacked = await self._run_hacks(query, base)
             if hacked:
@@ -236,13 +251,18 @@ class SearchEngine:
         if not base:
             return []
 
+        from .trace import trace
+
         found: list[Journey] = []
         for hack in self.hacks:
+            started = time.monotonic()
             try:
                 produced = await hack.find(query, base, self._leg_search)
             except Exception:
                 log.exception("hack %s selhal", hack.name)
                 continue
+            finally:
+                trace(f"⏱ hack {hack.name}: {time.monotonic() - started:.0f} s")
             if produced:
                 log.info("hack %s našel %d variant", hack.name, len(produced))
                 found.extend(produced)

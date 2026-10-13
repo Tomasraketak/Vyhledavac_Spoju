@@ -18,7 +18,7 @@ from .models import DEFAULT_TZ, DiscountCard, Mode, Passenger, SearchQuery, Sear
 from .registry import FILTERS, HACKS, PROVIDERS, load_plugins
 
 DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva", "PKP", "MÁV", "DB", "NS", "Trenitalia",
-                     "OUIGO", "SNCF", "Vy", "DSB", "SJ", "BDŽ", "CP", "Srbijavoz", "SBB", "Renfe", "Eurostar", "EuropeanSleeper", "CFR", "SŽ", "HŽPP", "LeoExpress", "IDS", "Plánovač"]
+                     "OUIGO", "SNCF", "Vy", "DSB", "SJ", "BDŽ", "CP", "Srbijavoz", "SBB", "Renfe", "Eurostar", "EuropeanSleeper", "CFR", "SŽ", "HŽPP", "LeoExpress", "IDS", "Plánovač", "MHD"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help=f"dopravci (výchozí: {' '.join(DEFAULT_PROVIDERS)})")
     parser.add_argument("--hacks", nargs="*", default=["split_ticket", "ids_ticket", "idos_complete", "obb_partial", "hub_transfer",
                                                         "cd_europe_border", "cd_europe_beyond",
-                                                        "regional_pass"],
+                                                        "regional_pass", "night_train"],
                         help="travel hacky; prázdné = vypnuto")
     parser.add_argument("--sort", choices=["departure", "price", "duration"],
                         default="departure", help="řazení výsledků")

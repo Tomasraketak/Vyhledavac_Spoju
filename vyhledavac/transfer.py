@@ -113,6 +113,37 @@ async def _transitous(a: str, b: str, when: dt.datetime) -> dt.timedelta:
         return UNKNOWN
 
 
+_located: dict[str, tuple[float, float] | None] = {}
+
+
+async def locate(name: str) -> tuple[float, float] | None:
+    """Souřadnice místa: z databáze měst, jinak z geokodéru Transitous
+    (česká místa v databázi souřadnice nemají)."""
+    place = stations.place(name)
+    if place is not None and place.lat is not None:
+        return place.lat, place.lon
+    key = normalize(name)
+    if key in _located:
+        return _located[key]
+    global _client
+    found = None
+    try:
+        from .http import HttpClient
+
+        if _client is None:
+            _client = HttpClient("Přestupy", timeout=20)
+        results = await _client.get_json(f"{transitous.API}/v1/geocode", params={"text": name, "language": "en"},
+                                         headers={"User-Agent": transitous.USER_AGENT})
+        picked = _pick(name, results or [])
+        if picked:
+            lat, lon = picked.split(",")
+            found = (float(lat), float(lon))
+    except Exception as exc:  # noqa: BLE001 - poloha neznámá
+        log.debug("poloha %s: %s", name, exc)
+    _located[key] = found
+    return found
+
+
 def _pick(name: str, results: list[dict[str, Any]]) -> str | None:
     """Zastávka nejpodobnější jménu, v okolí města (podle databáze měst)."""
     city = stations.place(name)

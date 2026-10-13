@@ -196,6 +196,14 @@ class StationDB:
         return out
 
 
+#: České exonymy, které v databázi měst (z Wikidat) chybí: „Segedín“ = Szeged.
+EXONYMS: dict[str, tuple[str, ...]] = {
+    "Szeged": ("Segedín",), "Pécs": ("Pětikostelí",), "Stockholm": ("Štokholm",), "Innsbruck": ("Inšpruk",),
+    "Klagenfurt": ("Celovec",), "Klagenfurt am Wörthersee": ("Celovec",), "Miskolc": ("Miškovec",),
+    "Szombathely": ("Sombathej",), "Sibiu": ("Sibiň",), "İstanbul": ("Cařihrad",), "Istanbul": ("Cařihrad",),
+}
+
+
 def _cities(data: dict[str, Any]) -> list[Place]:
     countries = data["countries"]
     out = []
@@ -203,7 +211,8 @@ def _cities(data: dict[str, Any]) -> list[Place]:
         name, country_i, local, population, alt, capital = row[:6]
         lat, lon = (row[6], row[7]) if len(row) > 7 else (None, None)
         code, country = countries[country_i]
-        keys = (normalize(name), *(a for a in alt.split("|") if a))
+        keys = (normalize(name), *(a for a in alt.split("|") if a),
+                *(normalize(x) for x in EXONYMS.get(local or name, ())))
         score = population // CITY_DIVISOR * (2 if capital else 1)
         out.append(Place(name=name, kind="c", country=country, code=code, local=local, score=score, keys=keys,
                          lat=lat, lon=lon))
@@ -276,9 +285,13 @@ def provider_name(name: str) -> str:
     if db is None or not name:
         return name
     best = db.info(name)
-    if best is None or not best.local or normalize(best.name) != normalize(name):
+    if best is None or best.kind != "c" or not best.code:
         return name
-    return best.local
+    if best.local and normalize(best.name) == normalize(name):
+        return best.local
+    if not best.local and normalize(name) in {normalize(x) for x in EXONYMS.get(best.name, ())}:
+        return best.name              # „Segedín“ → „Szeged“ (v databázi je jen místní jméno)
+    return name
 
 
 def countries_for(name: str) -> set[str]:

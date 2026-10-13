@@ -488,6 +488,44 @@ Druhé spuštění otevře už běžící instanci – pokud ta ale běží se s
 kódem (třeba z doby před `git pull`), spouštěč ji ukončí a pustí novou;
 otevřená stránka se pak sama obnoví.
 
+### Proč hledání trvá a co ho zkracuje
+
+Přímé dotazy na dopravce trvají 5–30 s (nejpomalejší bývá ÖBB a DB). Většinu
+času zabere dopočet cen spojů z IDOS a plánovače (hack `idos_complete`):
+každý spoj se zkouší celý i rozdělený v přestupech a na hranicích a každý
+dotaz na dopravce trvá 3–20 s. Proto:
+
+* na jeden spoj nejvýš **120 s nových dotazů** (pak jen z už známých
+  odpovědí) a 40 dotazů, přes prohlížeč (ČD, ZSSK) nejvýš 6;
+* začátky několika lomů se ptají **najednou**, ne po jednom;
+* engine pouští až 10 dotazů souběžně (na jeden web nejvýš 4);
+* zablokovaná DB (403 i v prohlížeči) se 3 hodiny neptá – dřív každé hledání
+  čekalo ~25 s;
+* `--trace` ukazuje čas dopravců i každého hacku (`⏱ hack idos_complete: 127 s`).
+
+Amsterdam → Bratislava vlakem: 7,8 min → 3,7 min.
+
+### MHD po městě
+
+Cesta po jednom městě („Praha, Anděl“ → „Praha, Letňany“, „Wien
+Stephansplatz“ → „Wien Schönbrunn“) se pozná automaticky (`city.py`): obě
+místa leží ve stejném městě a aspoň jedno je konkrétní zastávka. Pak se
+engine ptá jen zdrojů MHD (dálkoví dopravci by vrátili nesmysly typu
+„Praha → Praha za 22 h“) a hacky se nespouští:
+
+* **česká města** – IDOS (zastávka přesně podle našeptávače, i nejednoznačná
+  „Anděl“), cena podle tarifu IDS: Praha PID 36 Kč (30 min) / 46 Kč (90 min),
+  Brno IDS JMK, České Budějovice IDESKA, Olomouc MHD 25 Kč …; Ostrava zatím
+  bez ceny (ceník MHD ODIS neznáme);
+* **zahraniční města** – zdroj `MHD` (Transitous): Vídeň 3,20 €, Bratislava
+  1,20 € / 1,80 € (30 / 60 min), Budapešť 500 Ft na jednu linku, s přestupem
+  600 / 850 Ft (30 / 90 min). Jiná města najde bez ceny.
+
+```bash
+python -m vyhledavac "Praha, Anděl" "Praha, Letňany"          # metro, 36 Kč, ~6 s
+python -m vyhledavac "Wien Stephansplatz" "Wien Schönbrunn"     # U1 + U4, 3,20 €
+```
+
 ### Databáze zastávek
 
 `vyhledavac/data/stations.json.gz` (~0,6 MB) je součástí repozitáře, za
@@ -755,6 +793,24 @@ Jízdenka ČD na první stanici za hranicí a dál **Einfach-Raus-Ticket**
 (34 € + 10 € za další osobu, RB/RE/S/ALX…), obojí ve všední dny od 9:00.
 Nabídne se jen, když zbytek nalezeného spoje jede výhradně vlaky, ve kterých
 síťová jízdenka platí (ne RJ/IC/EC/ICE – např. EC Praha – Mnichov ne).
+
+### Noční vlak s návazností (`night_train`)
+
+European Sleeper prodává jen stanice na své trase, takže přímé hledání ho na
+cestu Amsterdam → Bratislava nezná. A IDOS ani plánovač ho mezi nejlepšími
+spoji často nemají, protože jede jednou denně a ne každý den. Hack proto:
+
+1. na každé trase vybere stanici nejblíž začátku a nejblíž cíli (polohy měst;
+   česká místa z geokodéru Transitous);
+2. má-li to smysl (noční vlak veze aspoň polovinu cesty, objížďka nejvýš
+   o 35 %), zeptá se European Sleeper na úsek mezi nimi;
+3. dokoupí dojezd k vlaku a navazující spoj do cíle (nejlevnější a nejdřív
+   v cíli) se skutečným časem přestupu.
+
+Amsterdam → Bratislava 11. 11. 2026: ES 453 do Prahy (sedadlo 1 219 Kč) +
+RegioJet 429 Kč = **1 648 Kč**; nejlevnější přímá jízdenka ÖBB stála 3 295 Kč.
+S předstihem je European Sleeper levný (Amsterdam → Praha od 50 €), týden
+před odjezdem bývají levné kategorie vyprodané (sedadlo 170 €).
 
 ### Šetrnost k dopravcům
 

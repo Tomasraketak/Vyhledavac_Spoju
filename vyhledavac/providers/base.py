@@ -73,6 +73,9 @@ class Provider(abc.ABC):
     multi_passenger: ClassVar[bool] = False
     #: Smí se ho ptát travel hacky na dílčí úseky? (IDS z IDOS ne – drahé dotazy.)
     hack_legs: ClassVar[bool] = True
+    #: Místa vybírá přesně (číslo zastávky z našeptávače) – kontrola země podle
+    #: jména se neprovádí („Anděl“ v Praze není nizozemské Andel).
+    exact_places: ClassVar[bool] = False
 
     def __init__(
         self,
@@ -195,8 +198,9 @@ class Provider(abc.ABC):
             _PUBLISH.reset(publish_token)
 
         mark_walks(journeys)
+        local_times(journeys)
         journeys = [j for j in journeys if _is_sane(j)]
-        kept = [j for j in journeys if _right_place(j, query)]
+        kept = [j for j in journeys if self.exact_places or _right_place(j, query)]
         if len(kept) < len(journeys):
             notes.append(f"{len(journeys) - len(kept)} spojů vynecháno – dopravce místo vyložil jinde "
                          "(jiná země, než jste zadali)")
@@ -295,9 +299,45 @@ PRICE_SCOPE_AHEAD = dt.timedelta(hours=4, minutes=15)
 def price_scope(journeys: Sequence[Journey], query: SearchQuery,
                 count: int = PRICE_SCOPE_COUNT) -> list[Journey]:
     """Spoje, u kterých se má zjistit cena: první ``count`` v okně 4:15 h."""
-    until = query.departure + PRICE_SCOPE_AHEAD
+    until = scope_end(query, [j.departure for j in journeys])
     ordered = sorted((j for j in journeys if j.departure <= until), key=lambda j: (j.departure, j.arrival))
     return ordered[:max(count, 1)]
+
+
+def local_times(journeys: Sequence[Journey]) -> None:
+    """Časy ve výpisu jako na nádraží: místní čas stanice (odjezd ze Sofie
+    23:00 EEST, ne 22:00 SELČ – okamžik je tentýž, mění se jen zápis)."""
+    from .. import geo
+
+    zones: dict[str, Any] = {}
+
+    def zone(name: str):
+        if name not in zones:
+            zones[name] = geo.zone_of(name)
+        return zones[name]
+
+    from ..models import DEFAULT_TZ
+
+    for journey in journeys:
+        if not journey.legs or all(zone(name) is DEFAULT_TZ
+                                   for name in (journey.legs[0].origin, journey.legs[-1].destination)):
+            continue                 # cesta ve středoevropském čase – nic nepřepisujeme
+        for leg in journey.legs:
+            leg.departure = leg.departure.astimezone(zone(leg.origin))
+            leg.arrival = leg.arrival.astimezone(zone(leg.destination))
+            for stop in leg.stops:
+                if stop.arrival is not None:
+                    stop.arrival = stop.arrival.astimezone(zone(stop.name))
+                if stop.departure is not None:
+                    stop.departure = stop.departure.astimezone(zone(stop.name))
+
+
+def scope_end(query: SearchQuery, departures: Sequence[dt.datetime]) -> dt.datetime:
+    """Konec okna 4:15 h – od zadaného odjezdu, nebo od prvního spoje, když
+    první jede až později (Bukurešť → Bratislava jednou denně v 16:00)."""
+    until = query.departure + PRICE_SCOPE_AHEAD
+    first = min((d for d in departures if d >= query.departure), default=query.departure)
+    return until if first <= until else first + PRICE_SCOPE_AHEAD
 
 
 def _right_place(journey: Journey, query: SearchQuery) -> bool:

@@ -14,7 +14,8 @@ Ceny jsou elektronické (MobilOK, Můj vlak) – papírové jsou o něco dražš
 Zvýhodněné jízdné: junioři 6–18, žáci a studenti 18–26, senioři 65+; děti do
 6 let zdarma. Platnost: hodnota pro pracovní dny (je kratší nebo stejná).
 Jízdenka jen pro jednu zónu s MHD (1, 11, 41, 51, 61, 71) se v Ceníku A
-neprodává – tam platí ceník MHD.
+neprodává – tam platí ceník MHD; pro Olomouc (zóna 71) ho známe: 25 Kč,
+zlevněná 12 Kč, od 65 let zdarma (DPMO od 1. 6. 2025).
 """
 
 from __future__ import annotations
@@ -29,6 +30,8 @@ SYSTEM = "IDSOK"
 URL = "https://www.idsok.cz/"
 
 OLOMOUC, OLOMOUC_REGIONAL = "71", "710"
+#: Jízdenka MHD Olomouc (DPMO, ceník od 1. 6. 2025, předprodej / aplikace).
+MHD_FULL, MHD_REDUCED = Decimal(25), Decimal(12)
 MHD_ZONES = {"1", "11", "41", "51", "61", "71", "710"}
 
 # Ceník A: počet zón 1..24 -> plné, zvýhodněné (elektronicky), platnost v pracovní dny
@@ -86,6 +89,19 @@ def fares_for_path(zones: list[str], passenger: Passenger) -> list[IdsFare]:
         out.append(IdsFare(SYSTEM, Decimal(table[others - 1]), B_MINUTES[others - 1],
                            f"71+{others} zón, {label}", first, last))
     return out
+
+
+def city_fare(stops: list[tuple[str, ...]], passenger: Passenger) -> IdsFare | None:
+    """Jízda MHD jen po Olomouci (zóna 71, bez vlaku): jízdenka MHD Olomouc
+    (DPMO od 1. 6. 2025: 25 Kč, zlevněná 12 Kč; do 6 a od 65 let zdarma)."""
+    zones = path_zones(stops)
+    if set(zones) != {OLOMOUC}:
+        return None
+    kind = category(passenger)
+    if kind is None or kind == "senior":
+        return IdsFare(SYSTEM, Decimal(0), None, "MHD Olomouc zdarma (do 6 / od 65 let)", OLOMOUC, OLOMOUC)
+    price, label = (MHD_FULL, "plné") if kind == "full" else (MHD_REDUCED, "zlevněné")
+    return IdsFare(SYSTEM, price, None, f"jízdenka MHD Olomouc, {label}", OLOMOUC, OLOMOUC)
 
 
 def best_for_route(stops: list[tuple[str, ...]], passenger: Passenger,

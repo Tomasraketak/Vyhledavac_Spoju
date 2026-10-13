@@ -231,6 +231,8 @@ def parse_legs(raw: dict[str, Any]) -> list[Leg]:
         end = (route.get("destionationStation") or {}).get("name")
         if dep is None or arr is None or not start or not end:
             continue
+        # MÁV píše místní čas stanice s maďarským posunem (Bukurešť 16:00+02:00 = 15:00 SELČ)
+        dep, arr = geo.local_time(dep, str(start)), geo.local_time(arr, str(end))
         train = route.get("trainDetails") or {}
         kind = str(((train.get("trainKind") or {}).get("name")) or "").strip()
         kind = KINDS.get(kind.lower(), kind)

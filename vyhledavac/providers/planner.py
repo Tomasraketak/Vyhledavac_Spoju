@@ -35,7 +35,7 @@ from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import normalize
 from ..registry import PROVIDERS
 from ..trace import trace
-from .base import PRICE_SCOPE_AHEAD, PRICE_SCOPE_COUNT, HttpProvider
+from .base import PRICE_SCOPE_COUNT, HttpProvider, scope_end
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class PlannerProvider(HttpProvider):
             if any((journey.departure, journey.arrival) == (o.departure, o.arrival) for o in journeys):
                 continue
             journeys.append(journey)
-        until = query.departure + PRICE_SCOPE_AHEAD
+        until = scope_end(query, [j.departure for j in journeys])
         journeys = sorted((j for j in journeys if j.departure <= until), key=lambda j: (j.departure, j.arrival))
         return journeys[:PRICE_SCOPE_COUNT]
 

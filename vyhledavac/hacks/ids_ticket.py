@@ -336,6 +336,10 @@ class IdsTicketHack(TravelHack):
             km = _distance(part)
             return None if km is None else odis.fare_for_km(
                 km, passenger, part[0].systems[system][0], part[-1].systems[system][0])
+        if system == idsok.SYSTEM and not any(s.rail for s in part):
+            city = idsok.city_fare(_passed_zones(part, system), passenger)   # MHD jen po Olomouci
+            if city is not None:
+                return city
         return _price(system, _passed_zones(part, system), passenger, minutes)
 
     def _passenger_fare(self, route: list[RouteStop], system: str, i: int, j: int,
