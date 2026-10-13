@@ -207,8 +207,13 @@ class IdosCompleteHack(TravelHack):
         missing = [p for p in pieces if p.price is None]
         trace("◐ jen část ceny – chybí: " + ", ".join(f"{p.origin} → {p.destination} ({p.legs[0].line} "
                                                       f"[{p.legs[0].carrier}])" for p in missing))
-        merged = _merge(pieces, "🧩 Spoj z plánovače – cenu zná jen část jízdenek")
+        merged = _merge(pieces, "🧩 Spoj – cenu zná jen část jízdenek")
         if merged is not None:
+            # neúplná cena nesmí vypadat jako nejlevnější spoj – jen v poznámce
+            known = sum((p.price for p in pieces if p.price is not None), Decimal(0))
+            merged.fares = []
+            merged.fare_status = FareStatus.UNKNOWN
+            merged.notes.append(f"Známé jízdenky dohromady {known:.0f} Kč (bez chybějících úseků).")
             merged.notes.append("Chybí cena úseků: " + ", ".join(
                 f"{p.origin} → {p.destination} ({p.legs[0].line}, {p.legs[0].carrier or 'dopravce neznámý'})"
                 for p in missing) + " – jízdenku kupte u dopravce.")

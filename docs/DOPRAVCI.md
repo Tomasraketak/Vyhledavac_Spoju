@@ -440,10 +440,21 @@ Evropy) – vlaky, FlixBus i MHD s dopravcem každého úseku, bez cen.
    40 dotazů na spoj. Co nikdo neprodá, ukáže se jako spoj s částí cen
    („◐“) a seznamem úseků, kde cena chybí.
 
-Výsledky z ověření (15. 10. 2026, viz `--trace`): Košice → Bordeaux
-RegioJet + FlixBus 4 024 Kč; Stockholm → Malmö SJ, Malmö → Kodaň SJ;
-úseky v Německu prodává DB, ze serveru, kde to bylo zkoušeno, je ale DB
-blokovaná (Akamai), takže tam cena chyběla.
+Ověření 13. 10. 2026 na cesty 15. 10. od 6:00 (IDOS + plánovač + 20
+dopravců, `--trace`):
+
+| Cesta | Nejlepší nalezené jízdenky | Doba hledání |
+|---|---|---|
+| Kraków → Hamar | FlixBus do Berlína 848 + ÖBB Berlín → Hamburk 1 512 + FlixBus do Osla + Vy do Hamaru = 4 900 Kč | 2 min |
+| Stockholm → Amsterdam | SJ do Lundu 1 492 + SJ do Kodaně 420 + IDOS Kodaň → Amsterdam 6 247 = 8 159 Kč | 3 min |
+| Košice → Bordeaux | FlixBus 3 696 Kč; RegioJet + FlixBus 4 035 Kč; RegioJet + FlixBus + SNCF 4 884 Kč | 12 min |
+| Bukurešť → Graz | FlixBus 2 107 Kč; FlixBus do Vídně + ÖBB 2 001 Kč | 2,5 min |
+| Třeboň → Paříž | ČD do Prahy + FlixBus 2 413 Kč; IDOS do Frankfurtu + SNCF 5 215 Kč | 12 min |
+| Valencie → Turín | Renfe do Barcelony + FlixBus přes Lyon 2 462 Kč | 2 min |
+
+Úseky v Německu prodává hlavně DB – ze serveru, kde se zkoušelo, je DB
+blokovaná (Akamai), proto tam pomáhaly ÖBB, FlixBus a IDOS. Nejdéle trvají
+dotazy na ČD a ZSSK přes prohlížeč.
 
 ## Transitous – jízdní řády bez cen
 

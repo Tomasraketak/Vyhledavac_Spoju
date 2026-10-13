@@ -172,11 +172,14 @@ class StationDB:
         Zvonařka (stan. 5)“ tak skončí aspoň u obce Brno.
         """
         words = [_alias(w) for w in normalize(name).split()]
-        for end in range(len(words), 0, -1):
-            hits = self.exact.get(" ".join(words[:end])) or self._abbreviated(words[:end])
-            if hits:
-                # stejné jméno: rozhodne důležitost (Vídeň u Žďáru < Vídeň v Rakousku)
-                return max(hits, key=lambda p: (p.kind != "b", p.score))
+        for variant in (words, _folded(words)):
+            for end in range(len(variant), 0, -1):
+                hits = self.exact.get(" ".join(variant[:end])) or self._abbreviated(variant[:end])
+                if hits:
+                    # stejné jméno: rozhodne důležitost (Vídeň u Žďáru < Vídeň v Rakousku)
+                    return max(hits, key=lambda p: (p.kind != "b", p.score))
+            if _folded(words) == words:
+                break
         return None
 
     def _abbreviated(self, words: list[str]) -> list[Place]:
@@ -205,6 +208,12 @@ def _cities(data: dict[str, Any]) -> list[Place]:
         out.append(Place(name=name, kind="c", country=country, code=code, local=local, score=score, keys=keys,
                          lat=lat, lon=lon))
     return out
+
+
+def _folded(words: list[str]) -> list[str]:
+    """Přepis bez přehlásek, jak ho píší cizí systémy: „Koebenhavn“ = København,
+    „Muenchen“ = München, „Goeteborg“ = Göteborg."""
+    return [w.replace("oe", "o").replace("ae", "a").replace("ue", "u") for w in words]
 
 
 def _all_words(words: list[str], key: str) -> bool:
@@ -278,10 +287,11 @@ def countries_for(name: str) -> set[str]:
     if db is None or not name:
         return set()
     words = [_alias(w) for w in normalize(name).split()]
-    for end in range(len(words), 0, -1):
-        hits = db.exact.get(" ".join(words[:end])) or db._abbreviated(words[:end])
-        if hits:
-            return {p.code or "CZ" for p in hits}
+    for variant in (words, _folded(words)):
+        for end in range(len(variant), 0, -1):
+            hits = db.exact.get(" ".join(variant[:end])) or db._abbreviated(variant[:end])
+            if hits:
+                return {p.code or "CZ" for p in hits}
     return set()
 
 
