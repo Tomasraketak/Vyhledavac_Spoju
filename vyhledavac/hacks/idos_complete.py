@@ -35,6 +35,8 @@ Kúty (ČD) a Kúty → Malacky (ZSSK).
 
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import datetime as dt
 import logging
 import re
@@ -45,6 +47,7 @@ from .. import geo
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import matches_station, normalize, same_place
 from ..registry import HACKS, PROVIDERS
+from ..trace import nested, set_tag, trace
 from .base import SearchFn, TravelHack, combine
 
 log = logging.getLogger(__name__)
@@ -73,18 +76,24 @@ TRANSFER_OTHER = dt.timedelta(minutes=10)
 MAX_VARIANTS = 2
 VARIANT_WAIT = dt.timedelta(hours=3)
 #: Zdroje, které jízdenky neprodávají (jen jízdní řád / tarif IDS).
-NOT_SELLERS = {"IDS", "Transitous"}
+NOT_SELLERS = {"IDS", "Transitous", "Plánovač"}
+#: Zdroj spoje, který se právě oceňuje (souběžně běží víc spojů).
+_SOURCE: contextvars.ContextVar[str] = contextvars.ContextVar("idos_complete_source", default="IDS")
+#: Kdo dodává spoje bez ceny s rozpisem jízdenek (``raw["plans"]``).
+ROUTE_SOURCES = {"IDS", "Plánovač"}
+#: Nejvýš tolik dotazů na prodejce na jeden spoj (dlouhá cesta přes 5 zemí).
+QUERY_BUDGET = 40
 
 
 @HACKS.register()
 class IdosCompleteHack(TravelHack):
     name = "idos_complete"
-    label = "Spoje z IDOS: úseky mimo IDS ocení dopravci"
+    label = "Spoje z IDOS a plánovače: úseky ocení dopravci"
     default_min_saving_pct = 0.0
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
                    search: SearchFn) -> list[Journey]:
-        todo = [j for j in journeys if j.provider == "IDS" and (j.raw.get("plans") or j.raw.get("unpriced"))]
+        todo = [j for j in journeys if j.provider in ROUTE_SOURCES and (j.raw.get("plans") or j.raw.get("unpriced"))]
         # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu
         todo.sort(key=lambda j: j.price is not None)
         todo = todo[:MAX_JOURNEYS]
@@ -93,36 +102,67 @@ class IdosCompleteHack(TravelHack):
         self._seen: dict[tuple[str, str, bool], list[Journey]] = {}
         # spoje z hlavního hledání: celá cesta jedním vlakem už může mít cenu
         self._base = [j for j in journeys if j.provider not in NOT_SELLERS and j.price is not None]
-        async def one(journey: Journey) -> list[Journey]:
+        async def one(n: int, journey: Journey) -> list[Journey]:
+            set_tag(f"#{n}")             # spoje běží souběžně – v trasování je rozliší číslo
             try:
                 return await self._complete(query, journey, search)
             except Exception:
                 log.exception("idos_complete: dopočet selhal")
                 return []
 
-        # postupně: souběžné dotazy na ČD přes prohlížeč nestíhají časový limit
+        # spoje souběžně; dotazy přes prohlížeč (ČD, ZSSK) ale po jednom –
+        # souběžné stránky prohlížeče nestíhaly časový limit
+        self._browser_lock = asyncio.Lock()
         found: list[Journey] = []
-        for journey in todo:
-            found.extend(await one(journey))
+        for part in await asyncio.gather(*(one(n, j) for n, j in enumerate(todo, 1))):
+            found.extend(part)
         return found
 
     async def _complete(self, query: SearchQuery, journey: Journey,
                         search: SearchFn) -> list[Journey]:
+        rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+        plans = _plans(journey)
+        _SOURCE.set(journey.provider)
+        trace(f"▶ spoj z {journey.provider} {journey.departure:%H:%M}–{journey.arrival:%H:%M} "
+              f"{rides[0].origin} → {rides[-1].destination}: "
+              + " ➔ ".join(f"{leg.line} [{leg.carrier or '?'}]" for leg in rides)
+              + f"; {len(plans)} rozpis(y) jízdenek")
+        budget = [QUERY_BUDGET]
+
+        async def limited(q: SearchQuery, **kw):
+            if budget[0] <= 0:
+                trace("⚠ vyčerpán limit dotazů na prodejce – dál jen z už známých odpovědí")
+                return []
+            budget[0] -= 1
+            return await search(q, **kw)
+
         best = None
-        for plan in _plans(journey):
-            segments = await self._price_plan(query, journey, plan, search)
-            if segments is None:
-                continue
-            total = sum((s.price for s in segments), Decimal(0))
-            if best is None or total < best[0]:
-                best = (total, segments)
+        with nested():
+            for n, plan in enumerate(plans, 1):
+                trace(f"rozpis {n}: " + " | ".join(_plan_text(rides, seg) for seg in plan))
+                with nested():
+                    segments = await self._price_plan(query, journey, plan, limited)
+                if segments is None:
+                    trace(f"✗ rozpis {n} nejde ocenit celý")
+                    continue
+                total = sum((s.price for s in segments), Decimal(0))
+                trace(f"✓ rozpis {n}: {total:.0f} Kč = " + " + ".join(
+                    f"{s.provider} {s.origin} → {s.destination} {s.price:.0f}" for s in segments))
+                if best is None or total < best[0]:
+                    best = (total, segments)
+        if best is None and journey.provider != "IDS":
+            # aspoň známé kusy – ať je vidět, který úsek chybí (z už známých odpovědí, bez dotazů)
+            partial = await self._partial(query, rides, plans[0], search)
+            if partial is not None:
+                partial.deep_link = journey.deep_link
+                return [partial]
         if best is None or (journey.price is not None and best[0] >= journey.price):
+            trace("✗ spoj zůstane bez ceny" if best is None else "= tarif IDS sám vyjde levněji")
             return []                        # IDS samo vyjde levněji
         out = []
-        rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
         if not any(o.price <= best[0] for o in self._base if _same(o, rides[0], rides[-1])):
             # (jinak tentýž spoj už má z hledání stejnou nebo nižší cenu)
-            merged = _merge(best[1], "🧩 Spoj z IDOS s jízdenkami")
+            merged = _merge(best[1], f"🧩 Spoj z {'IDOS' if journey.provider == 'IDS' else 'plánovače'} s jízdenkami")
             if merged is not None:
                 if not any(s.raw.get("other_route") for s in best[1]):
                     merged.legs = list(journey.legs)      # časy, zastávky a pěší přesuny z IDOS
@@ -130,6 +170,46 @@ class IdosCompleteHack(TravelHack):
                 out.append(merged)
         out += self._variants(query, best[1])
         return out
+
+    async def _partial(self, query: SearchQuery, rides: list[Leg], plan: list[dict],
+                       search: SearchFn) -> Journey | None:
+        """Spoj, který celý ocenit nejde: kusy s cenou z už známých odpovědí
+        (nejdelší možné) a kusy bez ceny – výsledek ukáže, co chybí."""
+        async def no_queries(q, **kw):
+            return []
+
+        pieces: list[Journey] = []
+        for seg in plan:
+            part = _slice(rides, seg["from"], seg["to"])
+            if seg["kind"] in ("local", "ids"):
+                price = Decimal(seg.get("price") or 0)
+                pieces.append(Journey(provider=seg.get("system") or "MHD", legs=part, fare_status=FareStatus.PRICED,
+                                      fares=[Fare(amount=price, currency="CZK", amount_czk=price,
+                                                  label=seg.get("system") or "MHD")]))
+                continue
+            i = 0
+            while i < len(part):
+                for j in range(len(part), i, -1):
+                    with nested():
+                        found = await self._seller(query, part[i:j], no_queries)
+                    if found is not None:
+                        pieces.append(found)
+                        i = j
+                        break
+                else:
+                    pieces.append(Journey(provider="?", legs=[part[i]], fare_status=FareStatus.UNKNOWN))
+                    i += 1
+        if not any(p.price is not None for p in pieces):
+            return None
+        missing = [p for p in pieces if p.price is None]
+        trace("◐ jen část ceny – chybí: " + ", ".join(f"{p.origin} → {p.destination} ({p.legs[0].line} "
+                                                      f"[{p.legs[0].carrier}])" for p in missing))
+        merged = _merge(pieces, "🧩 Spoj z plánovače – cenu zná jen část jízdenek")
+        if merged is not None:
+            merged.notes.append("Chybí cena úseků: " + ", ".join(
+                f"{p.origin} → {p.destination} ({p.legs[0].line}, {p.legs[0].carrier or 'dopravce neznámý'})"
+                for p in missing) + " – jízdenku kupte u dopravce.")
+        return merged
 
     def _variants(self, query: SearchQuery, segments: list[Journey]) -> list[Journey]:
         """Jiné navazující spoje na zbytek cesty za jízdenkami IDS (Trhové Sviny →
@@ -178,6 +258,8 @@ class IdosCompleteHack(TravelHack):
                     break
         variants = []
         for option in picks[:MAX_VARIANTS]:
+            trace(f"↪ navazující varianta: {option.provider} {option.departure:%H:%M}–{option.arrival:%H:%M} "
+                  f"{option.price:.0f} Kč")
             merged = _merge([*head, option], "🔀 Navazující varianta: jízdenky")
             if merged is not None:
                 variants.append(merged)
@@ -194,6 +276,12 @@ class IdosCompleteHack(TravelHack):
             part = _slice(legs, seg["from"], seg["to"])
             if not part:
                 return None
+            if seg["kind"] == "local":            # MHD uprostřed cesty – jízdenka na místě
+                segments.append(Journey(provider="MHD", legs=part, fare_status=FareStatus.PRICED,
+                                        fares=[Fare(amount=Decimal(0), currency="CZK", amount_czk=Decimal(0),
+                                                    label="MHD", tariff="jízdenka MHD na místě – cena "
+                                                                        "není započtena")]))
+                continue
             if seg["kind"] == "ids":
                 price = Decimal(seg["price"])
                 segments.append(Journey(
@@ -201,7 +289,7 @@ class IdosCompleteHack(TravelHack):
                     fares=[Fare(amount=price, currency="CZK", amount_czk=price, label=seg["system"],
                                 tariff=seg["name"])]))
                 continue
-            bought = await self._price_run(query, part, search, MAX_SPLITS)
+            bought = await self._price_run(query, part, search, seg.get("splits", MAX_SPLITS))
             if bought is None:
                 return None
             segments.extend(bought)
@@ -212,6 +300,13 @@ class IdosCompleteHack(TravelHack):
         """Jízdenky na souvislý kus cesty: celý u jednoho prodejce, jinak
         co nejdelší začátek + zbytek (rekurzivně) – lom v přestupní stanici
         nebo ve stanici na hranici státu, kde vlak staví."""
+        trace(f"kus {run[0].origin} → {run[-1].destination} ({len(run)} úsek/ů, "
+              f"{', '.join(sorted(_run_countries(run))) or '?'})")
+        with nested():
+            return await self._price_run_inner(query, run, search, splits, ready)
+
+    async def _price_run_inner(self, query: SearchQuery, run: list[Leg], search: SearchFn,
+                               splits: int, ready: dt.datetime | None) -> list[Journey] | None:
         whole = await self._seller(query, run, search, ready)
         countries = _run_countries(run)
         abroad = not countries <= {"CZ"}
@@ -228,6 +323,8 @@ class IdosCompleteHack(TravelHack):
         if len(options) == 1:
             return options[0] if isinstance(options[0], list) else [options[0]]
         split_price = sum((s.price for s in split), Decimal(0))
+        trace(f"⚖ celá jízdenka {whole.provider} {whole.price:.0f} Kč × rozdělená {split_price:.0f} Kč "
+              f"→ {'rozdělená' if split_price < whole.price else 'celá'}")
         return split if split_price < whole.price else [whole]
 
     async def _split_run(self, query: SearchQuery, run: list[Leg], search: SearchFn,
@@ -236,11 +333,17 @@ class IdosCompleteHack(TravelHack):
         if len(run) > MAX_RUN_LEGS:          # dlouhý kus: jen po celých úsecích
             points = [p for p in points if p[1] == 0]
         found: list[list[Journey]] = []
+        if points:
+            trace("možné lomy: " + ", ".join(_point_name(run, p) for p in reversed(points)))
         for point in reversed(points):        # nejdelší začátek první (ČD co nejdál)
             head, tail = _split(run, point)
             if not head or not tail:
                 continue
-            first = await self._seller(query, head, search, ready)
+            trace(f"✂ lom v {_point_name(run, point)}: {head[0].origin} → {head[-1].destination} + "
+                  f"{tail[0].origin} → {tail[-1].destination}")
+            with nested():
+                first = await self._seller(query, head, search, ready,
+                                           deadline=tail[0].departure - TRANSFER_SAME)
             if first is None:
                 continue
             # zbytek navazuje na skutečný příjezd jízdenky začátku (může být jiný spoj)
@@ -250,10 +353,13 @@ class IdosCompleteHack(TravelHack):
                 if len(found) >= MAX_SPLIT_OPTIONS:
                     break
         # nejlevnější z několika lomů: ČD do Villachu + ÖBB bývá levnější než ČD do Jesenic + ÖBB
+        if not found:
+            trace("✗ žádný lom nevyšel")
         return min(found, key=lambda parts: sum((p.price for p in parts), Decimal(0)), default=None)
 
     async def _seller(self, query: SearchQuery, run: list[Leg], search: SearchFn,
-                      ready: dt.datetime | None = None) -> Journey | None:
+                      ready: dt.datetime | None = None,
+                      deadline: dt.datetime | None = None) -> Journey | None:
         """Nejlevnější jízdenka na kus ``run``: přesně tentýž spoj, jinak spoj se
         stejným odjezdem, který nedojede později; za lomem (``ready`` = příjezd
         předchozí jízdenky) i nejbližší navazující spoj – WESTbahn Linz →
@@ -265,8 +371,19 @@ class IdosCompleteHack(TravelHack):
         origin, destination = _query_name(first.origin, abroad), _query_name(last.destination, abroad)
         from_base = _match(self._base, first, last, origin, destination)
         if from_base is not None:
+            trace(f"✓ {origin} → {destination}: už z hledání – {from_base.provider} {from_base.price:.0f} Kč")
             return _on_route(from_base, run)
-        plain, browser = sellers_for(origin, destination, run, countries)
+        crossed = _all_countries(run) or countries
+        plain, browser = sellers_for(origin, destination, run, crossed)
+        if browser and _SOURCE.get() != "IDS" and not any(leg.mode is Mode.TRAIN for leg in run):
+            browser = []                     # autobus z plánovače: ČD přes prohlížeč (pomalé) neptat
+        if not plain and not browser:
+            trace(f"– {origin} → {destination} ({', '.join(sorted(crossed))}): nikdo neprodává tuhle "
+                  "kombinaci zemí, neptám se")
+            return None
+        trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
+              f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
+              + (f" | prohlížeč: {', '.join(browser)}" if browser else ""))
         asks = [(plain, False)] + ([(browser, True)] if browser else [])
         options: list[Journey] = []
         for only, allow_browser in asks:
@@ -278,24 +395,51 @@ class IdosCompleteHack(TravelHack):
                 since = first.departure - dt.timedelta(minutes=2)
                 if ready is not None:
                     since = min(since, ready + TRANSFER_SAME)
-                fresh = await search(query.leg_query(origin, destination, since),
-                                     allow_browser=allow_browser, only=only)
+                lock = getattr(self, "_browser_lock", None) if allow_browser else None
+                if lock is not None:
+                    async with lock:
+                        fresh = await search(query.leg_query(origin, destination, since),
+                                             allow_browser=allow_browser, only=only)
+                else:
+                    fresh = await search(query.leg_query(origin, destination, since),
+                                         allow_browser=allow_browser, only=only)
                 cached = cached + list(fresh)
                 self._seen[key] = cached
             options.extend(cached)
         # jen spoje opravdu z místa do místa (prodejce může vrátit i jiný cíl)
         start, end = _end_countries(run)
-        options = [o for o in options if o.provider not in NOT_SELLERS and o.legs
-                   and _same_city(o.legs[0].origin, first.origin, origin)
-                   and _same_city(o.legs[-1].destination, last.destination, destination)
-                   and _marked_ok(o.legs[0].origin, start) and _marked_ok(o.legs[-1].destination, end)]
+        def place_ok(o: Journey) -> bool:
+            """Odkud i kam sedí – u spoje přesně ve stejný čas stačí jeden konec
+            (SJ píše Kodaň švédsky „Köpenhamn H“, DB „Praha hl.n.“ německy)."""
+            if not (_marked_ok(o.legs[0].origin, start) and _marked_ok(o.legs[-1].destination, end)):
+                return False
+            a = _same_city(o.legs[0].origin, first.origin, origin)
+            b = _same_city(o.legs[-1].destination, last.destination, destination)
+            return (a and b) or ((a or b) and _same(o, first, last))
+
+        options = [o for o in options if o.provider not in NOT_SELLERS and o.legs and place_ok(o)]
         same = [o for o in options if o.price is not None and _same(o, first, last)]
-        if same:
-            return _on_route(min(same, key=lambda o: o.price), run)
+        with nested():
+            counts: dict[str, list[int]] = {}
+            for o in options:
+                c = counts.setdefault(o.provider, [0, 0])
+                c[0] += 1
+                c[1] += o.price is not None
+            trace("odpovědi z místa do místa: " + (", ".join(
+                f"{name} {n} (s cenou {p})" for name, (n, p) in sorted(counts.items())) or "žádné"))
+            if same:
+                best = min(same, key=lambda o: o.price)
+                trace(f"✓ tentýž spoj: {best.provider} {best.price:.0f} Kč"
+                      + (f" (další: {', '.join(f'{o.provider} {o.price:.0f}' for o in same if o is not best)})"
+                         if len(same) > 1 else ""))
+                return _on_route(best, run)
         # jiná trasa se stejným odjezdem, která nedojede později (ÖBB přes Attnang
         # místo Selzthalu) – jízdenka je na ni, úseky se vezmou od prodejce
+        # deadline = odjezd navazujícího úseku (s rezervou): jiný spoj prodejce
+        # smí přijet později než trasa, pokud ho ještě stihne
+        latest = max(deadline or last.arrival, last.arrival) + dt.timedelta(minutes=1)
         other = [o for o in options if o.price is not None and abs(o.departure - first.departure) <= SAME_DEPARTURE
-                 and o.arrival <= last.arrival + dt.timedelta(minutes=1)]
+                 and o.arrival <= latest]
         if not other and ready is not None:
             late = dt.timedelta(minutes=60)
             other = [o for o in options if o.price is not None
@@ -305,10 +449,27 @@ class IdosCompleteHack(TravelHack):
             other = other[:1]
         if other:
             chosen = min(other, key=lambda o: o.price)
+            trace(f"✓ jiný spoj ve stejný čas / navazující: {chosen.provider} {chosen.departure:%H:%M}–"
+                  f"{chosen.arrival:%H:%M} {chosen.price:.0f} Kč", )
             return Journey(provider=chosen.provider, legs=list(chosen.legs), fares=list(chosen.fares),
                            fare_status=chosen.fare_status, deep_link=chosen.deep_link,
                            notes=list(chosen.notes), raw={**chosen.raw, "other_route": True})
+        trace("✗ tentýž spoj nikdo neprodává")
         return None
+
+
+def _plan_text(rides: list[Leg], seg: dict) -> str:
+    (k0, i0), (k1, i1) = seg["from"], seg["to"]
+    a = rides[k0].stops[i0].name if rides[k0].stops else rides[k0].origin
+    b = rides[k1].stops[i1].name if rides[k1].stops else rides[k1].destination
+    if seg["kind"] == "ids":
+        return f"{seg['system']} {a} → {b} {Decimal(seg['price']):.0f} Kč"
+    return f"{'MHD' if seg['kind'] == 'local' else 'koupit'} {a} → {b}"
+
+
+def _point_name(run: list[Leg], point: tuple[int, int]) -> str:
+    k, i = point
+    return run[k].origin if i == 0 else f"{run[k].stops[i].name} (ve vlaku {run[k].line})"
 
 
 def sellers_for(origin: str, destination: str, run: list[Leg],
@@ -320,10 +481,12 @@ def sellers_for(origin: str, destination: str, run: list[Leg],
     trains_cd = all("České dráhy" in leg.carrier or leg.carrier in ("ČD", "CD") for leg in run)
     if countries <= {"CZ"}:
         return list(SELLERS), (list(BROWSER_SELLERS) if trains_cd else [])
+    buses = all(leg.mode is Mode.BUS for leg in run)
     plain = [name for name, cls in PROVIDERS.items()
              if name not in NOT_SELLERS and getattr(cls, "provides_prices", True)
              and not getattr(cls, "needs_browser", False)
-             and countries <= set(getattr(cls, "countries", ()))]
+             and countries <= set(getattr(cls, "countries", ()))
+             and (buses or name not in BUS_SELLERS)]
     # vlakem přes prohlížeč (ČD, ZSSK) – i místo autobusu do ciziny, ať jde porovnat
     trains = any(leg.mode is Mode.TRAIN for leg in run) or len(countries) > 1
     browser = [name for name, home in BROWSER_FROM.items() if home in countries and trains]
@@ -343,6 +506,16 @@ def _end_countries(run: list[Leg]) -> tuple[str | None, str | None]:
 
 def _run_countries(run: list[Leg]) -> set[str]:
     return {c for c in _end_countries(run) if c}
+
+
+def _all_countries(run: list[Leg]) -> set[str]:
+    """Všechny země, kterými kus vede (konce každého úseku) – prodejce musí
+    obsloužit všechny: Stockholm → Kodaň → Hamburk potřebuje SE, DK i DE."""
+    found = set(_run_countries(run))
+    for leg in run:
+        ends = _end_countries([leg])
+        found.update(c for c in ends if c)
+    return found
 
 
 def _marked_ok(name: str, expected: str | None) -> bool:
@@ -390,6 +563,28 @@ def _stop_country(name: str, neighbours: set[str], rail: bool) -> str | None:
     return found
 
 
+def _city_inside(name: str):
+    """Město schované uvnitř jména stanice: „S+U Berlin Hauptbahnhof“ → Berlín,
+    „Malmö central train station FlixBus stop“ → Malmö. Delší shoda vyhrává,
+    při stejné délce větší město."""
+    from .. import stations
+
+    db = stations.database()
+    if db is None:
+        return None
+    words = normalize(name).split()
+    best = None
+    for i in range(len(words)):
+        for j in range(len(words), i, -1):
+            hits = [p for p in db.exact.get(" ".join(words[i:j]), []) if p.kind == "c"]
+            if hits:
+                place = max(hits, key=lambda p: p.score)
+                if best is None or (j - i, place.score) > best[0]:
+                    best = ((j - i, place.score), place)
+                break
+    return best[1] if best else None
+
+
 def _query_name(name: str, abroad: bool) -> str:
     """Jméno pro dotaz u prodejců. Do ciziny se ptáme na město: zastávka
     „České Budějovice, aut.nádr.“ → „České Budějovice“, „Salzburg South“ →
@@ -401,7 +596,7 @@ def _query_name(name: str, abroad: bool) -> str:
     station = _czech_station(name)
     if station is not None:
         return station.name
-    place = stations.place(name)
+    place = stations.place(name) or _city_inside(name)
     if place is None:
         return name.split(",")[0].strip()
     if place.country:
@@ -411,11 +606,15 @@ def _query_name(name: str, abroad: bool) -> str:
     return place.name
 
 
+#: Prodávají jen vlastní autobusy – na vlak se jich ptát nemá smysl.
+BUS_SELLERS = {"FlixBus"}
+
 SYSTEMS_IDS = {"PID", "IDESKA", "IDS JMK", "IDOL", "IREDO", "DÚK", "IDPK", "VDV", "IDZK", "IDSOK", "ODIS"}
 
 
 def _merge(segments: Sequence[Journey], title: str) -> Journey | None:
-    lines = "; ".join(f"{s.origin} → {s.destination}: {s.provider} {s.price:.0f} Kč" for s in segments)
+    lines = "; ".join(f"{s.origin} → {s.destination}: {s.provider} "
+                      + (f"{s.price:.0f} Kč" if s.price is not None else "cena neznámá") for s in segments)
     return combine(" + ".join(dict.fromkeys(s.provider for s in segments)), segments,
                    notes=[f"{title}: {lines}."])
 
@@ -443,8 +642,8 @@ def _split_points(run: list[Leg]) -> list[tuple[int, int]]:
     points: list[tuple[int, int]] = [(k, 0) for k in range(1, len(run))]
     for k, leg in enumerate(run):
         stops = leg.stops
-        if len(stops) < 3:
-            continue
+        if len(stops) < 3 or leg.mode is not Mode.TRAIN:
+            continue                         # autobus (FlixBus) se prodává celý, lom jen ve vlaku
         raw = [geo.country_of(s.name) for s in stops]
         countries = [_stop_country(s.name, {c for j, c in enumerate(raw[max(0, i - 2):i + 3], max(0, i - 2))
                                             if c and j != i}, leg.mode is Mode.TRAIN)

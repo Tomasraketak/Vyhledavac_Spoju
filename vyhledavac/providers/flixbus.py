@@ -30,7 +30,7 @@ from ..models import (
     SearchQuery,
     Stop,
 )
-from ..normalize import best_match
+from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
 from .base import HttpProvider
 
@@ -59,7 +59,8 @@ class FlixBusProvider(HttpProvider):
     currency = "CZK"
     provides_prices = True
     provides_stops = False
-    countries = ("CZ", "SK", "AT", "DE", "PL", "HU", "FR", "IT", "NL", "BE", "ES")
+    countries = ("CZ", "SK", "AT", "DE", "PL", "HU", "FR", "IT", "NL", "BE", "ES", "PT", "LU", "CH", "DK", "SE", "NO",
+                 "RO", "BG", "HR", "SI", "RS", "LT", "LV", "EE", "GB", "UA", "BA", "ME", "MK", "AL")
     region = "central"          # zahraniční města chce místně („Salzburg“, ne „Salcburk“)
     referer = "https://www.flixbus.cz/"
     min_interval = 0.4
@@ -85,7 +86,7 @@ class FlixBusProvider(HttpProvider):
 
     async def resolve_city(self, place: str, country_hint: str | None = None) -> tuple[str, str]:
         """Najde ID města ve FlixBusu. Vrací ``(uuid, oficiální název)``."""
-        key = f"city:{place.lower()}:{country_hint or ''}"
+        key = f"city2:{place.lower()}:{country_hint or ''}"
         cached = self.cache.get(self.name, key)
         if cached:
             return tuple(cached)  # type: ignore[return-value]
@@ -101,7 +102,16 @@ class FlixBusProvider(HttpProvider):
             raise StationNotFoundError(self.name, f"město {place!r} nenalezeno")
 
         names = [str(item.get("name", "")) for item in data]
-        idx = best_match(place, names, threshold=0.4)
+        # Přesná shoda s jménem města (i v češtině – našeptávač s lang=cs vrací
+        # „Paříž“ i na dotaz „Paris“), jinak podobnost, jinak první návrh.
+        from .. import stations
+
+        wanted = {normalize(place)}
+        city = stations.place(place)
+        if city is not None:
+            wanted |= {normalize(city.name), normalize(city.local)} - {""}
+        exact = [i for i, n in enumerate(names) if normalize(n) in wanted]
+        idx = exact[0] if exact else best_match(place, names, threshold=0.6)
         if idx is None:
             # Našeptávač řadí podle skóre – když se neshodneme, vezmeme jeho první.
             idx = 0

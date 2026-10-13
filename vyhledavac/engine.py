@@ -73,6 +73,8 @@ class SearchEngine:
         self._semaphore = asyncio.Semaphore(concurrency)
         self._leg_cache: dict[tuple, list[Journey]] = {}
         self._leg_locks: dict[tuple, asyncio.Lock] = {}
+        #: Dopravci, kteří při hledání úseků hlásili blokaci – dál se jich neptáme.
+        self._leg_blocked: set[str] = set()
         self._skipped: set[str] = set()
 
     # ---- tovární metody ------------------------------------------------------
@@ -263,7 +265,7 @@ class SearchEngine:
             # jízdní řád bez ceny je pro výpočet úspory k ničemu. Zároveň
             # vynecháme ty, co potřebují prohlížeč: hacků je hodně a každý
             # start prohlížeče by trval déle než celé hledání.
-            skipped = self._skipped
+            skipped = self._skipped | self._leg_blocked
             sellers = [
                 p for p in self.providers
                 if p.provides_prices and p.name not in skipped
@@ -274,6 +276,14 @@ class SearchEngine:
                 self._leg_cache[key] = []
                 return []
             results = await self._run_providers(query, providers=sellers)
+            from .trace import trace
+
+            for r in results:
+                if r.error and not r.not_served:
+                    trace(f"! {r.provider}: {r.error}"
+                          + (" – na další úseky se ho už neptám" if r.blocked else ""))
+                if r.blocked:
+                    self._leg_blocked.add(r.provider)
             journeys = [j for r in results for j in r.journeys]
             self._leg_cache[key] = journeys
             return journeys

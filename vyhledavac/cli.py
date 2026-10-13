@@ -18,7 +18,7 @@ from .models import DEFAULT_TZ, DiscountCard, Passenger, SearchQuery, SearchResu
 from .registry import FILTERS, HACKS, PROVIDERS, load_plugins
 
 DEFAULT_PROVIDERS = ["RegioJet", "FlixBus", "ÖBB", "Bileto", "Arriva", "PKP", "MÁV", "DB", "NS", "Trenitalia",
-                     "OUIGO", "SNCF", "Vy", "DSB", "SJ", "BDŽ", "CP", "Srbijavoz", "SBB", "Renfe", "Eurostar", "EuropeanSleeper", "CFR", "SŽ", "HŽPP", "LeoExpress", "IDS"]
+                     "OUIGO", "SNCF", "Vy", "DSB", "SJ", "BDŽ", "CP", "Srbijavoz", "SBB", "Renfe", "Eurostar", "EuropeanSleeper", "CFR", "SŽ", "HŽPP", "LeoExpress", "IDS", "Plánovač"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -66,6 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="vypsat dostupné dopravce, filtry a hacky")
     parser.add_argument("-v", "--verbose", action="count", default=0,
                         help="podrobnější log (-vv pro ladění)")
+    parser.add_argument("--trace", action="store_true",
+                        help="vypisovat úvahy: kde se zkouší lomy jízdenek, u kterých dopravců, co vyšlo")
     return parser
 
 
@@ -291,6 +293,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         level = logging.DEBUG
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    if args.trace:
+        from .trace import enable_terminal
+
+        enable_terminal()
 
     if args.list_providers:
         print_listing()

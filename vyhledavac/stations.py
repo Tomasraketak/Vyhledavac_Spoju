@@ -56,6 +56,8 @@ class Place:
     country: str = ""             # jen u zahraničí – česky („Německo“)
     code: str = ""                # kód země u zahraničí („DE“)
     local: str = ""               # místní jméno pro dopravce („München“), je-li jiné
+    lat: float | None = None      # souřadnice (jen zahraniční města)
+    lon: float | None = None
     # Všechny integrované systémy, do kterých místo patří, i přesahy
     # z jiných krajů: {"IDESKA": ("932",), "PID": ("5",)}.
     systems: dict[str, tuple[str, ...]] = field(default_factory=dict, compare=False)
@@ -194,11 +196,14 @@ class StationDB:
 def _cities(data: dict[str, Any]) -> list[Place]:
     countries = data["countries"]
     out = []
-    for name, country_i, local, population, alt, capital in data["places"]:
+    for row in data["places"]:
+        name, country_i, local, population, alt, capital = row[:6]
+        lat, lon = (row[6], row[7]) if len(row) > 7 else (None, None)
         code, country = countries[country_i]
         keys = (normalize(name), *(a for a in alt.split("|") if a))
         score = population // CITY_DIVISOR * (2 if capital else 1)
-        out.append(Place(name=name, kind="c", country=country, code=code, local=local, score=score, keys=keys))
+        out.append(Place(name=name, kind="c", country=country, code=code, local=local, score=score, keys=keys,
+                         lat=lat, lon=lon))
     return out
 
 

@@ -117,6 +117,7 @@ dopravce.
 | Leo Express | `leo.py` | GraphQL API | jen jeho stanice | skupina, CZK | ověřeno živě |
 | IDS | `ids_idos.py`, `idos.py` | IDOS + tarify IDS | jeden IDS / zastávka bez nádraží | skupina, z tarifu | ověřeno živě |
 | Transitous | `transitous_jr.py`, `transitous.py` | JSON API (data CIS JŘ) | na přání; záloha IDS | bez cen | ověřeno živě |
+| Plánovač | `planner.py`, `transitous.py` | JSON API Transitous (celá Evropa) | cesty mimo Česko / do ciziny | bez cen, ocení hack po kusech | ověřeno živě |
 | ÖBB | `obb.py`, `_hafas.py`, `_oebb_shop.py` | HAFAS + e-shop API | ne po Česku | skupina, EUR | jízdní řád živě; e-shop z datacentra blokován |
 | ZSSK | `zssk.py` | prohlížeč | ne po Česku | 1 osoba, EUR | ověřeno živě |
 | PKP | `pkp.py` | Koleo API | konec v Polsku | 1 dospělý, PLN | ověřeno živě |
@@ -401,6 +402,33 @@ tarifu, ne z e-shopu ODISka.
   chybou, vezmou se spoje z [Transitous](#transitous--jízdní-řády-bez-cen)
   (stejná data CIS JŘ). Zastávky a licence linek jsou už ve spoji, detail
   z IDOS se nestahuje; spoj nese poznámku „Spoj z Transitous“.
+
+## Plánovač – trasy po celé Evropě
+
+**Soubory:** `providers/planner.py`, `transitous.py` · **Typ:** JSON API Transitous · **Klíč:** ne
+
+IDOS zná jen cesty z Česka a do Česka. Cesty jinde (Kraków → Hamar,
+Stockholm → Amsterdam, Valencie → Turín) naplánuje Transitous
+(`api.transitous.org/api/v5/plan`, MOTIS nad otevřenými jízdními řády
+Evropy) – vlaky, FlixBus i MHD s dopravcem každého úseku, bez cen.
+
+1. Zahraniční město → souřadnice středu z databáze měst (GeoNames), české
+   místo → zastávka podle jména. (Geokódování podle jména vracelo i cizí
+   data: Kraków ze švédského feedu, Paříž v Brazílii.)
+2. MHD a chůze na začátku a konci trasy se vypustí, spoj začíná a končí na
+   nádraží. MHD uprostřed (metro mezi pařížskými nádražími, S-Bahn po
+   Berlíně, kratší než 12 km) zůstane jako úsek „MHD“ bez ceny.
+3. První 3 spoje do 4:15 h vrátí bez ceny s rozpisem „koupit celé“ a hack
+   `idos_complete` je ocení po kusech (viz IDS výše): prodejce musí
+   obsluhovat všechny země kusu, FlixBus jen autobusy, ČD přes prohlížeč
+   jen vlaky; dělí se v přestupech a na hranicích uvnitř vlaku, nejvýš
+   40 dotazů na spoj. Co nikdo neprodá, ukáže se jako spoj s částí cen
+   („◐“) a seznamem úseků, kde cena chybí.
+
+Výsledky z ověření (15. 10. 2026, viz `--trace`): Košice → Bordeaux
+RegioJet + FlixBus 4 024 Kč; Stockholm → Malmö SJ, Malmö → Kodaň SJ;
+úseky v Německu prodává DB, ze serveru, kde to bylo zkoušeno, je ale DB
+blokovaná (Akamai), takže tam cena chyběla.
 
 ## Transitous – jízdní řády bez cen
 

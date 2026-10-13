@@ -39,6 +39,7 @@ from .. import stations
 from ..browser import playwright_available
 from ..engine import SearchEngine
 from ..hacks.ids_ticket import PASS_EXAMPLES, SYSTEMS as IDS_SYSTEMS
+from ..trace import collect as collect_trace
 from ..filters.base import FilterPipeline
 from ..models import (
     DEFAULT_TZ,
@@ -101,6 +102,8 @@ class SearchSession:
             name: {"name": name, "status": "running", "detail": "hledám…"} for name in providers
         }
         self.problems: list[dict[str, Any]] = []
+        #: úvahy hacků (``vyhledavac.trace``) – kde se zkoušely lomy, u koho, co vyšlo
+        self.trace: list[str] = []
         if any(p.has(DiscountCard.ISIC) and p.age >= 26 for p in query.passengers):
             self._problem("ISIC", "studentská sleva platí jen do 26 let – hledám ceny pro "
                                   "dospělého. Jste-li mladší, opravte věk.", "soft")
@@ -221,6 +224,7 @@ class SearchSession:
             "providers": [self.status[name] for name in self.providers],
             "problems": self.problems,
             "journeys": items,
+            "trace": self.trace[-TRACE_LINES:],
         }
         text = json.dumps(payload, ensure_ascii=False)
         with self.cond:
@@ -303,9 +307,10 @@ class WebApp:
         engine = SearchEngine.build(session.providers, filter_spec=SERVER_FILTERS,
                                     hack_names=session.hacks)
         try:
-            result = await engine.search(
-                session.query, on_partial=session.on_partial, on_progress=session.on_progress,
-                sort_by="departure", enable_hacks=bool(session.hacks))
+            with collect_trace(session.trace):
+                result = await engine.search(
+                    session.query, on_partial=session.on_partial, on_progress=session.on_progress,
+                    sort_by="departure", enable_hacks=bool(session.hacks))
             session.on_done(result)
         except Exception as exc:  # noqa: BLE001 - i tohle musí skončit v UI
             log.exception("hledání selhalo")
@@ -320,6 +325,9 @@ class WebApp:
             session.future.cancel()
         session.finish(cancelled=True)
 
+
+#: Kolik řádků úvah posílat do prohlížeče (Diagnostika).
+TRACE_LINES = 3000
 
 #: Skupiny dopravců ve webovém rozhraní, v tomto pořadí.
 REGIONS = [("cz", "Česko"), ("central", "Střední Evropa"), ("east", "Východní Evropa"),

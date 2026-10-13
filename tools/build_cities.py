@@ -15,7 +15,8 @@ v jednotlivých jazycích). U každého města:
   dopravcům, protože české exonymum („Lublaň“) jejich vyhledávání nezná;
   u zemí s cyrilicí/řečtinou anglický přepis (Sofia, Beograd → Belgrade);
 * další podoby pro hledání (anglicky, německy, místní jazyky);
-* počet obyvatel = důležitost v našeptávači.
+* počet obyvatel = důležitost v našeptávači;
+* souřadnice středu (pro plánovač tras po Evropě – Transitous).
 
 Česko se vynechává – to pokrývá ``tools/build_stations.py`` z CIS JŘ.
 """
@@ -117,6 +118,7 @@ def load_cities(path: Path) -> dict[int, dict]:
             if not in_europe(code, lat, lon):
                 continue
             cities[int(f[0])] = {"name": f[1], "ascii": f[2], "country": code, "pop": int(f[14] or 0),
+                                 "lat": round(lat, 4), "lon": round(lon, 4),
                                  "region": f[10],
                                  "capital": feature == "PPLC", "names": defaultdict(list)}
     return cities
@@ -170,7 +172,7 @@ def main() -> None:
         czech, local, keys = describe(city)
         alt = "|".join(k for k in keys if k != normalize(czech))
         rows.append([czech, codes.index(city["country"]), local if local != czech else "",
-                     city["pop"], alt, 1 if city["capital"] else 0])
+                     city["pop"], alt, 1 if city["capital"] else 0, city["lat"], city["lon"]])
     data = {"meta": {"built": dt.date.today().isoformat(), "source": "GeoNames cities1000 (CC BY 4.0)",
                      "count": len(rows)},
             "countries": [[c, COUNTRIES[c]] for c in codes], "places": rows}

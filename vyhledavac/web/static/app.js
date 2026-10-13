@@ -675,6 +675,10 @@
       }
       for (const p of S.data.problems || []) lines.push(`  ! ${p.provider}: ${p.message}${p.raw ? ` [${p.raw}]` : ''}`);
       lines.push(`  Spojení ze serveru: ${(S.data.journeys || []).length}`);
+      if ((S.data.trace || []).length) {
+        lines.push('', 'Jak program přemýšlel (lomy jízdenek, dotazy na dopravce):');
+        for (const t of S.data.trace) lines.push(`  ${t}`);
+      }
     }
     if (S.clientError) lines.push(`Chyba v prohlížeči: ${S.clientError}`);
     return lines.join('\n');
@@ -1059,7 +1063,7 @@
     // a IDS – proto nový klíč a jednorázové zapnutí všech dopravců přidaných od té doby.)
     const known = store.get('providersKnown2', null);
     const added = ['Bileto', 'Arriva', 'PKP', 'MÁV', 'DB', 'NS', 'Trenitalia', 'OUIGO', 'SNCF', 'Vy', 'DSB', 'SJ', 'BDŽ', 'CP', 'Srbijavoz', 'SBB', 'Renfe', 'Eurostar',
-      'EuropeanSleeper', 'CFR', 'SŽ', 'HŽPP', 'LeoExpress', 'IDS'];
+      'EuropeanSleeper', 'CFR', 'SŽ', 'HŽPP', 'LeoExpress', 'IDS', 'Plánovač'];
     if (saved) meta.providers.filter(p => p.default && (Array.isArray(known) ? !known.includes(p.name) : added.includes(p.name)))
       .forEach(p => S.providersOn.add(p.name));
     store.set('providersKnown2', names);

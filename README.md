@@ -150,6 +150,7 @@ python -m vyhledavac --list-providers
 python -m vyhledavac Praha Brno --only-priced  # jen spoje se známou cenou
 python -m vyhledavac Bratislava Košice --providers ZSSK --card sk_free
 python -m vyhledavac Praha Brno --json        # strojově čitelný výstup
+python -m vyhledavac Třeboň Lublaň --hacks idos_complete --trace   # vypisuje, jak hledá lomy jízdenek
 
 # webové rozhraní (otevře prohlížeč)
 python -m vyhledavac.web
@@ -158,6 +159,30 @@ python -m vyhledavac.web --port 8080 --no-browser
 # starší okenní rozhraní (tkinter)
 python -m vyhledavac.gui
 ```
+
+### Jak program přemýšlí (`--trace`)
+
+S přepínačem `--trace` vypisuje do terminálu (stderr) průběžně úvahy hacku,
+který skládá jízdenky na spoj z IDOS / plánovače – kde zkouší lomy, u kterých
+dopravců se ptá, co odpověděli a co vybral:
+
+```
+· ▶ spoj z IDS 09:05–18:09 Třeboň, aut.nádr. → Ljubljana: Bus 300 [ČSAD] ➔ Sp 3803 [České dráhy] ➔ …
+·   rozpis 1: IDESKA Třeboň, aut.nádr. → České Budějovice, aut.nádr. 49 Kč | koupit České Budějovice → Ljubljana
+·     kus České Budějovice → Ljubljana (3 úsek/ů, CZ, SI)
+·       ? České Budějovice → Lublaň 10:05–18:09 (AT, CZ, SI): ptám se MÁV, ÖBB | prohlížeč: ČD
+·         odpovědi z místa do místa: ČD 4 (s cenou 2), ÖBB 3 (s cenou 3)
+·       ✗ tentýž spoj nikdo neprodává
+·       možné lomy: Villach Hbf, Jesenice (ve vlaku D 317), Salzburg Hbf
+·       ✂ lom v Villach Hbf: České Budějovice → Villach Hbf + Villach Hbf → Ljubljana
+·           ✓ tentýž spoj: ČD 411 Kč
+·       ⚖ celá jízdenka ÖBB 1734 Kč × rozdělená 604 Kč → rozdělená
+```
+
+Značky: `▶` spoj, `?` dotaz na prodejce, `✓` nalezená jízdenka, `✗` nic,
+`✂` zkoušený lom, `⚖` porovnání, `–` kus, který nikdo neprodává (bez dotazu),
+`!` chyba dopravce, `◐` spoj jen s částí cen. Ve webovém rozhraní je totéž
+v panelu *Diagnostika* (pod výsledky) po skončení hledání.
 
 Z Pythonu:
 
