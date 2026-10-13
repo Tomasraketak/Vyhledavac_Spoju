@@ -35,6 +35,7 @@ class IdosLeg:
     stops: list[str] = field(default_factory=list)   # celá projetá trasa (z detailu)
     # projeté zastávky (jméno, příjezd, odjezd), když je zná už zdroj spojení (Transitous)
     inline_stops: list[tuple[str, str, str]] = field(default_factory=list)
+    walk_before: int = 0            # pěší přesun před tímto úsekem (min), „Přesun asi 8 min“
 
     @property
     def is_bus(self) -> bool:
@@ -123,10 +124,12 @@ def parse_results(page: str, day: dt.date) -> list[IdosConnection]:
             if dep is None or arr is None:
                 continue
             last = arr
+            walk = re.search(r'class="walk[^"]*">.*?P[řr]esun\s+(?:asi\s+)?(\d+)\s*min', item, re.S)
             legs.append(IdosLeg(line=line, kind=kind, carrier=_text(owner.group(1)) if owner else "",
                                 origin=_text(stations[0][1]), destination=_text(stations[-1][1]),
                                 departure=dep, arrival=arr,
-                                detail_url=htmlmod.unescape(href.group(1)) if href else ""))
+                                detail_url=htmlmod.unescape(href.group(1)) if href else "",
+                                walk_before=int(walk.group(1)) if walk else 0))
         if legs:
             out.append(IdosConnection(legs, htmlmod.unescape(share.group(1)) if share else ""))
     return out
@@ -152,6 +155,21 @@ def parse_stops(page: str) -> list[tuple[str, str, str]]:
             times.append(hhmm.group(0) if hhmm else "")
         stops.append((_text(name.group(1)), times[0], times[1]))
     return stops
+
+
+def parse_distances(page: str) -> list[float | None]:
+    """Kilometry zastávek z detailu spoje („50 km“ od výchozí stanice spoje),
+    ve stejném pořadí jako ``parse_stops``; ``None``, kde chybí."""
+    out: list[float | None] = []
+    for cls, body in re.findall(r'<li class="(item[^"]*)"[^>]*>(.*?)</li>', page, re.S):
+        if "inactive" in cls:
+            continue
+        if not re.search(r'<strong class="name[^"]*">|class="station"', body):
+            continue
+        m = re.search(r'class="distance">(.*?)</span>\s*$', body, re.S) or re.search(r'class="distance">(.*)', body, re.S)
+        km = re.search(r"(\d+(?:[.,]\d+)?)\s*km", _text(m.group(1)) if m else "")
+        out.append(float(km.group(1).replace(",", ".")) if km else None)
+    return out
 
 
 def parse_route(page: str) -> list[str]:

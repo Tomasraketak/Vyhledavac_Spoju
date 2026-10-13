@@ -111,19 +111,22 @@ class IdsIdosProvider(HttpProvider):
 
     @staticmethod
     def _worth_asking(query: SearchQuery) -> bool:
-        """IDOS se ptáme, když jde o cestu v jednom IDS, nebo když je některý
-        konec obyčejná zastávka / obec bez nádraží – tu ostatní dopravci neznají."""
+        """IDOS se ptáme vždy, když aspoň jeden konec cesty leží v Česku – i na
+        cesty do ciziny (Domanín → Bad Ischl): IDOS najde celý spoj i s přestupy
+        a dopravci jednotlivých úseků, domácí část ocení IDS a zbytek dokoupí
+        hack ``idos_complete`` u dopravců."""
         a, b = stations.place(query.origin), stations.place(query.destination)
-        if a is None or b is None or a.country or b.country:
-            return False
-        if IdsIdosProvider._common_systems(query):
-            return True
-        return any(p.kind == "b" or railnet.station_for(name) is None
-                   for p, name in ((a, query.origin), (b, query.destination)))
+        return any(p is not None and not p.country for p in (a, b))
+
+    @staticmethod
+    def _international(query: SearchQuery) -> bool:
+        from .. import geo
+
+        return geo.leaves_czechia(query.origin, query.destination)
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         if not self._worth_asking(query):
-            raise StationNotFoundError(self.name, "spoj mezi nádražími najdou jiní dopravci")
+            raise StationNotFoundError(self.name, "IDOS hledá jen cesty z Česka nebo do Česka")
         try:
             connections = await self._idos(query)
         except (BlockedError, RateLimitedError, TransientProviderError) as exc:
@@ -186,11 +189,16 @@ class IdsIdosProvider(HttpProvider):
         """
         from ..hacks.ids_ticket import SYSTEMS, RouteStop, train_systems
 
+        from ..ids import odis
+
         infos = []          # pro každý úsek: (stops, povolené systémy | None = podle zón, IDS platí?)
         route_systems: list[dict] = []
         legs: list[Leg] = []
+        international = self._international(query)
+        offset: float | None = 0.0          # kilometráž celé cesty (tarif ODIS)
         for leg in conn.legs:
             raw_stops = [(leg.origin, "", ""), (leg.destination, "", "")]
+            distances: list[float | None] = []
             ok = True
             if leg.is_bus or leg.is_city:
                 systems = set()
@@ -200,6 +208,7 @@ class IdsIdosProvider(HttpProvider):
                     found = line_systems(licence or leg.licence, tagged)
                     systems = found if found is not None else None
                     raw_stops = idos.parse_stops(page) or raw_stops
+                    distances = idos.parse_distances(page)
                 elif leg.inline_stops:      # spoj z Transitous: linka podle licence z JDF
                     found = line_systems(leg.licence, set()) if leg.licence else None
                     systems = found if found is not None else None
@@ -208,17 +217,31 @@ class IdsIdosProvider(HttpProvider):
                 rail = False
             else:
                 systems = train_systems(leg.train_label)       # IC/Ex jen IDESKA
-                ok = systems != set() and "České dráhy" in leg.carrier
+                if "České dráhy" not in leg.carrier:
+                    # ODIS platí i ve vlacích GW Train Regio, MBM rail a RegioJet (R8)
+                    odis_ok = systems is None and any(c in leg.carrier for c in odis.TRAIN_CARRIERS)
+                    systems = {odis.SYSTEM} if odis_ok else set()
+                ok = systems != set()
                 rail = True
+                crosses = international and _crosses_border(leg.origin, leg.destination)
                 if ok and leg.inline_stops:
                     raw_stops = leg.inline_stops
-                elif ok and leg.detail_url:       # zastávky vlaku – jen v nich smí být lom jízdenky
+                elif (ok or crosses) and leg.detail_url:
+                    # zastávky vlaku – jen v nich smí být lom jízdenky (i na hranici státu)
                     try:
-                        raw_stops = idos.parse_stops(await self._detail(leg.detail_url)) or raw_stops
+                        page = await self._detail(leg.detail_url)
+                        raw_stops = idos.parse_stops(page) or raw_stops
+                        distances = idos.parse_distances(page)
                     except TransientProviderError:
                         pass
             if len(raw_stops) < 2:
                 raw_stops = [(leg.origin, "", ""), (leg.destination, "", "")]
+            if offset is None or len(distances) != len(raw_stops) or None in distances:
+                distances = [None] * len(raw_stops)
+            else:
+                start = distances[0]
+                distances = [offset + d - start for d in distances]
+            offset = distances[-1]
             stops = []
             near: set[str] = set(route_systems[-1]) if route_systems else set()
             last = len(raw_stops) - 1
@@ -237,7 +260,8 @@ class IdsIdosProvider(HttpProvider):
                     prev = time or prev
                 stops.append(RouteStop(idos.display_name(name), time, zones,
                                        place.kraj if place else "",
-                                       idos.display_name(name) if rail else "", rail=rail))
+                                       idos.display_name(name) if rail else "", rail=rail,
+                                       km=distances[i]))
             infos.append((stops, systems, ok))
             route_systems.extend(st.systems for st in stops if st.systems)
             legs.append(Leg(origin=idos.display_name(leg.origin),
@@ -271,6 +295,7 @@ class IdsIdosProvider(HttpProvider):
                 trains = self._trains_bought(query, infos)
                 if trains:
                     journey.raw = {"plans": trains}
+            journey.legs = with_walks(legs, conn)
             return journey
         first = plans[0]
         priced = [seg for seg in first if seg["kind"] == "ids"]
@@ -278,6 +303,7 @@ class IdsIdosProvider(HttpProvider):
         journey.notes.append(f"Spoj z {source}. " + (f"Jízdenky IDS: {describe(legs, priced)}. " if priced else "")
                              + f"Cenu úseku {missing} IDS nezná – je potřeba jízdenka dopravce.")
         journey.raw = {"plans": plans}
+        journey.legs = with_walks(legs, conn)
         return journey
 
     @staticmethod
@@ -317,6 +343,35 @@ class IdsIdosProvider(HttpProvider):
             if plan not in unique:
                 unique.append(plan)
         return unique
+
+
+def with_walks(legs: list[Leg], conn: idos.IdosConnection) -> list[Leg]:
+    """Úseky spoje s pěšími přesuny mezi nimi („Přesun asi 8 min“ v IDOS).
+
+    Rozpisy jízdenek (``raw["plans"]``) počítají jen s jízdami – pozice
+    v nich jsou indexy úseků bez přesunů."""
+    out: list[Leg] = []
+    for k, (leg, raw) in enumerate(zip(legs, conn.legs)):
+        if k and raw.walk_before:
+            prev = out[-1]
+            start = prev.arrival
+            out.append(Leg(origin=prev.destination, destination=leg.origin, departure=start,
+                           arrival=min(start + dt.timedelta(minutes=raw.walk_before), leg.departure),
+                           mode=Mode.WALK, line="přesun"))
+        out.append(leg)
+    return out
+
+
+def rides(journey: Journey) -> list[Leg]:
+    """Úseky jízdy (bez pěších přesunů) – k nim se vztahují pozice v rozpisech."""
+    return [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+
+
+def _crosses_border(origin: str, destination: str) -> bool:
+    from .. import geo
+
+    a, b = geo.country_of(origin), geo.country_of(destination)
+    return a is not None and b is not None and a != b
 
 
 def _route(infos, atoms) -> list:
@@ -408,6 +463,8 @@ def _head_only(plan: list[dict], infos) -> list[dict]:
         k = seg["from"][0]
         end = [k, len(infos[k][0]) - 1]
         out.append({"kind": "buy", "from": seg["from"], "to": end})
+        if seg["to"][0] > k:                 # kus pokračuje dalšími úseky – i ty dokoupit
+            out.append({"kind": "buy", "from": [k + 1, 0], "to": seg["to"]})
         for rest in plan[n + 1:]:
             if rest["from"][0] > k:
                 out.append(dict(rest))

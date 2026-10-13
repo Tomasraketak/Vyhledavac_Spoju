@@ -219,8 +219,9 @@ def merge_offers(journeys: list[Journey], offers: list[ShopOffer], provider,
             provider=provider.name,
             legs=[
                 Leg(origin=s.origin, destination=s.destination, departure=s.departure,
-                    arrival=s.arrival, mode=Mode.TRAIN if s.is_train else Mode.BUS,
-                    carrier="ÖBB", line=s.line)
+                    arrival=s.arrival,
+                    mode=Mode.WALK if s.walk else Mode.TRAIN if s.is_train else Mode.BUS,
+                    carrier="" if s.walk else "ÖBB", line="přesun" if s.walk else s.line)
                 for s in offer.sections
             ],
             journey_id=offer.connection_id,

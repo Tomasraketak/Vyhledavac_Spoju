@@ -219,9 +219,9 @@ se ptá a na co si dát pozor): **[docs/DOPRAVCI.md](docs/DOPRAVCI.md)**.
 | **CFR** | `providers/cfr.py` | HTML formuláře bilete.cfrcalatori.ro | ✅⁵ | ✅ | konec v Rumunsku, jen vnitrostátně | ověřeno živě |
 | **SŽ** | `providers/sz.py` | HTML e-shopu eshop.sz.si | ✅ skupina | ✅ | jen po Slovinsku | ověřeno živě |
 | **HŽPP** | `providers/hzpp.py` | JSON API prodaja.hzpp.hr | ✅⁶ | ne | jen po Chorvatsku | ověřeno živě |
-| **Vy** | `providers/vy.py` | JSON API vy.no (plánovač Entur) | ✅ skupina | ✅ | konec v Norsku | ověřeno živě |
-| **DSB** | `providers/dsb.py` | JSON API e-shopu dsb.dk | ✅ skupina | ne | konec v Dánsku | ověřeno živě |
-| **SJ** | `providers/sj.py` | JSON API sj.se | ✅ skupina | ✅ | konec ve Švédsku | ověřeno živě |
+| **Vy** | `providers/vy.py` | JSON API vy.no (plánovač Entur) | ✅ skupina | ✅ | Norsko, Švédsko, Dánsko i mezi nimi | ověřeno živě |
+| **DSB** | `providers/dsb.py` | JSON API e-shopu dsb.dk | ✅ skupina | ne | Dánsko/Švédsko a sousední země | ověřeno živě |
+| **SJ** | `providers/sj.py` | JSON API sj.se | ✅ skupina | ✅ | Švédsko, Norsko, Dánsko a sousední země | ověřeno živě |
 | **BDŽ** | `providers/bdz.py` | jízdní řád razpisanie.bdz.bg s ceníkem | ✅ skupina | ✅ | jen po Bulharsku | ověřeno živě |
 | **CP** | `providers/cp.py` | JSON API api-gateway.cp.pt | ✅⁵ | ✅ | jen po Portugalsku | ověřeno živě |
 | **Srbijavoz** | `providers/srbijavoz.py` | JSON API eKarta | ✅ skupina | ✅ | jen po Srbsku | ověřeno živě |
@@ -274,6 +274,14 @@ chybí – GUI ale v panelu vpravo napíše proč. Takhle se našla chyba, kvůl
 které na Windows chybělo ÖBB: časové pásmo „Europe/Vienna“ vyžaduje
 balíček `tzdata`, který Windows nemá. Teď je v `requirements.txt`
 a program má i vlastní záložní pásmo s letním časem.
+
+**Pěší přesuny** dopravci označují různě – ÖBB jako „autobus W“, jinde
+„Fußweg“, „přesun“, „gyalog“. Program je po každém dopravci převede na
+úsek *pěšky* (`models.mark_walks`), takže se nepočítají jako přestup na
+další spoj a ve výsledcích jsou vidět jako přesun.
+
+**Zahraniční názvy:** zahraniční dopravci dostanou místní jméno města
+(Lublaň → Ljubljana, Curych → Zürich), čeští dopravci a IDOS české.
 
 Chyba jednoho dopravce nikdy neshodí ostatní: engine každého spouští
 zvlášť s časovým limitem a chybu ukáže u jeho řádku v GUI. Když dopravce
@@ -406,7 +414,7 @@ písma Archivo). Průběh hledání posílá server přes Server-Sent Events.
   *Severní Evropa*; klik na název oblasti zapne/vypne celou skupinu.
   *Rychlé* = jen zdroje bez prohlížeče.
 - **Našeptávač** zná všechny zastávky v Česku a všechna evropská města nad
-  5 000 obyvatel – česky (Mnichov, Lublaň, Kodaň), ale najde je i místním
+  1 000 obyvatel – česky (Mnichov, Lublaň, Kodaň), ale najde je i místním
   nebo anglickým jménem („munchen“, „copenhagen“). Zahraničním dopravcům
   program posílá místní jméno (Lublaň → Ljubljana), českým to české.
 - **Výsledky** přibývají průběžně, ceny pomalých dopravců (ZSSK) se
@@ -443,7 +451,7 @@ python tools/build_stations.py            # --refresh = stáhnout zdroje znovu
 
 | Údaj | Zdroj |
 |---|---|
-| evropská města nad 5 000 obyvatel, česká a místní jména (`data/cities.json.gz`, `python tools/build_cities.py`) | [GeoNames](https://www.geonames.org/) (CC BY 4.0) |
+| evropská sídla nad 1 000 obyvatel, česká a místní jména (`data/cities.json.gz`, `python tools/build_cities.py`) | [GeoNames](https://www.geonames.org/) (CC BY 4.0) |
 | autobusové zastávky, okres, počet spojů | CIS JŘ – JDF, [portal.cisjr.cz](https://portal.cisjr.cz/pub/jdf/) |
 | vlakové stanice a zastávky, počet vlaků | CIS JŘ – CZPTT, [portal.cisjr.cz](https://portal.cisjr.cz/pub/draha/celostatni/szdc/) |
 | kraj stanic, plné názvy a počty obyvatel obcí | © přispěvatelé [OpenStreetMap](https://www.openstreetmap.org/copyright) (ODbL), Overpass API |
@@ -641,9 +649,9 @@ Trasa ze železniční sítě (když vlak cestou mění číslo) slouží jen
 k výpočtu projetých zón.
 
 Potřebuje zapnutý zdroj ČD (cena k porovnání a případně cena úseku u ČD).
-**ODIS** má jen zóny (z jízdních řádů, ukazují se v našeptávači a detailu):
-jízdné REGION se od 2025 počítá z tarifních kilometrů (5 Kč + 0,75 Kč/km),
-které pro trasu vlaku veřejně dostupné nejsou – úseky v ODIS proto ocení ČD.
+**ODIS** má kilometrický tarif (REGION: 10 Kč + 1,50 Kč/km, zvýhodněné
+5 Kč + 0,75 Kč/km). Kilometry zná jen spoj z IDOS (detail spoje), proto
+ODIS počítá dopravce *IDS*; hack nad spoji ČD úseky v ODIS ocení ČD.
 IDS KK (Karlovarský kraj) se záměrně nepočítá – úseky tam ocení ČD. Každý cestující skupiny dostane svou jízdenku
 (dítě do 6 let zdarma, děti / studenti / senioři zvýhodněné podle pravidel
 systému) a ceny se sečtou. Počítadla VDV, IREDO, IDOL, DÚK a IDZK se volají za běhu (z vašeho počítače),

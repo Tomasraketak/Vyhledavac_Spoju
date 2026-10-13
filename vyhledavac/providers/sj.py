@@ -91,6 +91,8 @@ STATIONS_TTL = 7 * 24 * 3600
 MAX_OFFERS = PRICE_SCOPE_COUNT
 MAX_PERSONS = 9
 #: Prefix kódu UIC → země.
+NORDIC = {"SE", "NO", "DK"}
+SJ_COUNTRIES = ("SE", "NO", "DK", "DE", "FI")
 UIC_COUNTRY = {"74": "SE", "76": "NO", "86": "DK", "80": "DE", "81": "AT", "84": "NL", "88": "BE",
                "85": "CH", "87": "FR", "10": "FI", "51": "PL", "54": "CZ"}
 #: Česká a jiná jména → název (bez diakritiky) v seznamu SJ.
@@ -111,7 +113,7 @@ class SjProvider(HttpProvider):
     multi_passenger = True
     provides_stops = True
     currency = "SEK"
-    countries = ("SE", "NO", "DK", "DE")
+    countries = SJ_COUNTRIES
     international_only = True
     referer = WEB
     min_interval = 0.15
@@ -163,15 +165,18 @@ class SjProvider(HttpProvider):
 
     # ---- hledání ---------------------------------------------------------------------
     async def search(self, query: SearchQuery) -> list[Journey]:
+        # SJ jezdí po Švédsku, do Norska (Oslo, Narvik), Dánska (Kodaň) i Německa (Berlín, Hamburk)
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
-        if None not in known and "SE" not in known:
-            raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Švédsku")
+        if any(c not in (None, *SJ_COUNTRIES) for c in known) or (
+                None not in known and not set(known) & NORDIC):
+            raise StationNotFoundError(self.name, "SJ – jen cesty ve Skandinávii a do sousedních zemí")
         passengers = passenger_list(query)
         if len(passengers) > MAX_PERSONS:
             raise ProviderError(self.name, f"SJ prodává online nejvýš {MAX_PERSONS} cestujícím")
         origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
-        if "SE" not in (origin["country"], destination["country"]):
-            raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Švédsku")
+        found = {origin["country"], destination["country"]} - {""}
+        if not found & NORDIC or not found <= set(SJ_COUNTRIES):
+            raise StationNotFoundError(self.name, "SJ – jen cesty ve Skandinávii a do sousedních zemí")
         if origin["code"] == destination["code"]:
             raise StationNotFoundError(self.name, "výchozí a cílová stanice je stejná")
         start = query.departure.astimezone(DEFAULT_TZ)

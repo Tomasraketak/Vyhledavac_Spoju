@@ -35,7 +35,7 @@ from typing import Sequence
 import httpx
 
 from .. import cdtrain, railnet, stations
-from ..ids import IdsFare, group_fare, ideska, idpk, idsok, jmk, pid
+from ..ids import IdsFare, group_fare, ideska, idpk, idsok, jmk, odis, pid
 from ..ids.online import duk, idol, idzk, iredo, vdv
 from ..models import Fare, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery
 from ..normalize import normalize
@@ -45,7 +45,7 @@ from .base import SearchFn, TravelHack
 log = logging.getLogger(__name__)
 
 #: Systémy, jejichž tarif umíme spočítat.
-SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk, duk, idzk, idsok)}
+SYSTEMS = {m.SYSTEM: m for m in (ideska, pid, idpk, vdv, iredo, idol, jmk, duk, idzk, idsok, odis)}
 LINKS = {name: m.URL for name, m in SYSTEMS.items()}
 #: Příklady zón pro nastavení předplatného ve webovém rozhraní.
 PASS_EXAMPLES = {"PID": "P, 0, B", "IDESKA": "100", "IDPK": "001", "VDV": "1", "IREDO": "600",
@@ -56,7 +56,7 @@ PASS_EXAMPLES = {"PID": "P, 0, B", "IDESKA": "100", "IDPK": "001", "VDV": "1", "
 #: jakýchkoli údajů tu trasu systému nepřeruší; cenu určují jen zóny konců
 #: (u IDPK i projeté zóny, které známe).
 LENIENT = {idpk.SYSTEM, vdv.SYSTEM, iredo.SYSTEM, idol.SYSTEM, jmk.SYSTEM, duk.SYSTEM, idzk.SYSTEM,
-           idsok.SYSTEM}
+           idsok.SYSTEM, odis.SYSTEM}
 #: Na těchto vlacích jízdenka IDS neplatí (dálkové a komerční spoje).
 NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX)\b")
 #: Dálkové vlaky ČD, na které platí jízdenka jen některých IDS. IDESKA platí
@@ -90,6 +90,7 @@ class RouteStop:
     estimated: bool = False         # čas je odhad ze sítě, ne z jízdního řádu vlaku
     halts: bool = True              # vlak tu opravdu zastavuje (jen tady smí být lom)
     rail: bool = True               # železniční stanice (projeté stanice dohledá síť)
+    km: float | None = None         # kilometr od začátku cesty (z IDOS) – pro tarif ODIS
 
 
 @dataclass
@@ -331,6 +332,10 @@ class IdsTicketHack(TravelHack):
         part = route[i:j + 1]
         if system == pid.SYSTEM and not any(s.kraj in pid.HOME_REGIONS for s in part):
             return None        # PID neplatí na cesty jen po jiném kraji
+        if system == odis.SYSTEM:      # kilometrický tarif – jen kde známe kilometry trasy
+            km = _distance(part)
+            return None if km is None else odis.fare_for_km(
+                km, passenger, part[0].systems[system][0], part[-1].systems[system][0])
         return _price(system, _passed_zones(part, system), passenger, minutes)
 
     def _passenger_fare(self, route: list[RouteStop], system: str, i: int, j: int,
@@ -344,7 +349,7 @@ class IdsTicketHack(TravelHack):
         """
         full = self._single_fare(route, system, i, j, minutes, passenger)
         zones = passenger.pass_zones(system)
-        if not zones:
+        if not zones or system == odis.SYSTEM:
             return full
         first, last = route[i].systems[system][0], route[j].systems[system][0]
         runs = _uncovered_runs(route, system, i, j, zones)
@@ -507,6 +512,12 @@ def _mark_halts(route: list[RouteStop], known: set[str]) -> None:
         halts = k in (0, last) or _station_key(stop.node or stop.name) in known \
             or _station_key(stop.name) in known
         route[k] = replace(stop, halts=halts)
+
+
+def _distance(part: list[RouteStop]) -> float | None:
+    """Ujeté kilometry mezi konci úseku (``km`` je kilometráž celé cesty)."""
+    a, b = part[0].km, part[-1].km
+    return b - a if a is not None and b is not None and b >= a else None
 
 
 def _passed_zones(part: list[RouteStop], system: str) -> list[tuple[str, ...]]:

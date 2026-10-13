@@ -248,6 +248,7 @@ class ShopSection:
     arrival: dt.datetime
     line: str
     is_train: bool
+    walk: bool = False
 
 
 @dataclass(slots=True)
@@ -310,6 +311,9 @@ def parse_connection(raw: dict[str, Any]) -> ShopOffer | None:
             destination=str((sec.get("to") or {}).get("name") or ""),
             departure=s_dep, arrival=s_arr, line=line,
             is_train=bool(category.get("train", True)),
+            # pěší přesun mezi nástupišti/nádražími: kategorie „W“ (Fußweg)
+            walk=str(name).strip().upper() == "W" or "fußweg" in str(category.get("name") or "").lower()
+            or str(sec.get("type") or "").lower() in ("walk", "footpath", "transfer"),
         ))
     return ShopOffer(connection_id=str(raw["id"]), departure=departure,
                      arrival=arrival, sections=sections,

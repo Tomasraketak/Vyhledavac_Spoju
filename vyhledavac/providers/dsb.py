@@ -94,6 +94,10 @@ PROOF_TTL = 90
 #: Nejvýš kolik stránek ``next`` po prvním hledání (každá ~3–6 spojů).
 MAX_PAGES = 6
 
+#: DSB: Dánsko a sousední země (Öresund do Švédska, Hamburk, Oslo přes Göteborg).
+DSB_COUNTRIES = ("DK", "SE", "DE", "NO")
+
+
 MEANS_OF_TRANSPORT = ["INTERCITY_TRAIN", "INTERCITY_EXPRESS_TRAIN", "REGIONAL_TRAIN", "OTHER_TRAINS",
                       "S_TRAIN", "STANDARD_BUS", "EXPRESS_BUS", "OTHER_BUSSES", "SPECIAL_BUS", "FERRY",
                       "METRO", "LIGHT_RAIL"]
@@ -130,7 +134,7 @@ class DsbProvider(HttpProvider):
     multi_passenger = True
     provides_stops = True
     currency = "DKK"
-    countries = ("DK", "SE")
+    countries = DSB_COUNTRIES
     international_only = True
     referer = SHOP
     min_interval = 0.3
@@ -189,8 +193,8 @@ class DsbProvider(HttpProvider):
         check_route(query.origin, query.destination)
         origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
         countries = {stop_country(origin), stop_country(destination)}
-        if "DK" not in countries or not countries <= {"DK", "SE"}:
-            raise StationNotFoundError(self.name, "e-shop DSB prodává jen jízdenky po Dánsku")
+        if not countries & {"DK", "SE"} or not countries <= set(DSB_COUNTRIES):
+            raise StationNotFoundError(self.name, "DSB – jen cesty z Dánska / Švédska a do sousedních zemí")
         offers = offer_collection(query)
         value = await self._call("search", {"offerCollection": offers, "tripSearch": {
             "strategy": {"departureLocation": origin, "arrivalLocation": destination,
@@ -283,8 +287,8 @@ def check_route(origin: str, destination: str) -> None:
     known = ["DK" if is_danish(p) else geo.country_of(p) for p in (origin, destination)]
     if None not in known and "DK" not in known:
         raise StationNotFoundError(DsbProvider.name, "cesta nezačíná ani nekončí v Dánsku")
-    if any(c not in (None, "DK", "SE") for c in known):
-        raise StationNotFoundError(DsbProvider.name, "e-shop DSB prodává jen jízdenky po Dánsku")
+    if any(c not in (None, *DSB_COUNTRIES) for c in known):
+        raise StationNotFoundError(DsbProvider.name, "DSB – jen cesty z Dánska do sousedních zemí")
 
 
 def stop_country(location: dict[str, Any]) -> str:

@@ -5,8 +5,8 @@ Spouští se ručně, když je potřeba data obnovit (města se mění málo)::
     python tools/build_cities.py            # stáhne zdroje a sestaví
     python tools/build_cities.py --cache D  # zdroje uloží/hledá v adresáři D
 
-Zdroj: GeoNames (download.geonames.org, CC BY 4.0) – ``cities5000.zip``
-(všechna sídla nad 5 000 obyvatel) a ``alternateNamesV2.zip`` (názvy
+Zdroj: GeoNames (download.geonames.org, CC BY 4.0) – ``cities1000.zip``
+(všechna sídla nad 1 000 obyvatel) a ``alternateNamesV2.zip`` (názvy
 v jednotlivých jazycích). U každého města:
 
 * zobrazované jméno česky, pokud ho GeoNames zná (Mnichov, Lublaň, Kodaň),
@@ -107,7 +107,7 @@ def in_europe(code: str, lat: float, lon: float) -> bool:
 
 def load_cities(path: Path) -> dict[int, dict]:
     cities: dict[int, dict] = {}
-    with zipfile.ZipFile(path) as zf, zf.open("cities5000.txt") as raw:
+    with zipfile.ZipFile(path) as zf, zf.open("cities1000.txt") as raw:
         for line in io.TextIOWrapper(raw, encoding="utf-8"):
             f = line.rstrip("\n").split("\t")
             code, feature = f[8], f[7]
@@ -162,7 +162,7 @@ def main() -> None:
     parser.add_argument("--cache", type=Path, default=Path.home() / ".cache" / "vyhledavac-build")
     args = parser.parse_args()
     args.cache.mkdir(parents=True, exist_ok=True)
-    cities = load_cities(fetch("cities5000.zip", args.cache))
+    cities = load_cities(fetch("cities1000.zip", args.cache))
     load_names(fetch("alternateNamesV2.zip", args.cache), cities)
     codes = sorted(COUNTRIES)
     rows = []
@@ -171,7 +171,7 @@ def main() -> None:
         alt = "|".join(k for k in keys if k != normalize(czech))
         rows.append([czech, codes.index(city["country"]), local if local != czech else "",
                      city["pop"], alt, 1 if city["capital"] else 0])
-    data = {"meta": {"built": dt.date.today().isoformat(), "source": "GeoNames cities5000 (CC BY 4.0)",
+    data = {"meta": {"built": dt.date.today().isoformat(), "source": "GeoNames cities1000 (CC BY 4.0)",
                      "count": len(rows)},
             "countries": [[c, COUNTRIES[c]] for c in codes], "places": rows}
     with gzip.open(OUT, "wt", encoding="utf-8", compresslevel=9) as fh:

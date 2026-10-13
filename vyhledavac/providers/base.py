@@ -19,7 +19,7 @@ from typing import Any, Callable, ClassVar, Sequence
 
 from ..cache import Cache, get_cache
 from ..errors import ProviderError, ProviderUnavailableError
-from ..models import Fare, Journey, ProviderResult, SearchQuery
+from ..models import Fare, Journey, ProviderResult, SearchQuery, mark_walks
 from ..money import CurrencyConverter, get_converter
 from ..registry import PROVIDERS
 
@@ -191,6 +191,7 @@ class Provider(abc.ABC):
             _NOTES.reset(token)
             _PUBLISH.reset(publish_token)
 
+        mark_walks(journeys)
         journeys = [j for j in journeys if _is_sane(j)]
         return ProviderResult(
             provider=self.name,

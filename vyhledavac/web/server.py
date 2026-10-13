@@ -266,7 +266,7 @@ class WebApp:
             "hacks": [{"name": name, "label": short_label(getattr(cls, "label", name)),
                        "default": name in DEFAULT_HACKS} for name, cls in HACKS.items()],
             "idsSystems": [{"name": name, "example": PASS_EXAMPLES.get(name, "")}
-                           for name in IDS_SYSTEMS],
+                           for name in IDS_SYSTEMS if name in PASS_EXAMPLES],   # ODIS: km, ne zóny
             "playwright": playwright_available(),
             "eurRate": float(rate) if rate else 25.0,
             "loadErrors": {k: str(v) for k, v in LOAD_ERRORS.items()},

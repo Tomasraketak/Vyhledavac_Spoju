@@ -107,7 +107,7 @@ class VyProvider(HttpProvider):
     label = "Vy – Norské dráhy (jen cesty z/do Norska; vlaky Vy, SJ Nord, Go-Ahead a autobusy Vy)"
     multi_passenger = True
     currency = "NOK"
-    countries = ("NO", "SE")
+    countries = ("NO", "SE", "DK")
     international_only = True
     provides_stops = True
     referer = RESULTS
@@ -151,15 +151,14 @@ class VyProvider(HttpProvider):
 
     # ---- hledání ---------------------------------------------------------------------
     async def search(self, query: SearchQuery) -> list[Journey]:
+        # Vy (i Vy Tåg ve Švédsku) – cesty po Norsku, Švédsku a Dánsku i mezi nimi
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
         if any(c not in (None, *SCANDINAVIA) for c in known):
-            raise StationNotFoundError(self.name, "Vy jezdí jen po Norsku a do Švédska")
-        if None not in known and "NO" not in known:
-            raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Norsku")
+            raise StationNotFoundError(self.name, "Vy – jen cesty po Norsku, Švédsku a Dánsku")
         origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
         countries = [place_country(origin), place_country(destination)]
-        if "NO" not in countries or any(c not in (None, *SCANDINAVIA) for c in countries):
-            raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Norsku")
+        if any(c not in (None, *SCANDINAVIA) for c in countries):
+            raise StationNotFoundError(self.name, "Vy – jen cesty po Norsku, Švédsku a Dánsku")
         if origin["id"] == destination["id"]:
             raise StationNotFoundError(self.name, "stejné místo odjezdu i příjezdu")
 

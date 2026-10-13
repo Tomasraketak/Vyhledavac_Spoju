@@ -9,6 +9,7 @@ Ceny jsou ``Decimal`` – u peněz se float nepoužívá.
 from __future__ import annotations
 
 import datetime as dt
+import re
 from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from enum import Enum
@@ -206,6 +207,29 @@ class Stop:
         return self.departure or self.arrival
 
 
+#: Jak dopravci označují pěší přesun: ÖBB „W“, HAFAS „Fußweg“, MÁV „gyalog“…
+_WALK_LABELS = re.compile(
+    r"^(w|fu(ss|ß)weg|gehweg|walk(ing)?|transfer|umstieg|p[řr]esun|p[ěe][šs]ky|p[ěe][šs][íi] p[řr]esun|"
+    r"gyalog(lás)?|pieszo|przej[śs]cie|ch[ôo]dza|pe[šs]o|a pied|à pied|marche|a piedi|caminando|footpath)$",
+    re.IGNORECASE)
+
+
+def looks_like_walk(line: str) -> bool:
+    """Je úsek s tímhle označením pěší přesun, ne spoj?"""
+    return bool(_WALK_LABELS.match((line or "").strip()))
+
+
+def mark_walks(journeys: list["Journey"]) -> None:
+    """Úseky, které dopravce označil jako pěší přesun (ÖBB „W“ jako autobus),
+    převede na ``Mode.WALK`` – nepočítají se pak jako přestup na další spoj."""
+    for journey in journeys:
+        for leg in journey.legs:
+            if leg.mode is not Mode.WALK and looks_like_walk(leg.line):
+                leg.mode = Mode.WALK
+                leg.carrier = ""
+                leg.line = "přesun"
+
+
 @dataclass(slots=True)
 class Leg:
     """Jeden úsek jízdy jedním vozidlem (mezi přestupy)."""
@@ -304,7 +328,8 @@ class Journey:
 
     @property
     def transfers(self) -> int:
-        return max(0, len(self.legs) - 1)
+        """Počet přestupů – pěší přesun mezi nástupišti/nádražími není další spoj."""
+        return max(0, sum(1 for leg in self.legs if leg.mode is not Mode.WALK) - 1)
 
     @property
     def modes(self) -> set[Mode]:

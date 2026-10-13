@@ -131,9 +131,9 @@ dopravce.
 | CFR | `cfr.py` | HTML formuláře | konec v Rumunsku (jen vnitrostátně) | dospělý/dítě → skupina, RON | ověřeno živě |
 | SŽ | `sz.py` | HTML formuláře e-shopu | jen po Slovinsku | skupina, EUR | ověřeno živě |
 | HŽPP | `hzpp.py` | JSON API e-shopu | jen po Chorvatsku | skupina (děti jako dospělí), EUR | ověřeno živě |
-| Vy | `vy.py` | JSON API vy.no | konec v Norsku | skupina, NOK | ověřeno živě |
-| DSB | `dsb.py` | JSON API dsb.dk | konec v Dánsku (jen vnitrostátní ceny) | skupina, DKK | ověřeno živě |
-| SJ | `sj.py` | JSON API sj.se | konec ve Švédsku | skupina, SEK | ověřeno živě |
+| Vy | `vy.py` | JSON API vy.no | Norsko, Švédsko, Dánsko i mezi nimi | skupina, NOK | ověřeno živě |
+| DSB | `dsb.py` | JSON API dsb.dk | konec v Dánsku/Švédsku, i do sousedních zemí (ceny hlavně vnitrostátní) | skupina, DKK | ověřeno živě |
+| SJ | `sj.py` | JSON API sj.se | Švédsko, Norsko, Dánsko i do sousedních zemí | skupina, SEK | ověřeno živě |
 | BDŽ | `bdz.py` | HTML jízdního řádu razpisanie.bdz.bg | jen po Bulharsku | z ceníku (skupina), EUR | ověřeno živě |
 | CP | `cp.py` | JSON API api-gateway.cp.pt | jen po Portugalsku | dospělý z API, děti dopočítané, EUR | ověřeno živě |
 | Srbijavoz | `srbijavoz.py` | JSON API eKarta | jen po Srbsku | skupina, RSD | ověřeno živě |
@@ -315,17 +315,19 @@ celou skupinu, v CZK.
 **Soubory:** `providers/ids_idos.py`, `idos.py`, `ids/*` · **Typ:** HTML IDOS + tarify IDS · **Klíč:** ne
 
 Web ČD neprodává jízdenky integrovaných systémů na autobusy. IDOS ale zná
-všechny spoje včetně autobusů a MHD. Cenu pak spočítá tarif systému
-(PID, IDESKA, IDS JMK, IDOL, IREDO, DÚK, IDPK, VDV, IDZK, IDSOK, ODIS).
-IDS KK zapojený není.
+všechny spoje včetně autobusů a MHD – i vlaky do ciziny (Domanín → Bad
+Ischl přes České Budějovice, Linz a Selzthal) a dopravce každého úseku.
+Cenu domácí části spočítá tarif systému (PID, IDESKA, IDS JMK, IDOL,
+IREDO, DÚK, IDPK, VDV, IDZK, IDSOK, ODIS). IDS KK zapojený není.
 
 **Postup:**
 1. Výsledky `idos.cz/vlakyautobusymhdvse/spojeni/vysledky/?f=…&t=…`
    (nejvýš 2 stránky po 3 spojích). Úseky se dělí podle
-   `div.outside-of-popup…`, i pěší přesuny.
-2. Pro autobusy a vlaky ČD načte **detail spoje** (`/spojeni/draha/`,
-   cache 24 h). Získá z něj:
-   - zastávky, kde vozidlo opravdu staví, s časy;
+   `div.outside-of-popup…`; pěší přesun („Přesun asi 8 min“,
+   `div.walk`) je samostatný úsek „přesun“, ne další spoj.
+2. Pro autobusy, vlaky ČD a vlaky přes státní hranici načte **detail
+   spoje** (`/spojeni/draha/`, cache 24 h). Získá z něj:
+   - zastávky, kde vozidlo opravdu staví, s časy a kilometry (tarif ODIS);
    - systém linky („linka 300 [IDESKA]“), jinak seznam linek z JDF
      (`data/ids_lines.json.gz`, obnova
      `python tools/build_ids_lines.py --jdf JDF.zip`).
@@ -335,14 +337,29 @@ IDS KK zapojený není.
 4. **Plánovač jízdenek** (dynamické programování) najde nejlevnější pokrytí
    jízdenkami IDS. Vlak smí rozdělit jen ve stanici, kde staví, i mezi
    dvěma systémy v přesahu (IDESKA do Benešova + PID do Prahy). Úseky mimo
-   IDS (dálkový autobus, EC) zůstanou k dokoupení. Hack `idos_complete`
-   se na ně zeptá dopravců (Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
-   Express a, jsou-li zapnuté, ČD a OneTicket) a vybere nejlevnější rozpis
-   na **tentýž spoj**.
+   IDS (dálkový autobus, EC, vlaky v cizině) zůstanou k dokoupení. Hack
+   `idos_complete` se na ně zeptá dopravců a vybere nejlevnější rozpis na
+   **tentýž spoj**: po Česku Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
+   Express (a ČD, OneTicket přes prohlížeč); do ciziny dopravci, kteří
+   obsluhují obě země (ÖBB, DB, PKP, MÁV, RegioJet…; ČD a ZSSK přes
+   prohlížeč). Neprodá-li nikdo celý kus, rozdělí ho – nejdřív co nejdelší
+   začátek, zbytek znovu – v přestupu nebo ve stanici na hranici:
+   Domanín → Bad Ischl = IDESKA do Českých Budějovic + ČD/ÖBB do Bad Ischlu,
+   jinak ČB → Linz/Selzthal + zbytek ÖBB; Brno → Malacky = ČD/ZSSK celé,
+   jinak Brno → Kúty (ČD) + Kúty → Malacky (ZSSK).
 
-**Kdy se ptá:** když jsou obě místa ve stejném IDS, nebo když je jeden
-konec zastávka či obec bez nádraží. Takové místo ostatní dopravci
-neznají.
+**Kdy se ptá:** vždy, když aspoň jeden konec cesty leží v Česku (i na
+cesty do ciziny). Ocení se první 3 spoje do 4:15 h.
+
+**ODIS** (Moravskoslezský kraj) má kilometrický tarif: jednotlivá
+elektronická jízdenka REGION 10 Kč + 1,50 Kč/km, zvýhodněná (děti 6–15,
+15–18, studenti do 26, 65+) 5 Kč + 0,75 Kč/km, na desetihaléře
+([odis.cz](https://www.odis.cz/zakladni-informace-o-jizdnem),
+[kodis.cz](https://www.kodis.cz/plne-jednotlive-jizdne)). Kilometry bere
+z detailu spoje v IDOS. Platí v regionálních autobusech a ve vlacích ČD,
+GW Train Regio, MBM rail a RegioJet (R8). Opava východ → Ostrava hl. n.
+(33 km) = 59,50 Kč. Žádná ochrana se neobchází – cena je z veřejného
+tarifu, ne z e-shopu ODISka.
 
 **Pozor:**
 - Platnost na vlacích:
