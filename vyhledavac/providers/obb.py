@@ -65,7 +65,7 @@ class ObbProvider(HttpProvider):
     currency = "EUR"
     provides_prices = True
     provides_stops = True
-    countries = ("AT", "CZ", "SK", "DE", "HU", "SI", "IT", "CH", "HR", "PL")
+    countries = ("AT", "CZ", "SK", "DE", "HU", "SI", "IT", "CH", "HR", "PL", "DK", "NL", "BE")
     international_only = True
     min_interval = 0.6
 

@@ -225,3 +225,21 @@ def test_home_country_sellers():
                      Stop("Břeclav", at(18, 38), at(18, 40)), Stop("Wien Hauptbahnhof", arrival=at(19, 49))])]
     plain, browser = idos_complete.sellers_for("Krakov", "Vídeň", ec, {"PL", "AT"})
     assert "ÖBB" in plain and browser == ["ČD"]                    # ČD prodá i vlak přes Česko
+
+
+def test_browser_learns_countries_without_prices():
+    hack = idos_complete.IdosCompleteHack()
+    assert not hack._browser_unpriced(("SE", "CZ"))
+    hack._learn_unpriced(("SE", "CZ"))                    # Malmö → Břeclav: ČD bez ceny
+    assert hack._browser_unpriced(("SE", "AT")) and hack._browser_unpriced(("DE", "SE"))
+    assert not hack._browser_unpriced(("PL", "CZ"))
+    hack._learn_unpriced(("CZ", "CZ"))
+    assert not hack._browser_unpriced(("CZ", "AT")) and not hack._browser_unpriced(("CZ", "CZ"))
+
+
+def test_split_train_shown_once():
+    a = Leg("Koebenhavn H", "Břeclav", at(8, 22), at(22, 47), mode=Mode.TRAIN, line="rj 177 Berliner")
+    b = Leg("Břeclav", "Wien Hbf", at(22, 55), at(23, 49), mode=Mode.TRAIN, line="RJ 177")
+    c = Leg("Wien Hbf", "Graz Hbf", at(23, 58), at(23, 59), mode=Mode.TRAIN, line="RJ 559")
+    joined = idos_complete._join_split_trains([a, b, c])
+    assert [(leg.origin, leg.destination) for leg in joined] == [("Koebenhavn H", "Wien Hbf"), ("Wien Hbf", "Graz Hbf")]

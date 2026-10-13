@@ -72,7 +72,7 @@ def collect(lines: list[str]) -> Iterator[list[str]]:
 def enable_terminal(stream=None) -> None:
     """Vypisuje úvahy průběžně do terminálu (``--trace``)."""
     handler = logging.StreamHandler(stream)
-    handler.setFormatter(logging.Formatter("· %(message)s"))
+    handler.setFormatter(logging.Formatter("%(asctime)s · %(message)s", datefmt="%H:%M:%S"))
     log.addHandler(handler)
     log.setLevel(logging.INFO)
     log.propagate = False

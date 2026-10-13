@@ -44,6 +44,7 @@ from ..models import (
     SearchQuery,
     Stop,
 )
+from ..normalize import normalize, strip_accents
 from ..registry import PROVIDERS
 from .base import BrowserProvider
 
@@ -98,6 +99,16 @@ COOKIE_BUTTONS = [
     "button:has-text('Souhlasím')",
     "#cookiesAcceptAll",
 ]
+
+
+def station_variants(name: str) -> list[str]:
+    """Podoby jména pro našeptávač ČD: jak přišlo, česky, bez diakritiky."""
+    out = [name]
+    place = stations.place(name)
+    if place is not None and place.code:
+        out.append(place.name)                       # Gdańsk → Gdaňsk
+    out.append(strip_accents(name))                  # Kraków → Krakow
+    return list(dict.fromkeys(n for n in out if n))
 
 
 def without_rail(name: str) -> bool:
@@ -193,31 +204,46 @@ class CdProvider(BrowserProvider):
     async def _fill_route(self, session, page, query: SearchQuery) -> None:
         await self._wait_for_loader(page)
         from_input = await self._first_visible(page, FROM_INPUT, "pole Odkud")
-        await session.human_type(from_input, query.origin, page)
-        await self._pick_suggestion(page, from_input)
+        await self._type_station(session, page, from_input, query.origin)
 
         to_input = await self._first_visible(page, TO_INPUT, "pole Kam")
-        await session.human_type(to_input, query.destination, page)
-        await self._pick_suggestion(page, to_input)
+        await self._type_station(session, page, to_input, query.destination)
 
         # Datum a čas nastavujeme přímo hodnotou – klikání v kalendáři je
         # křehké a zbytečně pomalé.
         await self._set_value(page, "#depDate", query.departure.strftime("%d.%m.%Y"))
         await self._set_value(page, "#timePickerObj", query.departure.strftime("%H:%M"))
 
-    async def _pick_suggestion(self, page, input_locator) -> None:
-        """Vybere první položku našeptávače; když se neukáže, potvrdí Enterem."""
+    async def _type_station(self, session, page, input_locator, name: str) -> None:
+        """Napíše stanici a vybere ji z našeptávače. Web ČD (data CIS JŘ) zná
+        zahraniční místa česky nebo bez cizí diakritiky („Gdaňsk“, „Gdansk
+        Glowny“), ne „Gdańsk“ – když našeptávač nic nenabídne, zkusí další podobu.
+        Bez vybrané stanice by hledání jen 90 s čekalo na výsledky."""
+        for text in station_variants(name):
+            await session.human_type(input_locator, text, page)
+            if await self._pick_suggestion(page, input_locator, text):
+                return
+        raise StationNotFoundError(self.name, f"stanici {name!r} web ČD nezná")
+
+    async def _pick_suggestion(self, page, input_locator, text: str) -> bool:
+        """Vybere první položku našeptávače, pokud nabízí napsané místo."""
+        wanted = normalize(text).split(" ")[0]
         for selector in SUGGESTIONS:
             try:
-                options = page.locator(selector).first
-                if await options.is_visible(timeout=3000):
-                    await page.wait_for_timeout(250)
-                    await input_locator.press("ArrowDown")
-                    await input_locator.press("Enter")
-                    return
+                options = page.locator(selector)
+                if not await options.first.is_visible(timeout=3000 if selector == SUGGESTIONS[0] else 300):
+                    continue
+                # „ODJEZD/PŘÍJEZD“ a výběr třídy jsou taky seznamy – musí obsahovat hledané místo
+                texts = [normalize(t) for t in await options.all_inner_texts()]
+                if not any(wanted and wanted in t for t in texts):
+                    continue
+                await page.wait_for_timeout(250)
+                await input_locator.press("ArrowDown")
+                await input_locator.press("Enter")
+                return True
             except Exception:
                 continue
-        await input_locator.press("Enter")
+        return False
 
     async def _set_value(self, page, selector: str, value: str) -> None:
         """Nastaví hodnotu a vyvolá události, aby si jich všiml framework."""
