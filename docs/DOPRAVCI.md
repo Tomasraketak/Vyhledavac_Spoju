@@ -341,12 +341,31 @@ IREDO, DÚK, IDPK, VDV, IDZK, IDSOK, ODIS). IDS KK zapojený není.
    `idos_complete` se na ně zeptá dopravců a vybere nejlevnější rozpis na
    **tentýž spoj**: po Česku Arriva/SJT, Bileto, RegioJet, FlixBus, Leo
    Express (a ČD, OneTicket přes prohlížeč); do ciziny dopravci, kteří
-   obsluhují obě země (ÖBB, DB, PKP, MÁV, RegioJet…; ČD a ZSSK přes
-   prohlížeč). Neprodá-li nikdo celý kus, rozdělí ho – nejdřív co nejdelší
-   začátek, zbytek znovu – v přestupu nebo ve stanici na hranici:
-   Domanín → Bad Ischl = IDESKA do Českých Budějovic + ČD/ÖBB do Bad Ischlu,
-   jinak ČB → Linz/Selzthal + zbytek ÖBB; Brno → Malacky = ČD/ZSSK celé,
-   jinak Brno → Kúty (ČD) + Kúty → Malacky (ZSSK).
+   obsluhují obě země (ÖBB, DB, PKP, MÁV, RegioJet, FlixBus…) a přes
+   prohlížeč ČD (z Česka kamkoli – Včasná jízdenka Evropa) a ZSSK. Do ciziny
+   se ptá na město („České Budějovice, aut.nádr.“ → České Budějovice).
+   Kus do ciziny ocení celý **i** rozdělený – nejdřív co nejdelší začátek
+   (ČD co nejdál), zbytek znovu – v přestupu nebo ve stanici na hranici;
+   porovná dva nejdelší lomy s celou jízdenkou a vezme nejlevnější. Když
+   konkrétní vlak za lomem nikdo neprodá (WESTbahn), vezme nejbližší
+   navazující spoj prodejce. Spoje z IDOS se oceňují postupně; s ČD přes
+   prohlížeč to i tak trvá několik minut.
+   - Domanín → Bad Ischl = IDESKA do Českých Budějovic + ČD/ÖBB do Bad
+     Ischlu, jinak ČB → Linz/Selzthal + zbytek ÖBB;
+   - Třeboň → Lublaň = IDESKA do ČB + ČD do Villachu + ÖBB do Lublaně
+     (případně ÖBB do Jesenic + SŽ); ověřeno: 49 + 411 + 193 = 653 Kč;
+   - Brno → Malacky = ČD/ZSSK celé, jinak Brno → Kúty (ČD) + Kúty →
+     Malacky (ZSSK).
+
+   Země stanice se určuje podle trasy: „Jesenice“ mezi Villachem a Lublaní
+   je slovinská, „Rybník“ ve vlaku z Budějovic česká (ne polský Rybnik).
+
+   **Navazující varianty:** ke spoji z IDOS nabídne i jiné spoje na zbytek
+   cesty z odpovědí prodejců, které navazují na jízdenku IDS (rezerva
+   4 min ve stejné stanici, 10 min jinde ve městě, čekání nejvýš 3 h) –
+   nejlevnější a nejdřív přijíždějící. Trhové Sviny → Salzburg: IDS do
+   Budějovic a FlixBus podle IDOS, nebo vlak ČD/ÖBB – porovnáte cenu,
+   přestupy i čas.
 
 **Kdy se ptá:** vždy, když aspoň jeden konec cesty leží v Česku (i na
 cesty do ciziny). Ocení se první 3 spoje do 4:15 h.

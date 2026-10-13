@@ -116,8 +116,25 @@ _COUNTRY_WORDS: dict[str, tuple[str, ...]] = {
 }
 
 
+#: Značky zemí, které dopravci píší jinak než ISO (ÖBB „Jesenice(SL)“).
+_MARKS = {"SL": "SI", "UK": "GB", "CS": "CZ", "SLO": "SI", "AUT": "AT", "DEU": "DE", "GER": "DE", "CZE": "CZ",
+          "SVK": "SK", "HUN": "HU", "POL": "PL", "ITA": "IT", "HRV": "HR", "CRO": "HR", "SUI": "CH", "CHE": "CH"}
+
+
+def marked_country(name: str) -> str | None:
+    """Země výslovně uvedená u jména stanice („Rybnik(PL)“, „Jesenice(SL)“)."""
+    m = re.search(r"\(([A-Z]{2,3})\)\s*$", name or "")
+    if not m:
+        return None
+    code = _MARKS.get(m.group(1), m.group(1))
+    return code if len(code) == 2 else None
+
+
 def country_of(name: str) -> str | None:
     """Kód země stanice ("CZ", "AT", "SK" …); ``None`` = nevíme."""
+    marked = marked_country(name)
+    if marked:
+        return marked
     n = " " + normalize(name) + " "
     for code, words in _COUNTRY_WORDS.items():
         if any(f" {w} " in n for w in words):
@@ -130,6 +147,20 @@ def country_of(name: str) -> str | None:
     if place.country:
         return place.code or None
     return "CZ"
+
+
+def country_near(name: str, neighbours: set[str]) -> str | None:
+    """Země stanice s ohledem na sousední stanice trasy: „Jesenice“ mezi
+    Villachem a Lublaní je slovinská, ne česká obec stejného jména."""
+    found = country_of(name)
+    neighbours = {c for c in neighbours if c}
+    if neighbours and found not in neighbours:
+        from . import stations
+
+        candidates = stations.countries_for(name) & neighbours
+        if candidates:
+            return sorted(candidates)[0]
+    return found
 
 
 def leaves_czechia(*names: str) -> bool:

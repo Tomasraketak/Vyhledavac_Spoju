@@ -280,8 +280,13 @@ a program má i vlastní záložní pásmo s letním časem.
 úsek *pěšky* (`models.mark_walks`), takže se nepočítají jako přestup na
 další spoj a ve výsledcích jsou vidět jako přesun.
 
-**Zahraniční názvy:** zahraniční dopravci dostanou místní jméno města
-(Lublaň → Ljubljana, Curych → Zürich), čeští dopravci a IDOS české.
+**Zahraniční názvy:** zahraniční dopravci (i FlixBus a ČD) dostanou místní
+jméno města (Lublaň → Ljubljana, Curych → Zürich), čeští dopravci a IDOS
+české.
+
+**Špatně vyložené místo:** spoj, který podle dopravce začíná nebo končí
+v jiné zemi, než jste zadali (ÖBB umí z „Trhových Svinů“ udělat zastávku
+v Bratislavě), se zahodí s poznámkou.
 
 Chyba jednoho dopravce nikdy neshodí ostatní: engine každého spouští
 zvlášť s časovým limitem a chybu ukáže u jeho řádku v GUI. Když dopravce

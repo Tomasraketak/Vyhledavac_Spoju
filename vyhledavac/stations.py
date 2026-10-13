@@ -267,6 +267,19 @@ def provider_name(name: str) -> str:
     return best.local
 
 
+def countries_for(name: str) -> set[str]:
+    """Všechny země, kde leží místo toho jména („Jesenice“: Česko i Slovinsko)."""
+    db = database()
+    if db is None or not name:
+        return set()
+    words = [_alias(w) for w in normalize(name).split()]
+    for end in range(len(words), 0, -1):
+        hits = db.exact.get(" ".join(words[:end])) or db._abbreviated(words[:end])
+        if hits:
+            return {p.code or "CZ" for p in hits}
+    return set()
+
+
 def is_domestic(*names: str) -> bool:
     """Leží všechna místa v Česku? (Neznámé místo = nevíme, tedy ne.)"""
     found = [place(n) for n in names]

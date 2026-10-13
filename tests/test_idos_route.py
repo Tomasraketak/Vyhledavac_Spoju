@@ -114,3 +114,40 @@ def test_split_at_transfer_and_border():
     head, tail = idos_complete._split([ec, ir], (0, 1))
     assert head[-1].destination == "Horní Dvořiště" and tail[0].origin == "Horní Dvořiště"
     assert tail[-1].destination == "Bad Ischl"
+
+
+def test_country_from_route_context():
+    from vyhledavac import geo
+
+    assert geo.country_of("Jesenice") == "CZ"                       # obec u Prahy
+    assert geo.country_near("Jesenice", {"AT", "SI"}) == "SI"       # stanice u Lublaně
+    stops = [Stop("Villach Hbf", departure=at(21, 38)), Stop("Rosenbach", at(21, 55), at(21, 56)),
+             Stop("Jesenice", at(22, 10), at(22, 20)), Stop("Lesce-Bled", at(22, 30), at(22, 31)),
+             Stop("Ljubljana", arrival=at(23, 18))]
+    d39 = Leg("Villach Hbf", "Ljubljana", at(21, 38), at(23, 18), mode=Mode.TRAIN, line="D 39", stops=stops)
+    assert idos_complete._run_countries([d39]) == {"AT", "SI"}
+    assert idos_complete._split_points([d39]) == [(0, 2)]          # lom v Jesenicích (Rosenbach neznáme)
+
+
+def test_cd_sells_far_abroad_and_city_names():
+    from vyhledavac.registry import load_plugins
+
+    load_plugins()
+    ec = [Leg("České Budějovice", "Ljubljana", at(8), at(16), mode=Mode.TRAIN, carrier="České dráhy", line="EC 331")]
+    _, browser = idos_complete.sellers_for("České Budějovice", "Ljubljana", ec, {"CZ", "SI"})
+    assert browser == ["ČD"]
+    bus = [Leg("České Budějovice, aut.nádr.", "Salzburg South", at(9, 5), at(12, 50), mode=Mode.BUS,
+               carrier="FlixBus CZ s.r.o.", line="Bus 861")]
+    plain, browser = idos_complete.sellers_for("České Budějovice", "Salcburk", bus, {"CZ", "AT"})
+    assert "FlixBus" in plain and browser == ["ČD"]                 # do ciziny i vlak ČD k porovnání
+    _, browser = idos_complete.sellers_for("Třeboň", "Praha", bus, {"CZ"})
+    assert browser == []                                            # autobus po Česku: ČD ne
+    assert idos_complete._query_name("České Budějovice, aut.nádr.", True) == "České Budějovice"
+    assert idos_complete._query_name("Salzburg South", True) == "Salcburk"
+
+
+def test_marked_country():
+    from vyhledavac import geo
+
+    assert geo.country_of("Rybnik(PL)") == "PL" and geo.country_of("Jesenice(SL)") == geo.country_of("Jesenice(SLO)") == "SI"
+    assert not idos_complete._marked_ok("Rybnik(PL)", "CZ") and idos_complete._marked_ok("Jesenice(SL)", "SI")

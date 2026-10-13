@@ -167,9 +167,12 @@ async def test_idos_complete_prices_rest_with_same_train():
         assert "IDS" not in (only or [])
         return [sjt, other]
 
-    (done,) = await IdosCompleteHack().find(SearchQuery(origin="Domanín vrchy", destination="Praha",
-                                                        departure=at(6)), [journey], search)
+    done, variant = await IdosCompleteHack().find(SearchQuery(origin="Domanín vrchy", destination="Praha",
+                                                              departure=at(6)), [journey], search)
     assert done.price == Decimal(401) and [s.provider for s in done.segments] == ["IDESKA", "Arriva"]
+    # navazující varianta: tentýž autobus IDS a pozdější IC, levnější
+    assert variant.price == Decimal(349) and variant.segments[-1].legs[0].line == "IC 538"
+    assert "Navazující varianta" in variant.notes[0]
 
 
 def _infos(stops_by_leg):

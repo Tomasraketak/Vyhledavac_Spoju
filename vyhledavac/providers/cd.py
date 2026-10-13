@@ -117,7 +117,7 @@ class CdProvider(BrowserProvider):
     provides_prices = True
     provides_stops = True
     countries = ("CZ",)
-    czech_names = True
+    # zahraniční stanice zná cd.cz pod místními jmény („Salzburg Hbf“, ne „Salcburk“)
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         for name in (query.origin, query.destination):

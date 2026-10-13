@@ -19,7 +19,7 @@ from typing import Any, Callable, ClassVar, Sequence
 
 from ..cache import Cache, get_cache
 from ..errors import ProviderError, ProviderUnavailableError
-from ..models import Fare, Journey, ProviderResult, SearchQuery, mark_walks
+from ..models import Fare, Journey, Mode, ProviderResult, SearchQuery, mark_walks
 from ..money import CurrencyConverter, get_converter
 from ..registry import PROVIDERS
 
@@ -193,6 +193,11 @@ class Provider(abc.ABC):
 
         mark_walks(journeys)
         journeys = [j for j in journeys if _is_sane(j)]
+        kept = [j for j in journeys if _right_place(j, query)]
+        if len(kept) < len(journeys):
+            notes.append(f"{len(journeys) - len(kept)} spojů vynecháno – dopravce místo vyložil jinde "
+                         "(jiná země, než jste zadali)")
+            journeys = kept
         return ProviderResult(
             provider=self.name,
             journeys=journeys,
@@ -290,6 +295,21 @@ def price_scope(journeys: Sequence[Journey], query: SearchQuery,
     until = query.departure + PRICE_SCOPE_AHEAD
     ordered = sorted((j for j in journeys if j.departure <= until), key=lambda j: (j.departure, j.arrival))
     return ordered[:max(count, 1)]
+
+
+def _right_place(journey: Journey, query: SearchQuery) -> bool:
+    """Začíná a končí spoj v zemi, kterou uživatel zadal? ÖBB umí z „Trhových
+    Svinů“ udělat zastávku v Bratislavě – takový spoj nepatří do výsledků."""
+    from .. import geo, stations
+
+    rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK] or journey.legs
+    if not rides:
+        return True
+    for asked, got in ((query.origin, rides[0].origin), (query.destination, rides[-1].destination)):
+        a, b = geo.country_of(asked), geo.country_of(got)
+        if a and b and a != b and not (stations.countries_for(asked) & stations.countries_for(got)):
+            return False
+    return True
 
 
 def _is_sane(journey: Journey) -> bool:

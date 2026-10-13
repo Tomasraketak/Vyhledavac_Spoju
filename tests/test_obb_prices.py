@@ -184,8 +184,10 @@ async def test_timetable_request_carries_route_and_date():
 # ---- dopravce: spojení jízdního řádu a cen ---------------------------------
 def hafas_journeys():
     return [
-        make_journey(provider="ÖBB", dep=at(8, 28), arr=at(10, 53), line="RJX 165"),
-        make_journey(provider="ÖBB", dep=at(8, 57), arr=at(11, 49), line="WB 911"),
+        make_journey(provider="ÖBB", origin="Wien Hbf", destination="Salzburg Hbf",
+                     dep=at(8, 28), arr=at(10, 53), line="RJX 165"),
+        make_journey(provider="ÖBB", origin="Wien Hbf", destination="Salzburg Hbf",
+                     dep=at(8, 57), arr=at(11, 49), line="WB 911"),
     ]
 
 
