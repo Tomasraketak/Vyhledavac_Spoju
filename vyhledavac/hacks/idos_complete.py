@@ -199,8 +199,8 @@ class IdosCompleteHack(TravelHack):
                 else:
                     pieces.append(Journey(provider="?", legs=[part[i]], fare_status=FareStatus.UNKNOWN))
                     i += 1
-        if not any(p.price is not None for p in pieces):
-            return None
+        if not any(p.price is not None and p.provider != "MHD" for p in pieces):
+            return None                      # bez jediné skutečné jízdenky nemá smysl ukazovat
         missing = [p for p in pieces if p.price is None]
         trace("◐ jen část ceny – chybí: " + ", ".join(f"{p.origin} → {p.destination} ({p.legs[0].line} "
                                                       f"[{p.legs[0].carrier}])" for p in missing))
@@ -296,18 +296,19 @@ class IdosCompleteHack(TravelHack):
         return segments
 
     async def _price_run(self, query: SearchQuery, run: list[Leg], search: SearchFn,
-                         splits: int, ready: dt.datetime | None = None) -> list[Journey] | None:
+                         splits: int, ready: dt.datetime | None = None,
+                         ready_at: str = "") -> list[Journey] | None:
         """Jízdenky na souvislý kus cesty: celý u jednoho prodejce, jinak
         co nejdelší začátek + zbytek (rekurzivně) – lom v přestupní stanici
         nebo ve stanici na hranici státu, kde vlak staví."""
         trace(f"kus {run[0].origin} → {run[-1].destination} ({len(run)} úsek/ů, "
               f"{', '.join(sorted(_run_countries(run))) or '?'})")
         with nested():
-            return await self._price_run_inner(query, run, search, splits, ready)
+            return await self._price_run_inner(query, run, search, splits, ready, ready_at)
 
     async def _price_run_inner(self, query: SearchQuery, run: list[Leg], search: SearchFn,
-                               splits: int, ready: dt.datetime | None) -> list[Journey] | None:
-        whole = await self._seller(query, run, search, ready)
+                               splits: int, ready: dt.datetime | None, ready_at: str) -> list[Journey] | None:
+        whole = await self._seller(query, run, search, ready, ready_at=ready_at)
         countries = _run_countries(run)
         abroad = not countries <= {"CZ"}
         # po Česku stačí celá jízdenka; do ciziny se porovná i s rozdělením –
@@ -316,9 +317,10 @@ class IdosCompleteHack(TravelHack):
             return [whole]
         if splits <= 0:
             return None
-        split = await self._split_run(query, run, search, splits, ready)
+        split = await self._split_run(query, run, search, splits, ready, ready_at)
         options = [o for o in ([whole] if whole else []) + ([split] if split else [])]
         if not options:
+            trace("✗ kus nejde ocenit – ani celý, ani s lomem")
             return None
         if len(options) == 1:
             return options[0] if isinstance(options[0], list) else [options[0]]
@@ -328,7 +330,8 @@ class IdosCompleteHack(TravelHack):
         return split if split_price < whole.price else [whole]
 
     async def _split_run(self, query: SearchQuery, run: list[Leg], search: SearchFn,
-                         splits: int, ready: dt.datetime | None = None) -> list[Journey] | None:
+                         splits: int, ready: dt.datetime | None = None,
+                         ready_at: str = "") -> list[Journey] | None:
         points = _split_points(run)
         if len(run) > MAX_RUN_LEGS:          # dlouhý kus: jen po celých úsecích
             points = [p for p in points if p[1] == 0]
@@ -342,23 +345,22 @@ class IdosCompleteHack(TravelHack):
             trace(f"✂ lom v {_point_name(run, point)}: {head[0].origin} → {head[-1].destination} + "
                   f"{tail[0].origin} → {tail[-1].destination}")
             with nested():
-                first = await self._seller(query, head, search, ready,
+                first = await self._seller(query, head, search, ready, ready_at=ready_at,
                                            deadline=tail[0].departure - TRANSFER_SAME)
             if first is None:
                 continue
             # zbytek navazuje na skutečný příjezd jízdenky začátku (může být jiný spoj)
-            rest = await self._price_run(query, tail, search, splits - 1, first.arrival)
+            rest = await self._price_run(query, tail, search, splits - 1, first.arrival,
+                                         first.legs[-1].destination if first.legs else "")
             if rest is not None:
                 found.append([first, *rest])
                 if len(found) >= MAX_SPLIT_OPTIONS:
                     break
         # nejlevnější z několika lomů: ČD do Villachu + ÖBB bývá levnější než ČD do Jesenic + ÖBB
-        if not found:
-            trace("✗ žádný lom nevyšel")
         return min(found, key=lambda parts: sum((p.price for p in parts), Decimal(0)), default=None)
 
     async def _seller(self, query: SearchQuery, run: list[Leg], search: SearchFn,
-                      ready: dt.datetime | None = None,
+                      ready: dt.datetime | None = None, ready_at: str = "",
                       deadline: dt.datetime | None = None) -> Journey | None:
         """Nejlevnější jízdenka na kus ``run``: přesně tentýž spoj, jinak spoj se
         stejným odjezdem, který nedojede později; za lomem (``ready`` = příjezd
@@ -442,8 +444,12 @@ class IdosCompleteHack(TravelHack):
                  and o.arrival <= latest]
         if not other and ready is not None:
             late = dt.timedelta(minutes=60)
+            def gap(o: Journey) -> dt.timedelta:
+                # přestup ve stejné stanici 4 min, jinde ve městě (Südkreuz → Hbf) 10 min
+                return TRANSFER_SAME if not ready_at or same_place(o.legs[0].origin, ready_at) else TRANSFER_OTHER
+
             other = [o for o in options if o.price is not None
-                     and ready + TRANSFER_SAME <= o.departure <= first.departure + late
+                     and ready + gap(o) <= o.departure <= first.departure + late
                      and o.arrival <= last.arrival + late]
             other.sort(key=lambda o: (o.arrival, o.price))
             other = other[:1]

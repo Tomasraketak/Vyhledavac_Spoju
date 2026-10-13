@@ -167,17 +167,24 @@ který skládá jízdenky na spoj z IDOS / plánovače – kde zkouší lomy, u 
 dopravců se ptá, co odpověděli a co vybral:
 
 ```
-· ▶ spoj z IDS 09:05–18:09 Třeboň, aut.nádr. → Ljubljana: Bus 300 [ČSAD] ➔ Sp 3803 [České dráhy] ➔ …
-·   rozpis 1: IDESKA Třeboň, aut.nádr. → České Budějovice, aut.nádr. 49 Kč | koupit České Budějovice → Ljubljana
-·     kus České Budějovice → Ljubljana (3 úsek/ů, CZ, SI)
-·       ? České Budějovice → Lublaň 10:05–18:09 (AT, CZ, SI): ptám se MÁV, ÖBB | prohlížeč: ČD
-·         odpovědi z místa do místa: ČD 4 (s cenou 2), ÖBB 3 (s cenou 3)
-·       ✗ tentýž spoj nikdo neprodává
-·       možné lomy: Villach Hbf, Jesenice (ve vlaku D 317), Salzburg Hbf
-·       ✂ lom v Villach Hbf: České Budějovice → Villach Hbf + Villach Hbf → Ljubljana
-·           ✓ tentýž spoj: ČD 411 Kč
-·       ⚖ celá jízdenka ÖBB 1734 Kč × rozdělená 604 Kč → rozdělená
+· #1 ▶ spoj z Plánovač 07:00–10:46 Krakow, MDA Bus Station → Hamar stasjon: Bus FlixBus 1377 [FlixBus-eu] ➔ 28 (ICE 508) [DB Fernverkehr AG] ➔ Bus FlixBus N613 [FlixBus-eu] ➔ RE10 [Vy]
+· #1   rozpis 1: koupit Krakow, MDA Bus Station → Hamar stasjon
+· #1     kus Krakow, MDA Bus Station → Hamar stasjon (4 úsek/ů, NO, PL)
+· #1       – Krakov → Hamar (DE, NO, PL): nikdo neprodává tuhle kombinaci zemí, neptám se
+· #1       možné lomy: Oslo S, Hamburg central bus station, S Südkreuz Bhf (Berlin)
+· #1       ✂ lom v S Südkreuz Bhf (Berlin): Krakow, MDA Bus Station → Berlin Südkreuz train station + S Südkreuz Bhf (Berlin) → Hamar stasjon
+· #1         ? Krakov → Berlín 07:00–15:00 (DE, PL): ptám se DB, FlixBus, PKP, RegioJet
+· #1           odpovědi z místa do místa: FlixBus 27 (s cenou 27)
+· #1           ✓ tentýž spoj: FlixBus 848 Kč
+· #1       kus S Südkreuz Bhf (Berlin) → Hamar stasjon (3 úsek/ů, DE, NO)
+· #1         ✂ lom v Hamburg central bus station: …
+· #1             ? Hamburk → Oslo 18:00–08:55 (DE, NO): ptám se DSB, FlixBus, SJ
+· #1               ✓ tentýž spoj: FlixBus 1908 Kč
+· #1             ? Oslo → Hamar 09:34–10:46 (NO): ptám se DSB, SJ, Vy
+· #1               ✓ tentýž spoj: Vy 568 Kč
 ```
+
+(`#1` = první spoj – spoje se oceňují souběžně.)
 
 Značky: `▶` spoj, `?` dotaz na prodejce, `✓` nalezená jízdenka, `✗` nic,
 `✂` zkoušený lom, `⚖` porovnání, `–` kus, který nikdo neprodává (bez dotazu),

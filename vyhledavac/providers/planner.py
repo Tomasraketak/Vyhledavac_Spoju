@@ -40,6 +40,8 @@ from .base import PRICE_SCOPE_AHEAD, PRICE_SCOPE_COUNT, HttpProvider
 log = logging.getLogger(__name__)
 
 PLACE_TTL = 30 * 24 * 3600
+#: Záložní zastávka (z dat země města) nejdál tolik km od středu.
+HOME_STOP_KM = 10.0
 #: Úsek MHD: tramvaj/metro, nebo autobus kratší než tolik km.
 LOCAL_KM = 20.0
 MAX_RIDES = 9
@@ -90,35 +92,56 @@ class PlannerProvider(HttpProvider):
     hack_legs = False
     min_interval = 0.6
 
-    async def place(self, name: str) -> str:
-        key = f"planner-place3:{normalize(name)}"
+    async def places(self, name: str) -> list[str]:
+        """Kde v Transitous začít/skončit: u zahraničního města souřadnice středu
+        a jako záloha zastávka z dat té země nejblíž středu (ze středu Košic
+        Transitous cestu nenajde, ze zastávky ŽSR ano); u českého místa zastávka."""
+        key = f"planner-place4:{normalize(name)}"
         cached = self.cache.get(self.name, key)
         if cached:
-            return cached
+            return list(cached)
         city = stations.place(name)
         headers = {"User-Agent": transitous.USER_AGENT}
+        out: list[str] = []
         if city is not None and city.code and city.lat is not None:
-            # střed města: nádraží si plánovač vybere podle trasy (Paříž má jich šest),
-            # MHD k nádraží se pak z trasy vypustí
-            chosen = f"{city.lat},{city.lon}"
+            out.append(f"{city.lat},{city.lon}")
+            found = await self.client.get_json(f"{transitous.API}/v1/geocode",
+                                               params={"text": city.local or city.name, "language": "en"},
+                                               headers=headers)
+            home = [r for r in found or [] if r.get("type") == "STOP" and r.get("lat") is not None
+                    and str(r.get("id") or "").lower().startswith(f"{city.code.lower()}-")
+                    and _km(city.lat, city.lon, float(r["lat"]), float(r["lon"])) <= HOME_STOP_KM]
+            if home:
+                home.sort(key=lambda r: _km(city.lat, city.lon, float(r["lat"]), float(r["lon"])))
+                out.append(str(home[0]["id"]))
         else:
             found = await self.client.get_json(f"{transitous.API}/v1/geocode",
                                                params={"text": name, "language": "cs"}, headers=headers)
             chosen = transitous.pick_place(name, found or [])
-        if chosen is None:
+            if chosen is not None:
+                out.append(chosen)
+        if not out:
             raise StationNotFoundError(self.name, f"místo {name!r} Transitous nezná")
-        trace(f"plánovač: {name} → {chosen}")
-        self.cache.set(self.name, key, chosen, ttl=PLACE_TTL)
-        return chosen
+        trace(f"plánovač: {name} → {' / '.join(out)}")
+        self.cache.set(self.name, key, out, ttl=PLACE_TTL)
+        return out
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         if not geo.leaves_czechia(query.origin, query.destination):
             raise StationNotFoundError(self.name, "cesty po Česku plánuje IDOS")
-        origin, destination = await self.place(query.origin), await self.place(query.destination)
-        data = await self.client.get_json(f"{transitous.API}/v5/plan", params={
-            "fromPlace": origin, "toPlace": destination, "numItineraries": 6,
-            "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
-            headers={"User-Agent": transitous.USER_AGENT}) or {}
+        origins, destinations = await self.places(query.origin), await self.places(query.destination)
+        tries = [(origins[0], destinations[0])]
+        if (origins[-1], destinations[-1]) != tries[0]:
+            tries.append((origins[-1], destinations[-1]))
+        data: dict[str, Any] = {}
+        for origin, destination in tries:
+            data = await self.client.get_json(f"{transitous.API}/v5/plan", params={
+                "fromPlace": origin, "toPlace": destination, "numItineraries": 6,
+                "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")},
+                headers={"User-Agent": transitous.USER_AGENT}) or {}
+            if data.get("itineraries"):
+                break
+            trace(f"plánovač: z {origin} do {destination} nic – zkouším zastávky")
         journeys = []
         for it in data.get("itineraries") or []:
             journey = self.to_journey(it, query)
