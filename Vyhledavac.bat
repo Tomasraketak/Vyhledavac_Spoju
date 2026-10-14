@@ -7,7 +7,8 @@ rem  příkazová řádka, takže jde volat i takto:
 rem      Vyhledavac.bat Praha Brno --sort price
 rem
 rem  Při prvním spuštění si vedle sebe vytvoří virtuální prostředí (.venv)
-rem  a doinstaluje knihovny. Příště se spustí rovnou.
+rem  a doinstaluje knihovny. Při každém spuštění stáhne nejnovější verzi
+rem  (git pull) a doinstaluje, co přibylo – aktualizace = dvojklik.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
 chcp 65001 >nul 2>&1
@@ -19,6 +20,21 @@ set "VENV=%~dp0.venv"
 set "PYW=%VENV%\Scripts\pythonw.exe"
 set "PYC=%VENV%\Scripts\python.exe"
 set "HOTOVO=%VENV%\.instalace-hotova"
+
+rem Aktualizace: je-li program stažený přes git, stáhne nejnovější verzi.
+rem Bez internetu nebo s vlastními úpravami se nic nestane - spustí se,
+rem co je na disku. Vypnout: soubor "bez-aktualizace.txt" vedle tohoto souboru.
+rem Celý blok se načte najednou: git pull může přepsat i tento soubor, proto
+rem se pak spustí jeho nová verze (už bez další aktualizace) a tahle skončí.
+if not defined VYH_AKTUALIZOVANO if exist "%~dp0.git" if not exist "%~dp0bez-aktualizace.txt" (
+    where git >nul 2>&1 && (
+        echo   Hledám novou verzi programu ...
+        git -C "%~dp0." pull --ff-only --quiet >nul 2>&1
+        set "VYH_AKTUALIZOVANO=1"
+        call "%~f0" %*
+        exit /b
+    )
+)
 
 if not exist "%PYC%" goto instalace
 if not exist "%HOTOVO%" goto instalace

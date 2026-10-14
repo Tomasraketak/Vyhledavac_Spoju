@@ -37,7 +37,10 @@ zaškrtněte *Add python.exe to PATH*. Verze z Microsoft Storu nestačí.
 Stáhněte projekt (přes `git clone` níže, nebo na GitHubu *Code → Download
 ZIP* a rozbalte) a dvakrát klikněte na **`Vyhledavac.bat`**. Při prvním
 spuštění si sám připraví prostředí, pak už jen otevírá program – webové
-rozhraní ve vašem prohlížeči. Po aktualizaci si sám doinstaluje, co přibylo.
+rozhraní ve vašem prohlížeči. **Při každém spuštění se sám aktualizuje**
+(je-li stažený přes `git clone`: stáhne nejnovější verzi, doinstaluje, co
+přibylo, a spustí ji). Nechcete-li to, vytvořte vedle něj prázdný soubor
+`bez-aktualizace.txt`.
 
 ### Příkazy pro Windows (cmd)
 
@@ -77,13 +80,15 @@ Neděje se vůbec nic, ani okno s chybou? Pak Python nenašel modul
 a pro kontrolu spusťte `.venv\Scripts\python -m vyhledavac.web`
 (s konzolí, chybu uvidíte rovnou).
 
-**Aktualizace** na nejnovější verzi:
+**Aktualizace a rovnou spuštění** – jeden příkaz (stáhne nejnovější verzi,
+doinstaluje, co přibylo, a otevře program v prohlížeči):
 
 ```bat
-cd Vyhledavac_Spoju
-git pull
-.venv\Scripts\python -m pip install --upgrade -r requirements.txt
+cd Vyhledavac_Spoju && git pull && .venv\Scripts\python -m pip install -q --upgrade -r requirements.txt && .venv\Scripts\pythonw -m vyhledavac.web
 ```
+
+(V příkazovém řádku `cmd`. V PowerShellu 5 nahraďte `&&` středníkem `;`.
+Běží-li program se starší verzí, nové spuštění ji samo ukončí a otevře novou.)
 
 Máte-li prohlížeč pro ČD, občas aktualizujte i ten:
 
@@ -109,8 +114,8 @@ python3 -m venv .venv
 # spuštění (webové rozhraní v prohlížeči)
 .venv/bin/python -m vyhledavac.web
 
-# aktualizace
-git pull && .venv/bin/python -m pip install --upgrade -r requirements.txt
+# aktualizace a rovnou spuštění
+git pull && .venv/bin/python -m pip install -q --upgrade -r requirements.txt && .venv/bin/python -m vyhledavac.web
 ```
 
 Starší okenní rozhraní (`python -m vyhledavac.gui`) potřebuje tkinter,
