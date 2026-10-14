@@ -346,9 +346,23 @@ def _right_place(journey: Journey, query: SearchQuery) -> bool:
         return True
     for asked, got in ((query.origin, rides[0].origin), (query.destination, rides[-1].destination)):
         a, b = geo.country_of(asked), geo.country_of(got)
+        city = stations.place(asked)
+        if city is not None and city.code and city.code != "CZ":
+            # „Mnichov“ je München, ne česká vesnice Mnichov – OneTicket ho doplnil na Mnichovice
+            if b and b != city.code and city.code not in stations.countries_for(got):
+                return False
+            there = stations.place(got)
+            if (there is not None and there.lat is not None and city.lat is not None
+                    and geo.km((city.lat, city.lon), (there.lat, there.lon)) > FAR_KM):
+                return False
+            continue
         if a and b and a != b and not (stations.countries_for(asked) & stations.countries_for(got)):
             return False
     return True
+
+
+#: Spoj, který končí dál od hledaného zahraničního města, jede jinam.
+FAR_KM = 100.0
 
 
 def _is_sane(journey: Journey) -> bool:

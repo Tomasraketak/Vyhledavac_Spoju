@@ -450,7 +450,14 @@ class CdProvider(BrowserProvider):
                 continue
             if journey is not None:
                 journeys.append(journey)
-        return journeys
+        # Formulář ČD si pamatuje poslední hledání: když se stanice z našeptávače
+        # nevybere, hledá se dál odtamtud (Ostrava → Krakov vrátil spoje z Prahy).
+        wrong = [j for j in journeys if not (_plausible(j.legs[0].origin, query.origin)
+                                             and _plausible(j.legs[-1].destination, query.destination))]
+        if journeys and len(wrong) == len(journeys):
+            raise ProviderError(self.name, f"web ČD hledal jinou trasu ({journeys[0].legs[0].origin} → "
+                                           f"{journeys[0].legs[-1].destination}) – výsledky zahozeny")
+        return [j for j in journeys if j not in wrong]
 
     async def _parse_card(self, page, card, query: SearchQuery) -> Journey | None:
         times = await card.locator("p.schedule__text--time").all_inner_texts()
@@ -628,3 +635,16 @@ def _group_label(passengers: tuple[Passenger, ...]) -> str:
 
     counts = Counter(_tariff_label(p) for p in passengers)
     return " + ".join(f"{n}× {k}" if n > 1 else k for k, n in counts.items())
+
+
+def _plausible(station: str, asked: str) -> bool:
+    """Může stanice ``station`` (jak ji píše ČD) ležet v místě ``asked``?
+    Shoda místa, nebo aspoň společné delší slovo („Č. Budějovice“ × „České
+    Budějovice“). Praha hl.n. × Ostrava ne."""
+    from ..normalize import same_place
+
+    if same_place(station, asked):
+        return True
+    words = lambda text: {w for w in normalize(text).split() if len(w) >= 4}
+    return bool(words(station) & words(asked)) or not words(asked)
+

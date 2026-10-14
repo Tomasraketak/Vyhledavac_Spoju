@@ -73,3 +73,18 @@ def test_transitous_drops_flights():
     assert transitous.to_connections({"itineraries": [{"legs": [leg, flight]}]}) == []
     assert transitous.is_air({"routeType": 1100}) and not transitous.is_air({"routeType": 2})
     assert "AIRPLANE" not in transitous.GROUND_MODES
+
+
+def test_transitous_trims_city_sightseeing_bus_at_czech_end():
+    from vyhledavac.models import Leg, Mode
+    from vyhledavac.providers.transitous_jr import _trim_foreign_ends
+
+    query = SearchQuery(origin="Praha", destination="Berlín", departure=at(10))
+    city = Leg("Praha, Václavské náměstí", "Praha, Hlavní nádraží", at(10, 21), at(10, 26), Mode.BUS,
+               "PREMIANT CITY TOUR s.r.o.", "Bus 103904 21")
+    train = Leg("Praha hl.n.", "Berlin Hbf", at(10, 31), at(14, 29), Mode.TRAIN, "ČD", "RJ 382")
+    trimmed = _trim_foreign_ends(Journey(provider="Transitous", legs=[city, train]), query)
+    assert [leg.line for leg in trimmed.legs] == ["RJ 382"]
+    # cesta po jednom městě se neořezává
+    inside = SearchQuery(origin="Praha, Václavské náměstí", destination="Praha, Hlavní nádraží", departure=at(10))
+    assert _trim_foreign_ends(Journey(provider="Transitous", legs=[city]), inside).legs == [city]

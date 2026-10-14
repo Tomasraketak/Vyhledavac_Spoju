@@ -130,7 +130,11 @@ class IdosCompleteHack(TravelHack):
         from_idos = {(j.departure, j.arrival) for j in todo if j.provider == "IDS"}
         todo = [j for j in todo if j.provider == "IDS" or (j.departure, j.arrival) not in from_idos]
         # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu; IDOS před plánovačem
-        todo.sort(key=lambda j: (j.price is not None, j.provider != "IDS", j.provider not in ROUTE_SOURCES))
+        # spoje mimo hledané okno (RegioJet vrací i další dny) se stejně neukážou
+        todo = [j for j in todo if query.departure - dt.timedelta(minutes=30) <= j.departure
+                <= query.window_end + query.window]
+        todo.sort(key=lambda j: (not query.within_window(j.departure), j.price is not None,
+                                 j.provider != "IDS", j.provider not in ROUTE_SOURCES))
         todo = _distinct_trips(todo, journeys)[:MAX_JOURNEYS]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
         # vrátí i vlak v 10:10, další spoj se tedy už ptát nemusí.

@@ -32,7 +32,7 @@ from typing import Any
 from .. import geo, stations, transitous
 from ..errors import StationNotFoundError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
-from ..normalize import normalize
+from ..normalize import normalize, same_place
 from ..registry import PROVIDERS
 from ..trace import trace
 from .base import PRICE_SCOPE_COUNT, HttpProvider, scope_end
@@ -188,10 +188,19 @@ class PlannerProvider(HttpProvider):
                 a.get("lat"), a.get("lon"), b.get("lat"), b.get("lon")) else 0.0
             legs.append(leg)
             lengths.append(length)
-        # MHD a chůze na začátku a na konci: spoj začíná a končí na nádraží
-        while legs and (legs[0].mode is Mode.WALK or is_local(legs[0], lengths[0])):
+        # MHD a chůze na začátku a na konci: spoj začíná a končí na nádraží.
+        # U českého konce jen MHD po tom městě – vlak Ostrava → Bohumín (8 km)
+        # je část cesty, ne městská doprava
+        def local_end(leg: Leg, length: float, place: str, inner: str) -> bool:
+            if leg.mode is Mode.WALK:
+                return True
+            if not is_local(leg, length):
+                return False
+            return geo.country_of(place) not in (None, "CZ") or same_place(inner, place)
+
+        while legs and local_end(legs[0], lengths[0], query.origin, legs[0].destination):
             legs.pop(0), lengths.pop(0)
-        while legs and (legs[-1].mode is Mode.WALK or is_local(legs[-1], lengths[-1])):
+        while legs and local_end(legs[-1], lengths[-1], query.destination, legs[-1].origin):
             legs.pop(), lengths.pop()
         rides = [(leg, n) for leg, n in zip(legs, lengths) if leg.mode is not Mode.WALK]
         if not rides or len(rides) > MAX_RIDES:

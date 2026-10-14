@@ -132,6 +132,12 @@ class OneTicketProvider(BrowserProvider):
         }.get(passenger.category, "ADULT")
 
     async def search(self, query: SearchQuery) -> list[Journey]:
+        from .. import geo
+
+        for name in (query.origin, query.destination):
+            if geo.country_of(name) not in (None, "CZ"):
+                # „Mnichov“ by našeptávač doplnil na Mnichovice – OneTicket prodává jen po Česku
+                raise StationNotFoundError(self.name, f"{name!r} neleží v Česku – OneTicket prodává jen po Česku")
         session = await self.browser()
         page = await session.new_page()
         api = _ApiListener()

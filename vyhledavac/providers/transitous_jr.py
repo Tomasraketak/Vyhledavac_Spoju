@@ -36,32 +36,64 @@ class TransitousProvider(HttpProvider):
         connections = await transitous.search(self.client, self.cache, self.name, query.origin,
                                               query.destination, query.departure, query.window_end)
         journeys = [to_journey(conn) for conn in connections]
-        return [j for j in (_trim_foreign_ends(j, query) for j in journeys) if j is not None]
+        out: list[Journey] = []
+        seen: set[tuple] = set()
+        for journey in (_trim_foreign_ends(j, query) for j in journeys):
+            if journey is None:
+                continue
+            key = (journey.departure, journey.arrival, journey.legs[0].line)
+            if key not in seen:              # po oříznutí MHD můžou splynout dva spoje
+                seen.add(key)
+                out.append(journey)
+        return out
 
 
 #: MHD na konci cesty v cizím městě (autobus 23 z nádraží Brašov do čtvrti
 #: Căprioara) – spoj má končit na nádraží / autobusovém nádraží města.
 LOCAL_MINUTES = 30
+#: Krátká jízda S-Bahnem na konci v cizím městě je MHD, ne část cesty.
+S_BAHN_MINUTES = 12
 
 
 def _is_local(leg: Leg) -> bool:
     if leg.mode in (Mode.TRAM, Mode.METRO, Mode.WALK):
         return True
+    if leg.mode is Mode.TRAIN:
+        # S-Bahn z nádraží do centra (München Hbf → Marienplatz, 3 min)
+        return ("s-bahn" in (leg.carrier or "").lower()
+                and leg.duration.total_seconds() <= S_BAHN_MINUTES * 60)
     return (leg.mode is Mode.BUS and "flix" not in (leg.carrier or "").lower()
             and leg.duration.total_seconds() <= LOCAL_MINUTES * 60)
 
 
+def _within(leg: Leg, city: str) -> bool:
+    """Úsek MHD jen po městě ``city`` (Praha, Václavské nám. → Praha, Hlavní nádraží)."""
+    from ..normalize import same_place
+
+    if leg.mode is Mode.WALK:
+        return True
+    if leg.mode not in (Mode.BUS, Mode.TRAM, Mode.METRO) or "flix" in (leg.carrier or "").lower():
+        return False
+    return (leg.duration.total_seconds() <= LOCAL_MINUTES * 60
+            and same_place(leg.origin, city) and same_place(leg.destination, city))
+
+
 def _trim_foreign_ends(journey: Journey, query: SearchQuery) -> Journey | None:
+    """Ořízne MHD na koncích: v cizím městě (autobus z nádraží do čtvrti) a po
+    městě, které je začátkem/cílem (Transitous začíná „Prahu“ ve středu města
+    a jede vyhlídkovou linkou na hlavní nádraží)."""
     from .. import geo
+    from ..normalize import same_place
 
     legs = list(journey.legs)
-    if geo.country_of(query.destination) not in (None, "CZ"):
-        while len(legs) > 1 and _is_local(legs[-1]):
-            legs.pop()
-    if geo.country_of(query.origin) not in (None, "CZ"):
-        while len(legs) > 1 and _is_local(legs[0]):
-            legs.pop(0)
-    if not legs:
+    city_trip = same_place(query.origin, query.destination)      # MHD po městě – nic neořezávat
+    foreign_end = geo.country_of(query.destination) not in (None, "CZ")
+    while len(legs) > 1 and ((foreign_end and _is_local(legs[-1])) or (not city_trip and _within(legs[-1], query.destination))):
+        legs.pop()
+    foreign_start = geo.country_of(query.origin) not in (None, "CZ")
+    while len(legs) > 1 and ((foreign_start and _is_local(legs[0])) or (not city_trip and _within(legs[0], query.origin))):
+        legs.pop(0)
+    if not legs or all(leg.mode is Mode.WALK for leg in legs):
         return None
     journey.legs = legs
     return journey
