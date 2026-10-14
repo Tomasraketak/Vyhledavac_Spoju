@@ -241,31 +241,44 @@ class FlixBusProvider(HttpProvider):
         from_name: str,
         to_name: str,
     ) -> list[Leg]:
-        """Přestupní spoj má více úseků v ``transfers``; přímý jeden."""
+        """Přestupní spoj má více úseků v ``legs`` (dřív ``transfers``); přímý jeden.
 
-        def station_name(sid: Any, fallback: str) -> str:
-            info = stations.get(str(sid)) or cities.get(str(sid)) or {}
+        Úsek: ``{"departure": {"date", "station_id", "city_id"}, "arrival": {…},
+        "means_of_transport": "bus" | "train", "line_code"?}``."""
+
+        def station_name(sid: Any, fallback: str, city: Any = None) -> str:
+            info = stations.get(str(sid)) or cities.get(str(city)) or cities.get(str(sid)) or {}
             return str(info.get("name") or fallback)
 
-        transfers = raw.get("transfers") or []
+        parts = raw.get("legs") or raw.get("transfers") or []
         legs: list[Leg] = []
-        if transfers:
-            for part in transfers:
-                part_dep = _parse_flix_time(part.get("departure"))
-                part_arr = _parse_flix_time(part.get("arrival"))
+        if len(parts) > 1:
+            last = len(parts) - 1
+            for n, part in enumerate(parts):
+                dep_node, arr_node = part.get("departure") or {}, part.get("arrival") or {}
+                part_dep = _parse_flix_time(dep_node)
+                part_arr = _parse_flix_time(arr_node)
                 if part_dep is None or part_arr is None:
-                    continue
-                origin = station_name(part.get("from_station_id"), from_name)
-                destination = station_name(part.get("to_station_id"), to_name)
+                    legs = []
+                    break
+                origin = station_name(dep_node.get("station_id") if isinstance(dep_node, dict) else None
+                                      or part.get("from_station_id"),
+                                      from_name if n == 0 else "přestup",
+                                      dep_node.get("city_id") if isinstance(dep_node, dict) else None)
+                destination = station_name(arr_node.get("station_id") if isinstance(arr_node, dict) else None
+                                           or part.get("to_station_id"),
+                                           to_name if n == last else "přestup",
+                                           arr_node.get("city_id") if isinstance(arr_node, dict) else None)
+                train = str(part.get("means_of_transport") or "").lower() == "train"
                 legs.append(
                     Leg(
                         origin=origin,
                         destination=destination,
                         departure=part_dep,
                         arrival=part_arr,
-                        mode=Mode.BUS,
-                        carrier="FlixBus",
-                        line=str(part.get("line_code") or "FlixBus"),
+                        mode=Mode.TRAIN if train else Mode.BUS,
+                        carrier="FlixTrain" if train else "FlixBus",
+                        line=str(part.get("line_code") or ("FlixTrain" if train else "FlixBus")),
                         stops=[
                             Stop(name=origin, departure=part_dep),
                             Stop(name=destination, arrival=part_arr),

@@ -75,3 +75,27 @@ def test_unpriced_twin_of_priced_hack_hidden():
                    fare_status=FareStatus.PRICED)
     kept = Deduplicate().apply([bare, hack], SearchQuery("Třeboň", "Brašov", _at(5)))
     assert kept == [hack]
+
+
+def test_flixbus_transfer_legs():
+    """FlixBus posílá přestupy v ``legs`` – spoj Třeboň → Brašov má 2 přestupy, ne přímý."""
+    from vyhledavac.cache import MemoryCache
+    from vyhledavac.providers.flixbus import FlixBusProvider
+
+    def node(date, station):
+        return {"date": date, "station_id": station, "city_id": "c-" + station}
+    raw = {"departure": node("2026-10-16T13:40:00+02:00", "t"), "arrival": node("2026-10-17T18:30:00+03:00", "b"),
+           "legs": [{"departure": node("2026-10-16T13:40:00+02:00", "t"), "arrival": node("2026-10-16T16:55:00+02:00", "brno"),
+                     "means_of_transport": "bus"},
+                    {"departure": node("2026-10-16T21:50:00+02:00", "brno"), "arrival": node("2026-10-17T00:05:00+02:00", "wien"),
+                     "means_of_transport": "bus"},
+                    {"departure": node("2026-10-17T01:25:00+02:00", "wien"), "arrival": node("2026-10-17T18:30:00+03:00", "b"),
+                     "means_of_transport": "bus"}]}
+    names = {"t": "Třeboň (aut. nádr.)", "brno": "Brno (aut. nádr. Hotel Grand)", "wien": "Vídeň, hlavní nádraží",
+             "b": "Brașov (Autogara Internationala Bartolomeu)"}
+    stations_ = {k: {"name": v} for k, v in names.items()}
+    p = FlixBusProvider(cache=MemoryCache())
+    legs = p._build_legs(raw, stations_, {}, _at(13, 40), _at(17, 30), "Třeboň", "Brašov")
+    journey = Journey(provider="FlixBus", legs=legs)
+    assert journey.transfers == 2
+    assert [leg.destination for leg in legs] == [names["brno"], names["wien"], names["b"]]
