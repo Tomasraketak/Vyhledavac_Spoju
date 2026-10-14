@@ -145,8 +145,8 @@ def test_flixbus_picks_city_by_position():
 
 
 def test_transitous_trnava_is_slovak():
-    results = [{"type": "STOP", "name": "Trnava", "id": "cz-JDF-merged_jdf:stop:13000"},
-               {"type": "STOP", "name": "Trnava", "id": "sk-zsr_5613676"}]
+    results = [{"type": "STOP", "name": "Trnava", "id": "cz-JDF-merged_jdf:stop:13000", "lat": 49.254, "lon": 15.928},
+               {"type": "STOP", "name": "Trnava", "id": "sk-zsr_5613676", "lat": 48.371, "lon": 17.585}]
     assert transitous.pick_place("Trnava", results) == "sk-zsr_5613676"
     assert transitous.pick_place("Domanín", [{"type": "STOP", "name": "Domanín", "id": "cz-1"},
                                              {"type": "STOP", "name": "Domanín", "id": "sk-2"}]) == "cz-1"
@@ -173,9 +173,9 @@ def test_same_trip_from_several_sources_shown_once():
 
 
 def test_transitous_foreign_city_is_not_czech_village():
-    results = [{"type": "STOP", "name": "Vídeň", "id": "cz-JDF-merged_jdf:stop:761"},
-               {"type": "STOP", "name": "Wien Hauptbahnhof", "id": "at-oebb_1290401"},
-               {"type": "STOP", "name": "Wien", "id": "at-oebb_1"}]
+    results = [{"type": "STOP", "name": "Vídeň", "id": "cz-JDF-merged_jdf:stop:761", "lat": 49.42, "lon": 16.05},
+               {"type": "STOP", "name": "Wien Hauptbahnhof", "id": "at-oebb_1290401", "lat": 48.185, "lon": 16.376},
+               {"type": "STOP", "name": "Wien", "id": "at-oebb_1", "lat": 48.2, "lon": 16.37}]
     assert transitous.pick_place("Vídeň", results) == "at-oebb_1"
     assert transitous._query_text("Vídeň") == "Wien"
 
@@ -184,3 +184,9 @@ def test_european_sleeper_knows_idos_abbreviation():
     from vyhledavac.providers.european_sleeper import pick_station
 
     assert pick_station("Ústí n. L. hl. n.") == pick_station("Ústí nad Labem") is not None
+
+
+def test_transitous_rome_is_not_lisbon_metro():
+    results = [{"type": "PLACE", "name": "Roma", "id": "node/1", "lat": 41.893, "lon": 12.483},
+               {"type": "STOP", "name": "Roma", "id": "pt-Metro-Lisboa_RM", "lat": 38.748, "lon": -9.141}]
+    assert transitous.pick_place("Řím", results) == "41.893,12.483"

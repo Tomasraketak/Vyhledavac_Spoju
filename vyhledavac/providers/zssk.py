@@ -94,6 +94,12 @@ class ZsskProvider(BrowserProvider):
     sale_area = frozenset({"SK", "CZ", "AT", "HU", "PL", "UA"})
 
     async def search(self, query: SearchQuery) -> list[Journey]:
+        from .. import geo
+
+        ends = {geo.country_of(query.origin), geo.country_of(query.destination)}
+        if None not in ends and not (ends <= self.sale_area and ends & {"SK", "CZ", "HU", "PL"}):
+            # Málaga → Řím: e-shop ZSSK nic nenajde, jen 30 s čeká na seznam spojů
+            raise StationNotFoundError(self.name, "ZSSK – jen cesty po Slovensku a do sousedních zemí")
         session = await self.browser()
         page = await session.new_page()
         try:

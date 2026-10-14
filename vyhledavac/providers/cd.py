@@ -130,7 +130,16 @@ class CdProvider(BrowserProvider):
     countries = ("CZ",)
     # zahraniční stanice zná cd.cz pod místními jmény („Salzburg Hbf“, ne „Salcburk“)
 
+    #: ČD prodá cestu z/do Česka a vlaky, které Českem projíždějí – aspoň jeden
+    #: konec musí ležet v Česku nebo v sousední zemi (Málaga → Řím: 90 s naprázdno).
+    area = frozenset({"CZ", "SK", "AT", "DE", "PL", "HU"})
+
     async def search(self, query: SearchQuery) -> list[Journey]:
+        from .. import geo
+
+        ends = {geo.country_of(query.origin), geo.country_of(query.destination)}
+        if None not in ends and not ends & self.area:
+            raise StationNotFoundError(self.name, "ČD prodávají jen cesty z/do Česka a přes Česko")
         for name in (query.origin, query.destination):
             if without_rail(name):
                 # Web ČD hledá jen vlaky: autobusovou zastávku nenabídne a hledání

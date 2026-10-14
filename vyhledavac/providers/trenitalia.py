@@ -22,6 +22,8 @@ Ptáme se jen tehdy, když aspoň jeden konec cesty leží v Itálii.
 
 from __future__ import annotations
 
+import re
+
 import datetime as dt
 import logging
 from decimal import Decimal
@@ -55,20 +57,30 @@ class TrenitaliaProvider(HttpProvider):
     min_interval = 0.4
 
     async def resolve(self, place: str) -> dict[str, Any]:
-        key = f"place:{normalize(place)}"
+        key = f"place2:{normalize(place)}"
         cached = self.cache.get(self.name, key)
         if cached:
             return cached
-        data = await self.client.get_json(f"{API}/locations/search", params={"name": place, "limit": 10},
-                                          referer=WEB)
-        items = [p for p in data or [] if p.get("id")]
-        if not items and "," in place:
-            data = await self.client.get_json(f"{API}/locations/search",
-                                              params={"name": place.split(",")[0], "limit": 10}, referer=WEB)
+        from .. import stations
+
+        # české jméno Trenitalia nezná („Řím“ našeptá Milán, „Florencie“ nic) –
+        # nejdřív italské jméno města, pak jméno, jak přišlo, pak jen město
+        # („FIRENZE S.MARIA NOVELLA“ → Firenze, vybere se nejpodobnější stanice)
+        city = stations.place(place)
+        texts = []
+        if city is not None and city.local and normalize(city.name) == normalize(place):
+            texts.append(city.local)
+        texts += [place, re.split(r"[ ,(]", place.strip())[0]]
+        items: list[dict[str, Any]] = []
+        for text in dict.fromkeys(t for t in texts if t):
+            data = await self.client.get_json(f"{API}/locations/search", params={"name": text, "limit": 10},
+                                              referer=WEB)
             items = [p for p in data or [] if p.get("id")]
+            if items:
+                break
         if not items:
             raise StationNotFoundError(self.name, f"stanici {place!r} Trenitalia nezná")
-        chosen = pick_location(place, items)
+        chosen = pick_location(texts[0] if texts[0] != place else place, items, place)
         self.cache.set(self.name, key, chosen, ttl=PLACE_TTL)
         return chosen
 
@@ -125,17 +137,22 @@ class TrenitaliaProvider(HttpProvider):
         return journey
 
 
-def pick_location(place: str, items: list[dict[str, Any]]) -> dict[str, Any]:
-    """Skupina „Tutte Le Stazioni“ / „(city)“ pro město, jinak nejpodobnější stanice."""
+def pick_location(place: str, items: list[dict[str, Any]], original: str | None = None) -> dict[str, Any]:
+    """Skupina „Tutte Le Stazioni“ pro město, jinak přesná nebo nejpodobnější stanice."""
     wanted = normalize(place)
-    for item in items:
-        name = normalize(str(item.get("name") or ""))
-        if name == wanted:
-            return item
-    for item in items:
-        if item.get("multistation") and normalize(str(item.get("name") or "")).split(" ")[0] == wanted.split(" ")[0]:
-            return item
-    idx = best_match(place, [str(i.get("name") or "") for i in items])
+    exact = [i for i in items if normalize(str(i.get("name") or "")) == wanted]
+    multi = [i for i in items if i.get("multistation")
+             and normalize(str(i.get("name") or "")).split(" ")[0] == wanted.split(" ")[0]]
+    if len(wanted.split()) == 1 and multi:
+        return multi[0]                      # „Firenze“: všechny stanice, ne zastávka „FIRENZE“
+    if exact:
+        return exact[0]
+    if multi and original is None:
+        return multi[0]
+    names = [str(i.get("name") or "") for i in items]
+    idx = best_match(original or place, names)
+    if idx is None and multi:
+        return multi[0]
     return items[idx if idx is not None else 0]
 
 

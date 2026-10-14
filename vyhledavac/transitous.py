@@ -124,6 +124,10 @@ def _hhmm(value: Any) -> str:
     return when.strftime("%H:%M") if when else ""
 
 
+#: Zastávka/obec smí ležet nejvýš tak daleko od polohy města z databáze.
+NEAR_KM = 60.0
+
+
 def pick_place(name: str, results: list[dict[str, Any]]) -> str | None:
     """Zastávka se stejným jménem (data země, kde místo leží – „Trnava“ je
     slovenská, ne obec u Třebíče; „Vídeň“ je Wien, ne česká obec Vídeň), jinak
@@ -135,6 +139,17 @@ def pick_place(name: str, results: list[dict[str, Any]]) -> str | None:
     home = f"{country.lower()}-"
     city = stations.place(name)
     wanted = {normalize(name)} | ({normalize(city.local), normalize(city.name)} - {""} if city else set())
+    if city is not None and city.lat is not None and city.lon is not None:
+        # jen místa poblíž skutečného města: „Roma“ je i stanice metra v Lisabonu
+        from .geo import km
+
+        def near(r: dict[str, Any]) -> bool:
+            try:
+                return km((float(r["lat"]), float(r["lon"])), (city.lat, city.lon)) <= NEAR_KM
+            except (KeyError, TypeError, ValueError):
+                return False
+
+        results = [r for r in results if near(r)]
     stops = [r for r in results if r.get("type") == "STOP" and r.get("id")]
     if country != "CZ":
         # zahraniční místo: české zastávky stejného jména (obec Vídeň) nebrat
@@ -174,7 +189,7 @@ async def search(client: Any, cache: Any, namespace: str, origin: str, destinati
     headers = {"User-Agent": USER_AGENT}
     ends = []
     for name in (origin, destination):
-        key = f"transitous-place3:{normalize(name)}"
+        key = f"transitous-place4:{normalize(name)}"
         place = cache.get(namespace, key)
         if not place:
             found = await client.get_json(f"{API}/v1/geocode", params={"text": _query_text(name), "language": "cs"},

@@ -533,7 +533,9 @@ IDS – tedy totéž co IDOS. Ceny nezná.
 1. `GET /api/v1/geocode?text=…&language=cs` – zastávka se stejným jménem
    (`cz-JDF-merged_jdf:stop:33720` = „Domanín,Vrchy“), jinak obec jako
    souřadnice. Přednost mají data země, kde místo leží: „Trnava“ je
-   slovenská (`sk-zsr_…`), ne obec Trnava u Třebíče.
+   slovenská (`sk-zsr_…`), ne obec Trnava u Třebíče. Zahraniční město se hledá
+   místním jménem (Vídeň → Wien) a bere se jen místo do 60 km od polohy města
+   z databáze – „Roma“ je i stanice lisabonského metra.
 2. `GET /api/v5/plan?fromPlace&toPlace&time` – spojení, `nextPageCursor`
    pro další stránku. Úsek má dopravce (`agencyName`), linku
    (`routeShortName`), licenci a spoj (`tripShortName` „340100 7“, u vlaku

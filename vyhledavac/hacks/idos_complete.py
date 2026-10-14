@@ -74,6 +74,8 @@ BROWSER_FROM = {"ČD": "CZ", "ZSSK": "SK"}
 #: ZSSK e-shop prodá jen po Slovensku a do sousedních zemí (Trnava → Mnichov
 #: či Rotterdam vrátil po 46–130 s čekání prázdno) – dál se ho neptáme.
 BROWSER_AREA = {"ZSSK": {"SK", "CZ", "AT", "HU", "PL", "UA"}}
+#: Kam ČD prodá vlak, který Českem jen projíždí (Krakov → Vídeň).
+TRANSIT_AREA = {"CZ", "SK", "AT", "DE", "PL", "HU"}
 #: … a ČD i na vlak, který Českem jen projíždí.
 TRANSIT_SELLERS = {"ČD"}
 #: Rezerva na přestup ve stejné stanici; jinde ve městě skutečný čas (``transfer``).
@@ -145,7 +147,7 @@ class IdosCompleteHack(TravelHack):
 
         # spoje souběžně; dotazy přes prohlížeč (ČD, ZSSK) ale po jednom –
         # souběžné stránky prohlížeče nestíhaly časový limit
-        self._browser_lock = asyncio.Lock()
+        self._browser_locks: dict[str, asyncio.Lock] = {}
         self._browser_left = BROWSER_TOTAL
         self._hard_stop = time.monotonic() + TOTAL_TIME
         found: list[Journey] = []
@@ -288,8 +290,8 @@ class IdosCompleteHack(TravelHack):
         """ČD ukázalo spoje, ale bez ceny (Malmö → Břeclav: ze Švédska ČD neprodává):
         dál se na tu zemi přes prohlížeč neptáme – každý dotaz stojí ~20 s."""
         start, end = ends
-        if start == end == "CZ" or None in ends:
-            return                           # po Česku ČD ceny dává – výpadek, ne pravidlo
+        if (start == end and start in BROWSER_FROM.values()) or None in ends:
+            return                           # po Česku ČD, po Slovensku ZSSK ceny dává – výpadek, ne pravidlo
         known = self.__dict__.setdefault("_unpriced", set())
         known.add((start, end))
         if end == "CZ" and start and start != "CZ":
@@ -573,16 +575,22 @@ class IdosCompleteHack(TravelHack):
             # Öresundståg bez ceny, SJ ho prodá – ale odpověděl jen na dřívější čas)
             if not any(_same(o, first, last) and o.price is not None for o in cached):
                 since = _since(first, ready)
-                lock = getattr(self, "_browser_lock", None) if allow_browser else None
                 started = time.monotonic()
-                if lock is not None:
-                    async with lock:
-                        waited = time.monotonic() - started
-                        deadline_box = _DEADLINE.get()
-                        if deadline_box is not None:
-                            deadline_box[0] += waited      # fronta na prohlížeč není práce na spoji
-                        fresh = await search(query.leg_query(origin, destination, since),
-                                             allow_browser=allow_browser, only=only)
+                locks = getattr(self, "_browser_locks", None) if allow_browser else None
+                if locks is not None:
+                    # každý prodejce přes prohlížeč (ČD, ZSSK) má svou frontu – běží souběžně
+                    async def ask(name: str) -> tuple[float, list[Journey]]:
+                        asked_at = time.monotonic()
+                        async with locks.setdefault(name, asyncio.Lock()):
+                            wait = time.monotonic() - asked_at
+                            return wait, await search(query.leg_query(origin, destination, since),
+                                                      allow_browser=True, only=[name])
+                    answers = await asyncio.gather(*(ask(name) for name in only))
+                    waited = max(w for w, _ in answers)
+                    deadline_box = _DEADLINE.get()
+                    if deadline_box is not None:
+                        deadline_box[0] += waited          # fronta na prohlížeč není práce na spoji
+                    fresh = [j for _, found in answers for j in found]
                 else:
                     waited = 0.0
                     fresh = await search(query.leg_query(origin, destination, since),
@@ -804,8 +812,14 @@ def sellers_for(origin: str, destination: str, run: list[Leg],
     # ČD prodá i vlak, který Českem jen projíždí (EC Krakov → Vídeň)
     trains = any(leg.mode is Mode.TRAIN for leg in run) or len(countries) > 1
     transit = _transit_countries(run)
+    asked = {c for c in (geo.country_of(origin), geo.country_of(destination)) if c} or set(ends)
     browser = [name for name, home in BROWSER_FROM.items()
-               if trains and (home in countries or name in TRANSIT_SELLERS and home in transit)
+               if trains and (home in asked
+                              or name not in TRANSIT_SELLERS and home in countries
+                              # vlak Českem jen projíždí: ČD ho prodá, jen když oba konce
+                              # leží v sousedství (Považská Bystrica → Amsterdam ne – 20 s naprázdno)
+                              or name in TRANSIT_SELLERS and (home in transit or home in countries)
+                              and asked <= TRANSIT_AREA)
                and countries <= BROWSER_AREA.get(name, countries)]
     return plain, browser
 
