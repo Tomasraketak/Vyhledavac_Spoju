@@ -39,6 +39,15 @@ from .normalize import normalize
 log = logging.getLogger(__name__)
 
 API = "https://api.transitous.org/api"
+#: Jen pozemní doprava a lodě – bez letadel (do Narviku plánovač jinak vybral
+#: let Oslo → Trondheim → Narvik od Avinoru a ukázal ho jako „vlak“).
+GROUND_MODES = "TRAM,SUBWAY,FERRY,BUS,COACH,RAIL,CABLE_CAR,FUNICULAR"
+
+
+def is_air(leg: dict[str, Any]) -> bool:
+    """Úsek letadlem (MOTIS ``mode`` AIRPLANE, GTFS routeType 1100–1199)."""
+    route_type = int(leg.get("routeType") or 0)
+    return str(leg.get("mode") or "") in ("AIRPLANE", "FLIGHT") or 1100 <= route_type < 1200
 USER_AGENT = "vyhledavac-spoju (+https://github.com/tomasraketak/vyhledavac_spoju)"
 
 #: Druh úseku podle GTFS ``routeType`` → text jako v IDOS (podle něj se pozná bus/MHD/vlak).
@@ -88,6 +97,8 @@ def to_connections(data: dict[str, Any]) -> list[IdosConnection]:
     out: list[IdosConnection] = []
     seen: set[tuple] = set()
     for it in (data or {}).get("itineraries") or []:
+        if any(is_air(raw) for raw in it.get("legs") or []):
+            continue                          # letadlo nehledáme
         legs = []
         for raw in it.get("legs") or []:
             if raw.get("mode") == "WALK":
@@ -203,6 +214,7 @@ async def search(client: Any, cache: Any, namespace: str, origin: str, destinati
         ends.append(place)
     connections: list[IdosConnection] = []
     params: dict[str, Any] = {"fromPlace": ends[0], "toPlace": ends[1], "numItineraries": 8,
+                              "transitModes": GROUND_MODES,
                               "time": when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     for _ in range(pages):
         data = await client.get_json(f"{API}/v5/plan", params=params, headers=headers) or {}

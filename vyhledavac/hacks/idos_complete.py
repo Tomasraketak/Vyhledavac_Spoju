@@ -709,7 +709,7 @@ async def _de_regional(query: SearchQuery, run: list[Leg]) -> Journey | None:
 _LICENCE = re.compile(r"\b(\d{6})\b")
 
 
-def ids_fare(query: SearchQuery, run: list[Leg]) -> Journey | None:
+def ids_fare(query: SearchQuery, run: list[Leg], valid_minutes: float | None = None) -> Journey | None:
     """Kus po Česku, který žádný e-shop neprodá (regionální autobus z plánovače
     Třeboň → Budějovice): cena podle tarifu IDS kraje, pokud v něm linka jede.
 
@@ -747,7 +747,7 @@ def ids_fare(query: SearchQuery, run: list[Leg]) -> Journey | None:
     if len(route) < 2:
         return None
     allowed &= set(route[0].systems) & set(route[-1].systems)
-    minutes = (run[-1].arrival - run[0].departure).total_seconds() / 60
+    minutes = valid_minutes or (run[-1].arrival - run[0].departure).total_seconds() / 60
     hack = IdsTicketHack()
     fares = [f for f in (hack._ids_fare(query, route, system, 0, len(route) - 1, minutes)
                          for system in sorted(allowed)) if f is not None]

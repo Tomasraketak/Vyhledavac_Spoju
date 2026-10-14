@@ -418,6 +418,9 @@ class SearchQuery:
     #: Jen tyto druhy dopravy (``None`` = vše). ``{Mode.TRAIN}`` = čistě vlakové
     #: spojení – IDOS, plánovač i dopočet jízdenek pak hledají jen vlaky.
     modes: frozenset | None = None
+    #: Zpáteční cesta: ``"day"`` = návrat tentýž den, ``"24h"`` = do 24 hodin,
+    #: ``None`` = jen tam. Ke spojům se pak dopočítá cena tam i zpět (``round_trip``).
+    round_trip: str | None = None
 
     @property
     def trains_only(self) -> bool:

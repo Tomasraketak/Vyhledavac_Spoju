@@ -53,6 +53,14 @@
         <span class="sf-label" data-icon="clock">Odjezd od</span>
         <input id="f-time" name="time" type="time" required>
       </label>
+      <label class="sf-cell sf-ret">
+        <span class="sf-label" data-icon="arrow-left-right">Zpáteční</span>
+        <select id="f-ret" name="roundTrip">
+          <option value="">jen tam</option>
+          <option value="day">zpět tentýž den</option>
+          <option value="24h">zpět do 24 h</option>
+        </select>
+      </label>
       <div class="sf-cell sf-submit">
         <button class="btn btn-primary" type="submit" id="submit-btn"><span>Hledat spojení</span></button>
         <button class="btn btn-secondary" type="button" id="cancel-btn" hidden>Zrušit</button>

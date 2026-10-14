@@ -60,6 +60,9 @@ svg.i { display: block; flex: none; }
 .sf-place { flex: 1 1 190px; cursor: text; }
 .sf-date { flex: 1 1 150px; }
 .sf-time { flex: 1 1 120px; }
+.sf-ret { flex: 1 1 150px; }
+.sf-cell select { width: 100%; min-width: 0; border: 0; background: transparent; font: inherit; font-size: 16px; font-weight: 600; color: var(--color-text); padding: 2px 0; }
+.sf-cell select:focus-visible { outline: none; }
 .sf-swap { flex: 0 0 56px; align-items: center; justify-content: center; padding: 12px 8px; }
 .sf-submit { flex: 0 0 auto; flex-direction: row; align-items: center; gap: 8px; }
 .sf-submit .btn { min-height: 40px; gap: 10px; padding: 0 16px; font-size: 14px; white-space: nowrap; justify-content: flex-start; }
@@ -198,6 +201,8 @@ svg.i { display: block; flex: none; }
 .jr-price { flex: 0 0 190px; display: flex; flex-direction: column; gap: 8px; }
 .jr-price .amount { font-size: 24px; font-weight: 800; line-height: 1.15; }
 .jr-price .amount.unknown { color: var(--color-neutral-600); font-size: 20px; }
+.jr-price .rt { font-size: 13px; color: var(--color-text); display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+.jr-price .rt-save { color: var(--color-success, var(--color-accent)); font-weight: 700; }
 .jr-price .sub { font-size: 12px; color: var(--color-neutral-700); }
 .jr-actions { display: flex; gap: 6px; }
 .jr-actions .btn { flex: 1; }

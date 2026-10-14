@@ -526,6 +526,23 @@ dotaz na dopravce trvá 3–20 s. Proto:
 
 Trnava → Rotterdam: 8,3 min → 2,2–2,6 min.
 
+### Zpáteční cesta (tentýž den / do 24 hodin)
+
+Ve formuláři „Zpáteční“ (v příkazové řádce `--zpet day|24h`). Ke každému spoji
+se spočítá cena **tam i zpět** stejnou trasou – každá jízdenka spoje dvakrát,
+nebo místo ní celodenní / 24hodinová jízdenka IDS na tutéž část, když vyjde
+levněji, případně jedna taková jízdenka na celou cestu. Řazení „nejlevnější“
+pak bere cenu tam i zpět. Celodenní jízdenky:
+
+* IDESKA – Jihočeská 24 (195 Kč, celá síť; varianty s Bavorskem/Rakouskem jen
+  na cesty tam), 24 h ve městech;
+* PID (od 1. 1. 2026, elektronicky) – Praha 24 h 140 Kč, 4 vnější pásma 96 Kč,
+  Krajská 168 Kč, Celosíťová 288 Kč (zlevněné polovic);
+* VDV – 24hodinová celosíťová.
+
+Třeboň → Strakonice: vlak ČD 262 Kč jedním směrem, tam i zpět s Jihočeskou 24
+za 195 Kč. Návrat se počítá stejnou trasou a za stejnou cenu jako cesta tam.
+
 ### Kolik spojů má cenu
 
 Přes Německo prodává většinu vlaků jen DB a ta z některých IP adres (i domácích)

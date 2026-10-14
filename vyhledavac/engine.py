@@ -179,6 +179,10 @@ class SearchEngine:
         result.journeys = self.pipeline.apply(result.journeys, query)
         # Deduplikace pracuje přes slovník a pořadí nezachovává, proto znovu.
         result.journeys = sort_journeys(result.journeys, by=sort_by)
+        if query.round_trip:
+            from . import round_trip
+
+            round_trip.annotate(result.journeys, query)
 
         log.info(
             "hledání hotovo za %.1fs: %d spojů, %d dopravců selhalo",

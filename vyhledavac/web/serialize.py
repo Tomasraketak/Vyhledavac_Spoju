@@ -53,6 +53,14 @@ def fare_to_dict(fare: Fare) -> dict[str, Any]:
     }
 
 
+def _round_trip(journey: Journey) -> dict[str, Any] | None:
+    info = journey.raw.get("round_trip") if isinstance(journey.raw, dict) else None
+    if not info:
+        return None
+    return {"price": _num(info["price"]), "how": list(info["how"]), "mode": info["mode"],
+            "saving": _num(info["saving"]) if info.get("saving") is not None else None}
+
+
 def journey_to_dict(journey: Journey, key: str, *, dominated: bool = False) -> dict[str, Any]:
     price = journey.price
     return {
@@ -70,6 +78,7 @@ def journey_to_dict(journey: Journey, key: str, *, dominated: bool = False) -> d
         "notes": list(journey.notes),
         "hack": journey.is_hack,
         "dominated": dominated,
+        "roundTrip": _round_trip(journey),
         "legs": [leg_to_dict(leg) for leg in journey.legs],
         "segments": [{
             "provider": s.provider,

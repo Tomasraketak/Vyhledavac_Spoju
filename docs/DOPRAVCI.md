@@ -541,6 +541,10 @@ IDS – tedy totéž co IDOS. Ceny nezná.
    (`routeShortName`), licenci a spoj (`tripShortName` „340100 7“, u vlaku
    „R 865“) a mezizastávky s časy (UTC).
 
+**Bez letadel:** dotaz posílá `transitModes` jen s pozemní dopravou a loděmi
+a spojení s úsekem letadlem (Avinor, routeType 11xx) se zahodí – do Narviku
+dřív vyšel let Oslo → Trondheim → Narvik vydávaný za „vlak“.
+
 **Kdy se ptá:** samostatný dopravce „Transitous“ jen na přání (ve výchozím
 výběru není). IDS ho použije sám jako zálohu, když IDOS nejde.
 

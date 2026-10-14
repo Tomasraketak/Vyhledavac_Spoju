@@ -72,6 +72,33 @@ def city_category(passenger: Passenger) -> str | None:
     return "reduced" if passenger.age >= 60 else "full"
 
 
+#: 24hodinové jízdenky PID od 1. 1. 2026 (elektronicky v PID Lítačce; pid.cz/neplatvicnezmusis):
+#: (plné, zlevněné) Kč; ``None`` = zlevněná neexistuje (platí se plná).
+DAY_PRAHA = (140, 70)               # P, 0, B; zlevněná jen senioři 60–65
+DAY_OUTER_4 = (96, 48)              # libovolná 4 navazující vnější pásma
+DAY_REGION = (168, 84)              # Krajská – všechna vnější pásma
+DAY_NETWORK = (288, None)           # Celosíťová – Praha i všechna vnější pásma
+
+
+def day_fares(zone_from: str, zone_to: str, kind: str) -> list[IdsFare]:
+    """24hodinové jízdenky, které pokryjí cestu mezi pásmy (tam i zpět)."""
+    def fare(prices: tuple[int, int | None], name: str) -> IdsFare:
+        price = prices[1] if kind == "reduced" and prices[1] is not None else prices[0]
+        label = "plnocenná" if price == prices[0] else "zlevněná"
+        return IdsFare(SYSTEM, Decimal(price), 24 * 60, f"{name} 24 hodin, {label}", zone_from, zone_to)
+
+    in_praha = [z in PRAHA for z in (zone_from, zone_to)]
+    if all(in_praha):
+        return [fare(DAY_PRAHA, "Praha"), fare(DAY_NETWORK, "Celosíťová")]
+    if any(in_praha):
+        return [fare(DAY_NETWORK, "Celosíťová")]
+    out = [fare(DAY_REGION, "Krajská"), fare(DAY_NETWORK, "Celosíťová")]
+    count = zone_count(zone_from, zone_to)
+    if count is not None and count <= 4:
+        out.append(fare(DAY_OUTER_4, "4 vnější pásma"))
+    return out
+
+
 def zone_count(zone_from: str, zone_to: str) -> int | None:
     if zone_from not in ORDER or zone_to not in ORDER:
         return None
@@ -97,6 +124,7 @@ def fares(zone_from: str, zone_to: str, passenger: Passenger) -> list[IdsFare]:
             if row.get(kind) is not None:
                 out.append(IdsFare(SYSTEM, Decimal(row[kind]), int(row["minutes"]),
                                    f"Praha {minutes} min", zone_from, zone_to))
+    out += day_fares(zone_from, zone_to, kind)
     count = zone_count(zone_from, zone_to)
     if count is None:
         return out

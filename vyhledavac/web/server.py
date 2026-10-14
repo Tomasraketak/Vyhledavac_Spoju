@@ -223,7 +223,8 @@ class SearchSession:
             "done": self.done,
             "cancelled": cancelled,
             "query": {"from": query.origin, "to": query.destination,
-                      "departure": query.departure.isoformat(timespec="minutes")},
+                      "departure": query.departure.isoformat(timespec="minutes"),
+                      "roundTrip": query.round_trip},
             "providers": [self.status[name] for name in self.providers],
             "problems": self.problems,
             "journeys": items,
@@ -371,8 +372,9 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
     if len(raw) > MAX_PASSENGERS:
         raise ValueError(f"Nejvýš {MAX_PASSENGERS} cestujících.")
     passengers = tuple(_passenger(item if isinstance(item, dict) else {}) for item in raw)
+    back = str(body.get("roundTrip") or "")
     return SearchQuery(origin=origin, destination=destination, departure=when,
-                       passengers=passengers)
+                       passengers=passengers, round_trip=back if back in ("day", "24h") else None)
 
 
 MAX_PASSENGERS = 9

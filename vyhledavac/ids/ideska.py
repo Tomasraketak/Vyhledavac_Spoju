@@ -114,7 +114,13 @@ def fares(zone_from: str, zone_to: str, passenger: Passenger) -> list[IdsFare]:
         if not t["networkTariff"]:
             info = None if (single_network or invalid_zonal) else t["prices"].get(tz_id)
         else:
+            # síťová na 5 h má cenu u relace (200/206/207) a kalkulačka ji nabízí jen
+            # na delší relace; Jihočeská 24/72/120 (201–204) platí po celé síti vždy –
+            # ta s Bavorskem/Rakouskem jen na cestu do té země
             info = t["prices"].get(network_zone) if has_network else None
+            if info is None and not set(t["prices"]) & {"200", "206", "207"} \
+                    and _network_fits(t["name"], {c1, c2} - {"CZ"}):
+                info = next(iter(t["prices"].values()), None)
         if not info or info.get("price") is None or float(info["price"]) <= 1:
             continue    # kalkulačka cenu 1 Kč značí jako chybu v datech
         minutes = info.get("time")
@@ -122,6 +128,13 @@ def fares(zone_from: str, zone_to: str, passenger: Passenger) -> list[IdsFare]:
             minutes = int(t["dayValidity"]) * 24 * 60
         out.append(IdsFare(SYSTEM, Decimal(str(info["price"])), minutes, t["name"], zone_from, zone_to))
     return out
+
+
+def _network_fits(name: str, abroad: set[str]) -> bool:
+    """Síťová jízdenka „+ Bavorsko / + Rakousko“ jen na cestu do té země."""
+    lower = name.lower()
+    wants = {c for word, c in (("bavorsko", "DE"), ("rakousko", "AT")) if word in lower}
+    return wants == abroad if wants else not abroad
 
 
 def best_fare(zone_from: str, zone_to: str, passenger: Passenger,

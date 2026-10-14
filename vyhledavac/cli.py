@@ -68,6 +68,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="podrobnější log (-vv pro ladění)")
     parser.add_argument("--trains", action="store_true",
                         help="jen vlaky (čistě vlakové spojení, bez autobusů)")
+    parser.add_argument("--zpet", choices=["day", "24h"], default=None,
+                        help="cena i za cestu zpět: day = tentýž den, 24h = do 24 hodin "
+                             "(dvě jednosměrné jízdenky, nebo celodenní jízdenka IDS)")
     parser.add_argument("--trace", action="store_true",
                         help="vypisovat úvahy: kde se zkouší lomy jízdenek, u kterých dopravců, co vyšlo")
     return parser
@@ -267,6 +270,7 @@ async def run(args: argparse.Namespace) -> int:
         window=dt.timedelta(hours=args.window),
         max_results=args.limit,
         modes=frozenset({Mode.TRAIN}) if args.trains else None,
+        round_trip=args.zpet,
     )
 
     engine = SearchEngine.build(

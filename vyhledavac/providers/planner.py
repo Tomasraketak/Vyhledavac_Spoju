@@ -155,8 +155,8 @@ class PlannerProvider(HttpProvider):
         for origin, destination in tries:
             params = {"fromPlace": origin, "toPlace": destination, "numItineraries": 6,
                       "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
-            if query.trains_only:
-                params["transitModes"] = "RAIL"          # čistě vlakové spojení
+            # čistě vlakové spojení, jinak vše pozemní – bez letadel
+            params["transitModes"] = "RAIL" if query.trains_only else transitous.GROUND_MODES
             data = await self.client.get_json(f"{transitous.API}/v5/plan", params=params,
                                               headers={"User-Agent": transitous.USER_AGENT}) or {}
             if data.get("itineraries"):
@@ -164,6 +164,8 @@ class PlannerProvider(HttpProvider):
             trace(f"plánovač: z {origin} do {destination} nic – zkouším zastávky")
         journeys = []
         for it in data.get("itineraries") or []:
+            if any(transitous.is_air(leg) for leg in it.get("legs") or []):
+                continue                          # letadlo nehledáme
             journey = self.to_journey(it, query)
             if journey is None:
                 continue

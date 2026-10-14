@@ -118,7 +118,7 @@
 
   // ---- formulář ------------------------------------------------------------
   const form = $('#search-form');
-  const fFrom = $('#f-from'), fTo = $('#f-to'), fDate = $('#f-date'), fTime = $('#f-time');
+  const fFrom = $('#f-from'), fTo = $('#f-to'), fDate = $('#f-date'), fTime = $('#f-time'), fRet = $('#f-ret');
 
   function initForm() {
     const last = store.get('last', null);
@@ -126,6 +126,7 @@
     fTo.value = last ? last.to : 'Brno';
     fDate.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
     fTime.value = `${pad(today.getHours())}:${pad(today.getMinutes())}`;
+    fRet.value = store.get('roundTrip', '');
     document.querySelectorAll('.sf-label[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon, 13)));
     $('#swap-btn').innerHTML = icon('arrow-left-right', 18);
     $('#submit-btn').insertAdjacentHTML('beforeend', icon('arrow-right', 16));
@@ -282,7 +283,9 @@
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
       passengers: S.pax.map((p, i) => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree, passes: passesFor(i) })),
       providers, hacks: [...S.hacksOn],
+      roundTrip: fRet.value || null,
     };
+    store.set('roundTrip', fRet.value);
     if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
     closeStream();
     S.clientError = '';
@@ -361,7 +364,10 @@
     };
   }
 
-  const priceKey = j => j.price == null ? Infinity : j.price;
+  // Se zpáteční jízdenkou se řadí podle ceny tam i zpět.
+  const priceKey = j => j.roundTrip ? j.roundTrip.price : (j.price == null ? Infinity : j.price * (roundTripOn() ? 2 : 1));
+  const roundTrip = j => j.roundTrip;
+  function roundTripOn() { return !!(S.data && S.data.query && S.data.query.roundTrip); }
   const SORTERS = {
     fastest: (a, b) => a.minutes - b.minutes || a.depM - b.depM,
     fewest: (a, b) => a.realTransfers - b.realTransfers || a.minutes - b.minutes,
@@ -814,6 +820,7 @@
         <div class="jr-mid">${strip}${reservation || platform ? `<div class="jr-info">${reservation}${platform}</div>` : ''}</div>
         <div class="jr-price">
           <div><div class="amount ${j.price == null ? 'unknown' : ''}">${esc(priceText(j))}</div>
+            ${roundTrip(j) ? `<div class="rt">${icon('arrow-left-right', 12)}tam i zpět <strong>${money(j.roundTrip.price)}</strong>${j.roundTrip.saving ? ` <span class="rt-save">−${money(j.roundTrip.saving)}</span>` : ''}</div>` : ''}
             <div class="sub">${stillPricing ? `<span class="pending">${icon('loader-circle', 12, 'spin')}zjišťuji cenu…</span>` : subParts.join(' · ')}</div></div>
           <div class="jr-actions">
             <button class="btn btn-secondary" type="button" data-act="toggle" data-key="${esc(j.id)}">Detail${icon(isOpen ? 'chevron-up' : 'chevron-down', 16)}</button>
@@ -879,6 +886,7 @@
       ['Zdroj dat', j.provider],
       ['Cena', priceText(j) + (originalFare(j) ? ` (${originalFare(j)})` : '')],
     ];
+    if (j.roundTrip) rows.push(['Tam i zpět', `${money(j.roundTrip.price)} – ${j.roundTrip.how.join('; ')}`]);
     // "od" je u ÖBB jen předložka k ceně ("od 22 €"), jako tarif nic neříká.
     const fareLabel = fare && fare.label !== 'od' ? fare.label : '';
     if (fare && (fare.tariff || fareLabel)) rows.push(['Tarif', [fareLabel, fare.tariff].filter(Boolean).join(' · ')]);
@@ -889,7 +897,8 @@
     if (zoneOf(startInfo) || zoneOf(endInfo)) rows.push(['Tarifní zóny', `${zoneOf(startInfo) || '?'} → ${zoneOf(endInfo) || '?'}`]);
     const segments = j.segments.length ? `<div class="segments"><div class="sec-title" style="margin:0">Jízdenky ke koupi</div>${j.segments.map((s, i) =>
       `<div>${i + 1}. ${esc(s.from)} → ${esc(s.to)} · ${esc(s.provider)}: <strong>${esc(s.priceLabel)}</strong>${s.link ? ` · <a href="${esc(s.link)}" target="_blank" rel="noopener">koupit</a>` : ''}</div>`).join('')}</div>` : '';
-    const notes = j.notes.map(n => `<p class="note-warn">${esc(n)}</p>`).join('');
+    // cena tam i zpět je v souhrnu – poznámka „↔ …“ by ji jen opakovala
+    const notes = j.notes.filter(n => !(j.roundTrip && n.startsWith('↔'))).map(n => `<p class="note-warn">${esc(n)}</p>`).join('');
     return `<div class="jr-detail">
       <div class="itin"><div class="sec-title">Itinerář</div>${steps.join('')}</div>
       <aside class="summary"><div class="sec-title" style="margin:0">Souhrn</div>

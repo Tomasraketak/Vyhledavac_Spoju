@@ -85,6 +85,7 @@ def report(session: Any, version: dict[str, Any], ui: str = "", log_file: str = 
             f"{p.age} let" + (f", karty {', '.join(c.value for c in p.cards)}" if p.cards else "")
             + (f", předplatné {dict(p.passes)}" if p.passes else "") for p in q.passengers),
         f"Jen vlaky: {'ano' if q.trains_only else 'ne'}",
+        f"Zpáteční: {q.round_trip or 'ne'}",
         f"Dopravci: {', '.join(session.providers)}",
         f"Hacky: {', '.join(session.hacks) or '–'}",
         f"Stav: {'hotovo' if session.done else 'ještě běží'}",
