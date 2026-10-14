@@ -189,6 +189,8 @@ _CARRIERS: list[tuple[tuple[str, ...], str]] = [
     (("pkp intercity",), "PKP Intercity"),
     (("wiener linien",), "Wiener Linien"),
     (("tcdd",), "TCDD"),
+    (("nederlandse spoorwegen", "ns international", "ns"), "NS"),
+    (("european sleeper",), "European Sleeper"),
 ]
 
 

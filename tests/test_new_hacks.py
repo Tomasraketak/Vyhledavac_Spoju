@@ -203,8 +203,10 @@ async def test_obb_partial_buys_the_rest_separately():
                         dep=at(16, 50), arr=at(17, 12), price=105, line="REX 8")
 
     async def search(q, allow_browser=False, only=None):
-        assert (q.origin, q.destination) == ("Marchegg Bahnhof", "Bratislava hl.st.")
-        return [rest]
+        # tentýž úsek u jiného prodejce (levněji?) a zbytek trasy
+        assert (q.origin, q.destination) in {("Trebon", "Marchegg Bahnhof"),
+                                             ("Marchegg Bahnhof", "Bratislava hl.st.")}
+        return [rest] if q.origin == "Marchegg Bahnhof" else []
 
     found = await ObbPartialHack().find(query, [partial], search)
     assert len(found) == 1 and found[0].price == Decimal(468)

@@ -504,15 +504,27 @@ Přímé dotazy na dopravce trvají 5–30 s (nejpomalejší bývá ÖBB a DB). 
 každý spoj se zkouší celý i rozdělený v přestupech a na hranicích a každý
 dotaz na dopravce trvá 3–20 s. Proto:
 
-* na jeden spoj nejvýš **120 s nových dotazů** (pak jen z už známých
-  odpovědí) a 40 dotazů, přes prohlížeč (ČD, ZSSK) nejvýš 6; čekání ve
-  frontě na prohlížeč se do těch 120 s nepočítá, celý hack má strop 300 s;
+* **všechny hacky běží souběžně** (dílčí dotazy sdílí – tentýž dotaz se
+  položí jen jednou) se společným rozpočtem: celé hledání má skončit do
+  ~3 minut (`SEARCH_BUDGET` v `engine.py`), hacky mají po dopravcích vždy
+  aspoň 45 s; po vypršení dostávají už jen odpovědi, které přišly, a hack,
+  který ani pak do 25 s nedoběhne, se ukončí (`⚠ hack … nestihl doběhnout`);
+* na jeden spoj z IDOS/plánovače nejvýš **100 s nových dotazů** a 40 dotazů,
+  přes prohlížeč (ČD, ZSSK) nejvýš 6;
+* nejdřív rychlý pokus **po dopravcích** (ZSSK | RegioJet | European Sleeper
+  | NS – každý svůj kus), teprve pak lomy od nejdelšího začátku;
+* prohlížeč (ČD, ZSSK) se ptá, jen když tentýž vlak nikdo jiný neprodá –
+  dřív se čekalo i 90 s ve frontě kvůli úseku, který ÖBB už ocenilo;
+  ZSSK jen po Slovensku a do sousedních zemí (Trnava → Rotterdam jeho
+  e-shop neprodá, zjištění trvalo přes minutu);
 * začátky několika lomů se ptají **najednou**, ne po jednom;
-* engine pouští až 10 dotazů souběžně (na jeden web nejvýš 4);
+* engine pouští až 16 dotazů souběžně (na jeden web nejvýš 4);
 * zablokovaná DB (403 i v prohlížeči) se 3 hodiny neptá – dřív každé hledání
   čekalo ~25 s;
-* `--trace` ukazuje čas dopravců i každého hacku (`⏱ hack idos_complete: 127 s`).
+* `--trace` i diagnostický soubor ukazují čas dopravců i každého hacku
+  (`⏱ hack idos_complete: 127 s`).
 
+Trnava → Rotterdam: 8,3 min → 2,2–2,6 min.
 Amsterdam → Bratislava vlakem: 7,8 min → 3,7 min.
 
 ### MHD po městě
@@ -763,7 +775,18 @@ Shop ÖBB u některých spojů prodá jízdenku jen na úsek („Ticket nur für
 Teilstrecke“, např. Třeboň → Marchegg 14,90 € Sparschiene, ale ne do
 Bratislavy). Taková cena se u celého spoje nezobrazí – byla by nesmyslně nízká;
 spoj má poznámku „ÖBB prodá jízdenku jen na úsek …“. Hack pak dokoupí zbytek
-samostatnou jízdenkou (i ÖBB) a nabídne kombinaci, pokud je levnější.
+samostatnou jízdenkou (i ÖBB) a kombinaci nabídne vždy – jinak by vlak zůstal
+úplně bez ceny, i když je dražší než autobus:
+
+* úsek jízdenky může končit i uprostřed vlaku (ICE do Düsseldorfu, jízdenka
+  jen do Kölnu);
+* zbytek může být zase jen částečná jízdenka ÖBB (Köln → Arnhem) – dohledá
+  se i její zbytek (Arnhem → Rotterdam u NS);
+* navazuje-li zbytek přestupem, počítá se skutečný čas přesunu (nádraží →
+  autobusové nádraží);
+* úsek ÖBB se nahradí levnějším, pokud se vejde mezi sousední jízdenky:
+  Trnava → Rotterdam – ÖBB chce za Bratislava → Praha 89 €, RegioJet o půl
+  hodiny později 399 Kč, dál FlixBus z Prahy: celkem 1 948 Kč místo 3 723 Kč.
 
 ### Přestup v Praze / Brně mezi dopravci (`hub_transfer`)
 

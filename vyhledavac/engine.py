@@ -38,9 +38,16 @@ log = logging.getLogger(__name__)
 PartialCallback = Callable[[ProviderResult], None]
 
 
-#: Pořadí, ve kterém hacky běží (viz ``SearchEngine.build``).
 #: Zdroje, kterých se engine ptá u cesty po jednom městě (MHD).
 CITY_SOURCES = {"IDS", "MHD", "Transitous"}
+#: Celé hledání (dopravci + hacky) by mělo skončit do tolika sekund…
+SEARCH_BUDGET = 175.0
+#: … ale hacky mají po doběhnutí dopravců vždy aspoň tolik času na nové dotazy;
+#: po vypršení už odpovídají jen z paměti (dotazy, které už přišly).
+HACK_MIN_TIME = 45.0
+#: Hack, který ani pak neskončí (čeká na dlouhý dotaz), se po téhle rezervě ukončí.
+HACK_GRACE = 25.0
+#: Pořadí hacků (viz ``SearchEngine.build``) – běží souběžně, podle něj se řadí výsledky.
 HACK_ORDER = ("idos_complete", "ids_ticket", "obb_partial", "split_ticket", "hub_transfer", "hidden_city",
               "cd_europe_beyond", "cd_europe_border", "regional_pass", "night_train")
 
@@ -56,7 +63,7 @@ class SearchEngine:
         hacks: Sequence[TravelHack] = (),
         cache: Cache | None = None,
         converter: CurrencyConverter | None = None,
-        concurrency: int = 10,
+        concurrency: int = 16,
         provider_timeout: float = 90.0,
         skip_browser_in_hacks: bool = True,
     ) -> None:
@@ -81,6 +88,8 @@ class SearchEngine:
         #: (ČD přes prohlížeč ve výchozím výběru není) – jen pro dotazy hacků.
         self._helpers: dict[str, Provider] = {}
         self._skipped: set[str] = set()
+        #: Do kdy (``time.monotonic``) smějí hacky klást nové dotazy.
+        self._hack_deadline: float | None = None
 
     # ---- tovární metody ------------------------------------------------------
     @classmethod
@@ -102,8 +111,8 @@ class SearchEngine:
         )
         pipeline = FilterPipeline.from_spec(list(filter_spec))
         hacks: list[TravelHack] = []
-        # Levné hacky dřív, ty s dotazy přes prohlížeč (ČD, ZSSK) až nakonec –
-        # dílčí výsledky se sdílí přes cache, takže se pozdější hacky doptávají méně.
+        # Hacky běží souběžně a dílčí dotazy sdílí přes cache; pořadí určuje
+        # jen pořadí jejich výsledků.
         hack_names = sorted(dict.fromkeys(hack_names),
                             key=lambda n: HACK_ORDER.index(n) if n in HACK_ORDER else len(HACK_ORDER))
         for name in hack_names:
@@ -158,7 +167,8 @@ class SearchEngine:
 
         if enable_hacks and self.hacks and city_trip is None:
             base = [j for r in direct for j in r.journeys]
-            hacked = await self._run_hacks(query, base)
+            deadline = max(started + SEARCH_BUDGET - HACK_GRACE, time.monotonic() + HACK_MIN_TIME)
+            hacked = await self._run_hacks(query, base, deadline)
             if hacked:
                 result.journeys.extend(hacked)
                 result.journeys = drop_priced_duplicates(result.journeys)
@@ -194,6 +204,7 @@ class SearchEngine:
         on_partial: PartialCallback | None = None,
         on_progress: PartialCallback | None = None,
         providers: Sequence[Provider] | None = None,
+        cap: float | None = None,
     ) -> list[ProviderResult]:
         providers = self.providers if providers is None else providers
         if not providers:
@@ -204,6 +215,8 @@ class SearchEngine:
             # Dopravce, který ceny prokliká přes nákupní formulář (ZSSK),
             # potřebuje víc času než API – limit si může zvýšit sám.
             limit = max(self.provider_timeout, getattr(provider, "min_timeout", 0.0))
+            if cap is not None:          # dotaz hacku nesmí přetáhnout jeho čas
+                limit = min(limit, cap)
             latest: list[ProviderResult] = []
 
             def progress(partial: ProviderResult) -> None:
@@ -247,26 +260,56 @@ class SearchEngine:
         return results
 
     # ---- travel hacky --------------------------------------------------------
-    async def _run_hacks(self, query: SearchQuery, base: list[Journey]) -> list[Journey]:
+    async def _run_hacks(self, query: SearchQuery, base: list[Journey],
+                         deadline: float | None = None) -> list[Journey]:
+        """Hacky běží souběžně (dílčí dotazy sdílí přes ``_leg_search``).
+
+        Do ``deadline`` smějí klást nové dotazy, pak dostávají jen odpovědi,
+        které už engine zná – dopočítají, co jde, a skončí. Hack, který ani
+        potom nedoběhne do ``HACK_GRACE`` sekund, se ukončí bez výsledku.
+        """
         if not base:
             return []
 
         from .trace import trace
 
-        found: list[Journey] = []
-        for hack in self.hacks:
+        self._hack_deadline = deadline
+
+        async def one(hack: TravelHack) -> list[Journey]:
             started = time.monotonic()
             try:
-                produced = await hack.find(query, base, self._leg_search)
+                return await hack.find(query, base, self._leg_search) or []
+            except asyncio.CancelledError:
+                raise
             except Exception:
                 log.exception("hack %s selhal", hack.name)
-                continue
+                return []
             finally:
                 trace(f"⏱ hack {hack.name}: {time.monotonic() - started:.0f} s")
-            if produced:
-                log.info("hack %s našel %d variant", hack.name, len(produced))
-                found.extend(produced)
+
+        tasks = {asyncio.create_task(one(hack)): hack for hack in self.hacks}
+        limit = None if deadline is None else max(1.0, deadline - time.monotonic()) + HACK_GRACE
+        done, pending = await asyncio.wait(tasks, timeout=limit)
+        for task in pending:
+            trace(f"⚠ hack {tasks[task].name} nestihl doběhnout – ukončen")
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        found: list[Journey] = []
+        for task, hack in tasks.items():          # pořadí podle HACK_ORDER, ne podle doběhnutí
+            if task in done and not task.cancelled() and task.exception() is None:
+                produced = task.result()
+                if produced:
+                    log.info("hack %s našel %d variant", hack.name, len(produced))
+                    found.extend(produced)
+        self._hack_deadline = None
         return found
+
+    def hack_time_left(self) -> float | None:
+        """Kolik sekund ještě smějí hacky klást nové dotazy (``None`` = bez limitu)."""
+        if self._hack_deadline is None:
+            return None
+        return self._hack_deadline - time.monotonic()
 
     async def _leg_search(self, query: SearchQuery, *, allow_browser: bool = False,
                           only: Sequence[str] | None = None) -> list[Journey]:
@@ -284,6 +327,9 @@ class SearchEngine:
         async with lock:
             if key in self._leg_cache:
                 return self._leg_cache[key]
+            left = self.hack_time_left()
+            if left is not None and left <= 0:
+                return []            # čas hacků vypršel – jen odpovědi, které už přišly
             # Na dílčí úseky pouštíme jen dopravce, kteří vracejí ceny –
             # jízdní řád bez ceny je pro výpočet úspory k ničemu. Zároveň
             # vynecháme ty, co potřebují prohlížeč: hacků je hodně a každý
@@ -298,7 +344,8 @@ class SearchEngine:
             if not sellers:
                 self._leg_cache[key] = []
                 return []
-            results = await self._run_providers(query, providers=sellers)
+            cap = None if left is None else max(15.0, left + HACK_GRACE / 2)
+            results = await self._run_providers(query, providers=sellers, cap=cap)
             from .trace import trace
 
             for r in results:

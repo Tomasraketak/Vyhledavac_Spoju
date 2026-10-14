@@ -89,6 +89,9 @@ class ZsskProvider(BrowserProvider):
     #: Hledání ~10 s + ceny přes trychtýř (rozpočet ``price_budget``).
     #: Co do limitu nestihne, zůstane – engine drží poslední průběžný stav.
     min_timeout = 150.0
+    #: Kam e-shop ZSSK prodává (Slovensko a sousedé) – jinam (Trnava → Rotterdam)
+    #: trychtýř po minutě zjistí jen „nelze koupit“, tak ho vůbec nespouštíme.
+    sale_area = frozenset({"SK", "CZ", "AT", "HU", "PL", "UA"})
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         session = await self.browser()
@@ -101,6 +104,14 @@ class ZsskProvider(BrowserProvider):
 
             # Ceny jsou hlavní smysl celého vyhledávače, takže trychtýř je
             # zapnutý ve výchozím stavu. Vypnout: options={"deep_prices": False}.
+            from .. import geo
+
+            ends = {geo.country_of(query.origin), geo.country_of(query.destination)} - {None}
+            if not ends <= self.sale_area:
+                for journey in journeys:
+                    journey.fare_status = FareStatus.NOT_BOOKABLE
+                self.note("ZSSK tuto trasu přes e-shop neprodává – ceny hledejte u jiného dopravce")
+                return journeys
             if self.options.get("deep_prices", True) and journeys:
                 # Jízdní řád hned – ceny se doplní, jak budou přicházet.
                 self.publish(journeys)

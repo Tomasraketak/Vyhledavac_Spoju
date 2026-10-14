@@ -172,7 +172,10 @@ dopravce.
 **Soubor:** `providers/flixbus.py` · **Typ:** JSON API (`global.api.flixbus.com`) · **Klíč:** ne
 
 **Postup:**
-1. Přes našeptávač (`/search/autocomplete/cities`) najde ID měst.
+1. Přes našeptávač (`/search/autocomplete/cities`) najde ID měst. Rozhoduje
+   poloha z databáze měst (FlixBus jmenuje Kolín nad Rýnem „Kolín“ a na
+   „Köln Hbf“ nabídne nejdřív Berlín), pak přesné jméno; když se jméno
+   stanice netrefí, zkusí se jméno města.
 2. Zavolá `/search/service/v4/search` se seznamem cestujících
    (`{"adult": 1, "student": 1}`). Datum chce ve tvaru `DD.MM.YYYY`.
 
@@ -529,7 +532,8 @@ IDS – tedy totéž co IDOS. Ceny nezná.
 **Postup:**
 1. `GET /api/v1/geocode?text=…&language=cs` – zastávka se stejným jménem
    (`cz-JDF-merged_jdf:stop:33720` = „Domanín,Vrchy“), jinak obec jako
-   souřadnice.
+   souřadnice. Přednost mají data země, kde místo leží: „Trnava“ je
+   slovenská (`sk-zsr_…`), ne obec Trnava u Třebíče.
 2. `GET /api/v5/plan?fromPlace&toPlace&time` – spojení, `nextPageCursor`
    pro další stránku. Úsek má dopravce (`agencyName`), linku
    (`routeShortName`), licenci a spoj (`tripShortName` „340100 7“, u vlaku
@@ -609,6 +613,9 @@ Dva nezávislé zdroje, které běží souběžně:
   kartou `sk_free`. Cena 0 € je pak platná.
 - Spoj, u kterého formulář nepokračuje (lůžkový vůz, trasa mimo e-shop),
   je „nelze koupit online“.
+- E-shop prodá jen po Slovensku a do sousedních zemí (CZ, AT, HU, PL, UA).
+  Jinam (Trnava → Rotterdam) se trychtýř vůbec nespouští – spoje jsou hned
+  „nelze koupit online“ – a hacky se ZSSK na takové úseky neptají.
 - Po Česku se ZSSK neptá.
 
 ## PKP (Koleo)

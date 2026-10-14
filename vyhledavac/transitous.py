@@ -125,11 +125,17 @@ def _hhmm(value: Any) -> str:
 
 
 def pick_place(name: str, results: list[dict[str, Any]]) -> str | None:
-    """Zastávka se stejným jménem (česká data přednostně), jinak obec jako „lat,lon“."""
+    """Zastávka se stejným jménem (data země, kde místo leží – „Trnava“ je
+    slovenská, ne obec u Třebíče; jinak česká data přednostně), jinak obec
+    jako „lat,lon“."""
+    from .geo import country_of
+
     wanted = normalize(name)
+    home = f"{(country_of(name) or 'CZ').lower()}-"
     stops = [r for r in results if r.get("type") == "STOP" and r.get("id")]
+    stops.sort(key=lambda r: not str(r["id"]).startswith(home))
     exact = [r for r in stops if normalize(str(r.get("name") or "")) == wanted]
-    exact.sort(key=lambda r: not str(r["id"]).startswith("cz-"))
+    exact.sort(key=lambda r: (not str(r["id"]).startswith(home), not str(r["id"]).startswith("cz-")))
     places = [r for r in results if r.get("type") == "PLACE" and r.get("lat") is not None]
     if exact:
         return str(exact[0]["id"])
@@ -148,7 +154,7 @@ async def search(client: Any, cache: Any, namespace: str, origin: str, destinati
     headers = {"User-Agent": USER_AGENT}
     ends = []
     for name in (origin, destination):
-        key = f"transitous-place:{normalize(name)}"
+        key = f"transitous-place2:{normalize(name)}"
         place = cache.get(namespace, key)
         if not place:
             found = await client.get_json(f"{API}/v1/geocode", params={"text": name, "language": "cs"},

@@ -86,32 +86,50 @@ class FlixBusProvider(HttpProvider):
 
     async def resolve_city(self, place: str, country_hint: str | None = None) -> tuple[str, str]:
         """Najde ID města ve FlixBusu. Vrací ``(uuid, oficiální název)``."""
-        key = f"city2:{place.lower()}:{country_hint or ''}"
+        key = f"city4:{place.lower()}:{country_hint or ''}"
         cached = self.cache.get(self.name, key)
         if cached:
             return tuple(cached)  # type: ignore[return-value]
 
-        params: dict[str, Any] = {"q": place, "lang": self.options.get("language", "cs")}
-        if country_hint:
-            params["country"] = country_hint
-
-        data = await self.client.get_json(
-            AUTOCOMPLETE_URL, params=params, referer=self.referer
-        )
-        if not isinstance(data, list) or not data:
-            raise StationNotFoundError(self.name, f"město {place!r} nenalezeno")
-
-        names = [str(item.get("name", "")) for item in data]
-        # Přesná shoda s jménem města (i v češtině – našeptávač s lang=cs vrací
-        # „Paříž“ i na dotaz „Paris“), jinak podobnost, jinak první návrh.
         from .. import stations
 
-        wanted = {normalize(place)}
         city = stations.place(place)
+        wanted = {normalize(place)}
         if city is not None:
             wanted |= {normalize(city.name), normalize(city.local)} - {""}
-        exact = [i for i, n in enumerate(names) if normalize(n) in wanted]
-        idx = exact[0] if exact else best_match(place, names, threshold=0.6)
+        # „Köln Hbf“ našeptávač čte jako „hlavní nádraží“ a vrátí Berlín – když
+        # se jméno přesně netrefí, zkusí se jméno města (místní, pak české)
+        texts = [place] + ([t for t in (city.local, city.name) if t and normalize(t) != normalize(place)]
+                           if city is not None else [])
+        data: list = []
+        idx = None
+        for text in dict.fromkeys(texts):
+            params: dict[str, Any] = {"q": text, "lang": self.options.get("language", "cs")}
+            if country_hint:
+                params["country"] = country_hint
+            found = await self.client.get_json(AUTOCOMPLETE_URL, params=params, referer=self.referer)
+            if not isinstance(found, list) or not found:
+                continue
+            names = [str(item.get("name", "")) for item in found]
+            # Nejspolehlivější je poloha: FlixBus Kolín nad Rýnem jmenuje „Kolín“
+            near = _nearest(found, city)
+            if near is not None:
+                data, idx = found, near
+                break
+            # Přesná shoda s jménem města (i v češtině – našeptávač s lang=cs vrací
+            # „Paříž“ i na dotaz „Paris“), jinak podobnost.
+            exact = [i for i, name in enumerate(names) if normalize(name) in wanted]
+            if exact:
+                data, idx = found, exact[0]
+                break
+            if not data:
+                data, idx = found, best_match(place, names, threshold=0.6)
+            elif idx is None:
+                guess = best_match(text, names, threshold=0.6)
+                if guess is not None:
+                    data, idx = found, guess
+        if not data:
+            raise StationNotFoundError(self.name, f"město {place!r} nenalezeno")
         if idx is None:
             # Našeptávač řadí podle skóre – když se neshodneme, vezmeme jeho první.
             idx = 0
@@ -329,3 +347,22 @@ def _tariff_label(query: SearchQuery) -> str:
     names = {"infant": "dítě do 6", "child": "dítě", "youth": "mládež",
              "student": "student", "adult": "dospělý", "senior": "senior"}
     return ", ".join(names[p.category.value] for p in query.passengers)
+
+
+def _nearest(found: list, city: Any, km: float = 30.0) -> int | None:
+    """Návrh našeptávače nejblíž známé poloze města (do ``km``), jinak ``None``."""
+    if city is None or not getattr(city, "lat", None) or not getattr(city, "lon", None):
+        return None
+    from ..geo import km as distance
+
+    best = None
+    for i, item in enumerate(found):
+        loc = item.get("location") or {} if isinstance(item, dict) else {}
+        try:
+            d = distance((float(loc["lat"]), float(loc["lon"])), (city.lat, city.lon))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if d <= km and (best is None or d < best[0]):
+            best = (d, i)
+    return None if best is None else best[1]
+
