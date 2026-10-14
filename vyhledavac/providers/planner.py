@@ -29,7 +29,7 @@ import logging
 import math
 from typing import Any
 
-from .. import geo, stations, transitous
+from .. import city, geo, stations, transitous
 from ..errors import StationNotFoundError
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import normalize, same_place
@@ -202,6 +202,10 @@ class PlannerProvider(HttpProvider):
             legs.pop(0), lengths.pop(0)
         while legs and local_end(legs[-1], lengths[-1], query.destination, legs[-1].origin):
             legs.pop(), lengths.pop()
+        if not same_place(query.origin, query.destination):
+            # vlak dojel do Benátek (Venezia S. Lucia) – vaporetto po městě k cestě nepatří
+            start, end = city.main_part(legs, query.origin, query.destination)
+            legs, lengths = legs[start:end], lengths[start:end]
         rides = [(leg, n) for leg, n in zip(legs, lengths) if leg.mode is not Mode.WALK]
         if not rides or len(rides) > MAX_RIDES:
             return None

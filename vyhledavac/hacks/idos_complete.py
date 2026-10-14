@@ -55,6 +55,8 @@ from .base import SearchFn, TravelHack, combine
 log = logging.getLogger(__name__)
 
 MAX_JOURNEYS = 10
+#: … a dalších nejvýš tolik jen z už známých odpovědí (bez nových dotazů).
+MAX_FROM_MEMORY = 25
 #: Kdo prodává jízdenky na úseky mimo IDS (bez prohlížeče).
 SELLERS = ["Arriva", "Bileto", "RegioJet", "FlixBus", "LeoExpress"]
 #: Prodejci jízdenek na vlaky ČD přes prohlížeč – ptáme se jich, jen když je
@@ -135,16 +137,17 @@ class IdosCompleteHack(TravelHack):
                 <= query.window_end + query.window]
         todo.sort(key=lambda j: (not query.within_window(j.departure), j.price is not None,
                                  j.provider != "IDS", j.provider not in ROUTE_SOURCES))
-        todo = _distinct_trips(todo, journeys)[:MAX_JOURNEYS]
+        todo = _distinct_trips(todo, journeys)
+        todo, later = todo[:MAX_JOURNEYS], todo[MAX_JOURNEYS:MAX_JOURNEYS + MAX_FROM_MEMORY]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
         # vrátí i vlak v 10:10, další spoj se tedy už ptát nemusí.
-        self._seen: dict[tuple[str, str, bool], list[Journey]] = {}
+        self._seen: dict[tuple[str, str, bool, bool], list[Journey]] = {}
         # spoje z hlavního hledání: celá cesta jedním vlakem už může mít cenu
         self._base = [j for j in journeys if j.provider not in NOT_SELLERS and j.price is not None]
-        async def one(n: int, journey: Journey) -> list[Journey]:
+        async def one(n: int, journey: Journey, ask: SearchFn = search) -> list[Journey]:
             set_tag(f"#{n}")             # spoje běží souběžně – v trasování je rozliší číslo
             try:
-                return await self._complete(query, journey, search)
+                return await self._complete(query, journey, ask)
             except Exception:
                 log.exception("idos_complete: dopočet selhal")
                 return []
@@ -157,6 +160,16 @@ class IdosCompleteHack(TravelHack):
         found: list[Journey] = []
         for part in await asyncio.gather(*(one(n, j) for n, j in enumerate(todo, 1))):
             found.extend(part)
+        # další spoje už bez dotazů – jen z odpovědí, které přišly (FlixBus
+        # Olomouc → Katovice a IC Katovice → Varšava známe z dřívějších kusů)
+        later = _distinct_trips(later, [*journeys, *found])
+        if later and time.monotonic() < self._hard_stop:
+            async def memory(q: SearchQuery, **kw) -> list[Journey]:
+                return []
+            trace(f"… dalších {len(later)} spojů oceňuji jen z už známých odpovědí (bez dotazů)")
+            for part in await asyncio.gather(*(one(n, j, memory)
+                                               for n, j in enumerate(later, len(todo) + 1))):
+                found.extend(part)
         return found
 
     async def _complete(self, query: SearchQuery, journey: Journey,
@@ -324,14 +337,14 @@ class IdosCompleteHack(TravelHack):
         origin, destination = tail[0].origin, tail[-1].destination
         names = {normalize(_query_name(origin, True)), normalize(_full(origin))}
         pool: list[Journey] = []
-        for (o, d, _), options in self._seen.items():
+        for (o, d, *_), options in self._seen.items():
             if o in names and normalize(d) in {normalize(_query_name(destination, True)),
                                                normalize(_full(destination))}:
                 pool.extend(options)
         chosen = (tail[0].departure, tail[-1].arrival)
         fits = []
         for option in pool:
-            if option.price is None or option.provider in NOT_SELLERS or not option.legs:
+            if not _sells(option) or not option.legs:
                 continue
             if not (_same_city(option.legs[0].origin, origin, where)
                     and _same_city(option.legs[-1].destination, destination, query.destination)):
@@ -510,7 +523,7 @@ class IdosCompleteHack(TravelHack):
             origin, destination = _query_name(first.origin, abroad), _query_name(last.destination, abroad)
             if _match(self._base, first, last, origin, destination) is not None:
                 continue
-            cached = self._seen.get((normalize(origin), normalize(destination), False), [])
+            cached = self._seen.get((normalize(origin), normalize(destination), False, False), [])
             if any(_same(o, first, last) and o.price is not None for o in cached):
                 continue
             plain, _ = sellers_for(origin, destination, run, _all_countries(run) or _run_countries(run))
@@ -557,19 +570,23 @@ class IdosCompleteHack(TravelHack):
             if catchable and "DE" in crossed:
                 return await _de_regional(query, run)
             return None
+        ends = _end_countries(run)
+        # e-shop IDOS (ČD) prodá jízdenku z Česka do ciziny i bez prohlížeče –
+        # Plzeň → Schwandorf (autobus ALEX), když DB nejde a fronta ČD je plná
+        idos_ask = catchable and abroad and "CZ" in ends and _SOURCE.get() != "IDS"
         trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
               f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
+              + (" | e-shop IDOS" if idos_ask else "")
               + (f" | prohlížeč: {', '.join(browser)}" if browser else ""))
-        asks = [(plain, False)] + ([(browser, True)] if browser else [])
+        asks = [(plain, False)] + ([(["IDS"], False)] if idos_ask else []) + ([(browser, True)] if browser else [])
         options: list[Journey] = []
-        ends = _end_countries(run)
         for only, allow_browser in asks:
             if not only:
                 continue
-            key = (normalize(origin), normalize(destination), allow_browser)
+            key = (normalize(origin), normalize(destination), allow_browser, tuple(only) == ("IDS",))
             cached = self._seen.get(key, [])
-            if allow_browser and catchable and any(_same(o, first, last) and o.price is not None
-                                                   and o.provider not in NOT_SELLERS for o in options):
+            if (allow_browser or tuple(only) == ("IDS",)) and catchable and any(
+                    _same(o, first, last) and _sells(o) for o in options):
                 continue                     # tentýž spoj už prodá někdo bez prohlížeče (ÖBB)
             if allow_browser and self._browser_unpriced(ends):
                 trace(f"– prohlížeč ({', '.join(only)}): z/do {' → '.join(c or '?' for c in ends)} "
@@ -618,7 +635,7 @@ class IdosCompleteHack(TravelHack):
             b = _same_city(o.legs[-1].destination, last.destination, destination)
             return (a and b) or ((a or b) and _same(o, first, last))
 
-        options = [o for o in options if o.provider not in NOT_SELLERS and o.legs and place_ok(o)]
+        options = [o for o in options if (o.provider not in NOT_SELLERS or _sells(o)) and o.legs and place_ok(o)]
         same = [o for o in options if o.price is not None and _same(o, first, last)] if catchable else []
         with nested():
             counts: dict[str, list[int]] = {}
@@ -695,6 +712,12 @@ class IdosCompleteHack(TravelHack):
                 return regional
         trace("✗ tentýž spoj nikdo neprodává")
         return None
+
+
+def _sells(journey: Journey) -> bool:
+    """Spoj s cenou od prodejce – i z IDOS, když ho celý ocení e-shop IDOS
+    (ČD) nebo tarif IDS; Transitous a Plánovač ceny nemají."""
+    return journey.price is not None and (journey.provider not in NOT_SELLERS or journey.provider == "IDS")
 
 
 async def _de_regional(query: SearchQuery, run: list[Leg]) -> Journey | None:
@@ -1194,7 +1217,19 @@ def _cover_plan(plan: list[dict], legs: list[Leg]) -> list[dict] | None:
             out[-1]["to"] = end              # dokoupený kus prostě pokračuje do cíle
         else:
             out.append({"kind": "buy", "from": start, "to": end})
-    return out
+    # mezera uprostřed: IDOS prodá Plzeň → Regensburg a další kus začíná až
+    # v Mnichově – Regensburg → München se musí dokoupit, jinak je cena nízká
+    filled = [out[0]]
+    for seg in out[1:]:
+        k, i = filled[-1]["to"]
+        start = [k + 1, 0] if i >= last(k) else [k, i]
+        m, j = seg["from"]
+        stop = [m - 1, last(m - 1)] if j == 0 and m > 0 else [m, j]
+        if start < list(seg["from"]) and start < stop and 0 <= start[0] <= stop[0] < len(legs) \
+                and any(legs[n].mode is not Mode.WALK for n in range(start[0], stop[0] + 1)):
+            filled.append({"kind": "buy", "from": start, "to": stop})
+        filled.append(seg)
+    return filled
 
 
 def _slice(legs: list[Leg], start: list[int], end: list[int]) -> list[Leg]:

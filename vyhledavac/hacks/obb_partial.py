@@ -93,6 +93,10 @@ class ObbPartialHack(TravelHack):
         if missing_head:
             heads = _priced(await search(query.leg_query(query.origin, obb.origin)))
             head = _latest_before(heads, obb)
+            if head is None and _czech(query.origin):
+                # z Česka prodá začátek e-shop IDOS (ČD): Plzeň → München (ALEX) 463 Kč
+                heads = _priced(await search(query.leg_query(query.origin, obb.origin), only=["IDS"]))
+                head = _latest_before(heads, obb)
             if head is None:
                 trace(f"✗ začátek {query.origin} → {obb.origin} nikdo neprodává")
                 return None
@@ -162,6 +166,9 @@ class ObbPartialHack(TravelHack):
         since = prev.arrival - dt.timedelta(minutes=5)
         found = await search(query.leg_query(prev.destination, query.destination, since))
         options = [t for t in _priced(found) if await _follows(prev, t)]
+        if not options and _czech(query.destination):
+            ids = await search(query.leg_query(prev.destination, query.destination, since), only=["IDS"])
+            options = [t for t in _priced(ids) if await _follows(prev, t)]
         if options:
             tail = min(options, key=lambda t: (t.price, t.arrival))
             trace(f"✓ zbytek {prev.destination} → {query.destination}: {tail.provider} "
@@ -228,6 +235,12 @@ def _span(legs: list, start: str, end: str) -> list:
                 if (k, i) > tuple(first) and hit(end, name):
                     return _slice(legs, first, [k, i])
     return []
+
+
+def _czech(name: str) -> bool:
+    from .. import geo
+
+    return geo.country_of(name) == "CZ"
 
 
 def _priced(journeys: Sequence[Journey]) -> list[Journey]:

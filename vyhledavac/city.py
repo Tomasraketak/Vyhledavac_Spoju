@@ -26,6 +26,7 @@ import re
 from decimal import Decimal
 
 from . import stations
+from .models import Leg, Mode
 from .normalize import normalize
 
 
@@ -140,3 +141,47 @@ def abbreviated(text: str) -> str:
     for pattern, short in _ABBREVIATIONS:
         text = pattern.sub(short, text)
     return text
+
+
+#: MHD na konci cesty: nejdéle tolik minut (vaporetto, městský autobus) …
+CITY_MINUTES = 30
+#: … a vlakem jen kousek (S-Bahn z hlavního nádraží do centra).
+CITY_TRAIN_MINUTES = 15
+
+
+def city_leg(leg: Leg) -> bool:
+    """Může úsek být jen městskou dopravou (tramvaj, metro, krátký autobus/loď/S-Bahn)?"""
+    if leg.mode in (Mode.WALK, Mode.TRAM, Mode.METRO):
+        return True
+    minutes = leg.duration.total_seconds() / 60
+    if leg.mode is Mode.TRAIN:
+        return minutes <= CITY_TRAIN_MINUTES
+    if leg.mode in (Mode.BUS, Mode.FERRY):
+        return "flix" not in (leg.carrier or "").lower() and minutes <= CITY_MINUTES
+    return False
+
+
+def _whole_city(name: str) -> tuple[str, str] | None:
+    """Město, když je zadané celé („Benátky“, „Praha“), ne konkrétní zastávka."""
+    found = city_of(name)
+    return found if found is not None and not stop_part(name, found[0]) else None
+
+
+def main_part(legs: list[Leg], origin: str, destination: str) -> tuple[int, int]:
+    """Rozsah úseků bez MHD na koncích: když vlak dojede do hledaného města
+    (Venezia Santa Lucia = Benátky), vaporetto/tramvaj/S-Bahn dál po městě
+    k cestě nepatří. Zadaná konkrétní zastávka („Praha, Anděl“) se neořezává."""
+    start, end = 0, len(legs)
+    here = _whole_city(origin)
+    k = 0
+    while k < end - 1 and city_leg(legs[k]):
+        k += 1
+    if k and here is not None and city_of(legs[k].origin) == here:
+        start = k
+    there = _whole_city(destination)
+    j = end
+    while j - 1 > start and city_leg(legs[j - 1]):
+        j -= 1
+    if j < end and there is not None and city_of(legs[j - 1].destination) == there:
+        end = j
+    return start, end

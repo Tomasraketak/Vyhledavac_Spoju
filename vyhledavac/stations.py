@@ -369,6 +369,16 @@ def countries_for(name: str) -> set[str]:
     return set()
 
 
+@lru_cache(maxsize=None)
+def country_name(code: str) -> str:
+    """Český název státu podle kódu („DE“ → „Německo“); neznámý = ""."""
+    db = database()
+    for p in db.places if db else ():
+        if p.code == code and p.country:
+            return p.country
+    return ""
+
+
 def is_domestic(*names: str) -> bool:
     """Leží všechna místa v Česku? (Neznámé místo = nevíme, tedy ne.)"""
     found = [place(n) for n in names]

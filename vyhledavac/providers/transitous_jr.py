@@ -13,7 +13,7 @@ odmítne odpovídat.
 
 from __future__ import annotations
 
-from .. import idos, transitous
+from .. import city, idos, transitous
 from ..models import FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..registry import PROVIDERS
 from .base import HttpProvider
@@ -93,6 +93,9 @@ def _trim_foreign_ends(journey: Journey, query: SearchQuery) -> Journey | None:
     foreign_start = geo.country_of(query.origin) not in (None, "CZ")
     while len(legs) > 1 and ((foreign_start and _is_local(legs[0])) or (not city_trip and _within(legs[0], query.origin))):
         legs.pop(0)
+    if not city_trip:                          # vlak dojel do Benátek – vaporetto dál nepatří k cestě
+        start, end = city.main_part(legs, query.origin, query.destination)
+        legs = legs[start:end]
     if not legs or all(leg.mode is Mode.WALK for leg in legs):
         return None
     journey.legs = legs

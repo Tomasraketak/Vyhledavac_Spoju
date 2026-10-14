@@ -131,15 +131,15 @@ class IdsIdosProvider(HttpProvider):
         Graz): IDOS zná vlaky celé Evropy, FlixBus i RegioJet a dopravce
         každého úseku. Domácí část ocení IDS, zbytek dokoupí hack
         ``idos_complete`` u dopravců."""
-        a, b = stations.place(query.origin), stations.place(query.destination)
-        return a is not None and b is not None
+        return all(stations.place(name) is not None or _foreign_code(name) for name in (query.origin, query.destination))
 
     async def _idos_name(self, name: str) -> str:
         """Jméno pro IDOS: české místo beze změny, zahraniční město jednoznačně
         z našeptávače IDOS („Košice; Slovensko“, „Kraków; Polsko“) – samotné
         „Košice“ IDOS odmítne jako nejednoznačné."""
         place = stations.place(name)
-        if place is None or not place.code:
+        code = _foreign_code(name) if place is None else ""
+        if (place is None or not place.code) and not code:
             return await self._czech_stop(name) if "," in name else name
         key = f"idos-name2:{normalize(name)}"
         cached = self.cache.get(self.name, key)
@@ -147,11 +147,17 @@ class IdsIdosProvider(HttpProvider):
             return cached
         chosen = None
         # IDOS zná cizí místa často jen bez diakritiky („Brasov“; „Brašov“ našeptá
-        # Brašovskou uličku v Týně nad Vltavou)
-        texts = (place.name, name, place.local, strip_accents(place.local or place.name))
+        # Brašovskou uličku v Týně nad Vltavou); menší místo, které databáze měst
+        # nezná (Schwandorf), podle země z jména stanice
+        if place is not None:
+            texts = (place.name, name, place.local, strip_accents(place.local or place.name))
+            country = place.country
+        else:
+            texts = (name, strip_accents(name))
+            country = stations.country_name(code)
         for text in dict.fromkeys(t for t in texts if t):
             page = await self.client.get_text(idos.SUGGEST, params=idos.suggest_params(text), referer=self.referer)
-            chosen = idos.pick_foreign(idos.parse_suggest(page), place.country)
+            chosen = idos.pick_foreign(idos.parse_suggest(page), country)
             if chosen:
                 break
         if not chosen:
@@ -653,3 +659,11 @@ def describe(legs: list[Leg], plan: list[dict]) -> str:
     return "; ".join(f"{legs[s['from'][0]].stops[s['from'][1]].name} → {legs[s['to'][0]].stops[s['to'][1]].name}: "
                      f"{s['system']} ({s['name']}) {Decimal(s['price']):.0f} Kč" for s in plan
                      if s["kind"] in ("ids", "offer"))
+
+
+def _foreign_code(name: str) -> str:
+    """Kód cizí země místa, které databáze měst nezná („Schwandorf“ → „DE“); jinak ""."""
+    from .. import geo
+
+    code = geo.country_of(name)
+    return code if code and code != "CZ" and stations.country_name(code) else ""
