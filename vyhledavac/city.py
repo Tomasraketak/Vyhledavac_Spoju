@@ -147,6 +147,9 @@ def abbreviated(text: str) -> str:
 CITY_MINUTES = 30
 #: … a vlakem jen kousek (S-Bahn z hlavního nádraží do centra).
 CITY_TRAIN_MINUTES = 15
+#: … příměstskou železnicí (RER, S-Bahn, S-tog) i déle.
+SUBURBAN_MINUTES = 45
+_SUBURBAN = re.compile(r"\b(RER|S-?Bahn|S-tog|SKM|Cercan[ií]as|Rodalies)\b", re.IGNORECASE)
 
 
 def city_leg(leg: Leg) -> bool:
@@ -155,7 +158,9 @@ def city_leg(leg: Leg) -> bool:
         return True
     minutes = leg.duration.total_seconds() / 60
     if leg.mode is Mode.TRAIN:
-        return minutes <= CITY_TRAIN_MINUTES
+        # příměstská železnice po městě i delší (RER B z letiště CDG do centra Paříže)
+        suburban = _SUBURBAN.search(f"{leg.carrier} {leg.line}") is not None
+        return minutes <= (SUBURBAN_MINUTES if suburban else CITY_TRAIN_MINUTES)
     if leg.mode in (Mode.BUS, Mode.FERRY):
         return "flix" not in (leg.carrier or "").lower() and minutes <= CITY_MINUTES
     return False

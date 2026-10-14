@@ -559,7 +559,19 @@ skládají z jiných prodejců:
 * hack `idos_complete` oceňuje až 10 různých tras (každou trasu jen jednou)
   i ze spojů ÖBB/NS/ČD a z Transitous, které cenu nemají: ÖBB do Ústí, European
   Sleeper do Amersfoortu, NS do Rotterdamu;
-* `obb_partial` doplní částečné jízdenky ÖBB (do Utrechtu, Berlína…);
+* spoje nad tento limit (až dalších 25) se ocení **z už známých odpovědí** –
+  bez nových dotazů, takže hledání neprodlouží (FlixBus Olomouc → Katovice
+  a IC Katovice → Varšava už program zná z dřívějších kusů);
+* kus z Česka do ciziny (nebo opačně) ocení i **e-shop IDOS (ČD)** bez
+  prohlížeče: Plzeň → Schwandorf 296 Kč, Plzeň → München 463 Kč – i když DB
+  nejde a fronta prohlížeče ČD je plná;
+* když IDOS prodá jen část cesty (Plzeň → Regensburg) a další kus začíná až
+  dál (München), mezera se dokoupí – cena tak není podhodnocená;
+* MHD na koncích cesty se ořízne, jakmile vlak dojel do hledaného města
+  (vaporetto v Benátkách, tramvaj v Plzni, RER z letiště CDG, S-tog v Kodani),
+  a tentýž dálkový autobus z plánovače a od dopravce se ukáže jen jednou;
+* `obb_partial` doplní částečné jízdenky ÖBB (do Utrechtu, Berlína…), začátek
+  či konec v Česku i přes e-shop IDOS;
 * **německé regionální vlaky** (RE, RB, S-Bahn), které prodává jen DB, se ocení
   odhadem podle pevného ceníku (`de_regional.py`): Deutschlandtarif – oficiální
   Preisliste (Teil J, stav 14. 12. 2025), cena pro každý km 1–2000 km, 2. třída

@@ -94,3 +94,30 @@ async def test_journeys_over_limit_are_priced_from_known_answers(monkeypatch):
     found = await ic.IdosCompleteHack().find(query, [route(9), route(12)], search)
     assert {j.departure.hour: j.price for j in found if j.departure.hour == 12} == {12: 312}
     assert all(d.hour < 12 for d in asked)          # druhý spoj bez dotazu, z paměti
+
+
+def test_same_flixbus_from_planner_and_from_seller_shown_once():
+    from vyhledavac.filters.builtin import SameTrip
+    from vyhledavac.models import Mode
+
+    query = SearchQuery(origin="Ostrava", destination="Krakov", departure=at(8))
+    planner = make_journey(provider="Plánovač", origin="Ostrava (Nám. Republiky, ÚAN)",
+                           destination="Krakow, Krakow-Balice Airport", dep=at(8, 15), arr=at(10, 35),
+                           line="Bus FlixBus N899", mode=Mode.BUS)
+    seller = make_journey(provider="FlixBus", origin="Ostrava (Nám. Republiky)", destination="Krakov Czyzyny",
+                          dep=at(8, 15), arr=at(11, 25), price=308, line="FlixBus", mode=Mode.BUS)
+    later = make_journey(provider="Plánovač", origin="Ostrava (Nám. Republiky, ÚAN)",
+                         destination="Krakow, MDA Bus Station", dep=at(13, 25), arr=at(16), line="Bus FlixBus N3271A",
+                         mode=Mode.BUS)
+    assert SameTrip().apply([planner, seller, later], query) == [seller, later]
+
+
+def test_rer_from_airport_into_paris_is_city_transport():
+    from vyhledavac.city import main_part
+    from vyhledavac.models import Leg, Mode
+
+    legs = [Leg("Prague (Central Bus Station Florenc)", "Paris Charles de Gaulle Airport (Central Bus Station)",
+                at(10), at(20, 15), Mode.BUS, "FlixBus-eu", "Bus FlixBus N367"),
+            Leg("Aéroport CDG 1 (Terminal 3)", "Saint-Michel Notre-Dame", at(20, 20), at(20, 58), Mode.TRAIN,
+                "RER", "B (KOKO32)")]
+    assert main_part(legs, "Praha", "Paříž") == (0, 1)

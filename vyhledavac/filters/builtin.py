@@ -11,7 +11,7 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
-from ..models import FareStatus, Journey, Mode, SearchQuery
+from ..models import FareStatus, Journey, Leg, Mode, SearchQuery
 from ..normalize import same_place
 from ..registry import FILTERS
 from .base import Filter
@@ -226,7 +226,47 @@ class SameTrip(Filter):
                     continue          # rovnocenná dvojice bez ceny: nechá se ta podrobnější
                 drop.add(i)
                 break
+        # tentýž dálkový autobus: plánovač ho vede na letiště, dopravce na
+        # autobusové nádraží (FlixBus Ostrava 8:15 → Kraków Balice / MDA)
+        for i, x in enumerate(journeys):
+            if i in drop or x.price is not None or x.fare_status is FareStatus.SOLD_OUT:
+                continue
+            bus = _single_coach(x)
+            if bus is None:
+                continue
+            for k, y in enumerate(journeys):
+                if k == i or k in drop or y.price is None:
+                    continue
+                other = _single_coach(y)
+                if other is not None and _same_coach(bus, other):
+                    drop.add(i)
+                    break
         return [j for n, j in enumerate(journeys) if n not in drop]
+
+
+#: Dálkoví autobusoví dopravci – podle části jména dopravce nebo linky.
+_COACH_BRANDS = ("flix", "regiojet")
+
+
+def _single_coach(journey: Journey) -> tuple[str, Leg] | None:
+    """(značka, úsek) u spoje jedním dálkovým autobusem, jinak ``None``."""
+    rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+    if len(rides) != 1 or rides[0].mode is not Mode.BUS:
+        return None
+    text = f"{journey.provider} {rides[0].carrier} {rides[0].line}".lower()
+    brand = next((b for b in _COACH_BRANDS if b in text), None)
+    return (brand, rides[0]) if brand else None
+
+
+def _same_coach(a: tuple[str, Leg], b: tuple[str, Leg]) -> bool:
+    from ..city import city_of
+
+    (brand_a, x), (brand_b, y) = a, b
+    if brand_a != brand_b or abs(x.departure - y.departure) > dt.timedelta(minutes=3) \
+            or abs(x.arrival - y.arrival) > dt.timedelta(minutes=60):
+        return False
+    here, there = city_of(x.origin), city_of(x.destination)
+    return here is not None and there is not None and here == city_of(y.origin) and there == city_of(y.destination)
 
 
 @FILTERS.register()

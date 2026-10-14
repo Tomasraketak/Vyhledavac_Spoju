@@ -57,6 +57,8 @@ log = logging.getLogger(__name__)
 MAX_JOURNEYS = 10
 #: … a dalších nejvýš tolik jen z už známých odpovědí (bez nových dotazů).
 MAX_FROM_MEMORY = 25
+#: … na to nejvýš tolik sekund (bez dotazů je to rychlé).
+MEMORY_TIME = 8
 #: Kdo prodává jízdenky na úseky mimo IDS (bez prohlížeče).
 SELLERS = ["Arriva", "Bileto", "RegioJet", "FlixBus", "LeoExpress"]
 #: Prodejci jízdenek na vlaky ČD přes prohlížeč – ptáme se jich, jen když je
@@ -163,12 +165,17 @@ class IdosCompleteHack(TravelHack):
         # další spoje už bez dotazů – jen z odpovědí, které přišly (FlixBus
         # Olomouc → Katovice a IC Katovice → Varšava známe z dřívějších kusů)
         later = _distinct_trips(later, [*journeys, *found])
-        if later and time.monotonic() < self._hard_stop:
+        if later:
             async def memory(q: SearchQuery, **kw) -> list[Journey]:
                 return []
             trace(f"… dalších {len(later)} spojů oceňuji jen z už známých odpovědí (bez dotazů)")
-            for part in await asyncio.gather(*(one(n, j, memory)
-                                               for n, j in enumerate(later, len(todo) + 1))):
+            try:
+                parts = await asyncio.wait_for(asyncio.gather(
+                    *(one(n, j, memory) for n, j in enumerate(later, len(todo) + 1))), MEMORY_TIME)
+            except asyncio.TimeoutError:
+                trace("⚠ oceňování z paměti nestihlo – nechávám, co je")
+                parts = []
+            for part in parts:
                 found.extend(part)
         return found
 
@@ -1136,7 +1143,7 @@ def _bare_route(journey: Journey) -> bool:
     z Transitous (bez rozpisu jízdenek)."""
     rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
     if journey.provider == "Transitous":
-        return (journey.price is None and len(rides) > 1
+        return (journey.price is None and len(rides) >= 1
                 and any(leg.mode in (Mode.TRAIN, Mode.BUS) for leg in rides)
                 and all(leg.mode in (Mode.TRAIN, Mode.BUS, Mode.METRO, Mode.TRAM) for leg in rides))
     return (journey.price is None and not journey.is_hack and journey.provider not in NOT_SELLERS
