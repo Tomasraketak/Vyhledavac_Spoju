@@ -150,3 +150,37 @@ def test_transitous_trnava_is_slovak():
     assert transitous.pick_place("Trnava", results) == "sk-zsr_5613676"
     assert transitous.pick_place("Domanín", [{"type": "STOP", "name": "Domanín", "id": "cz-1"},
                                              {"type": "STOP", "name": "Domanín", "id": "sk-2"}]) == "cz-1"
+
+
+def test_same_trip_from_several_sources_shown_once():
+    from vyhledavac.filters.builtin import SameTrip
+
+    query = SearchQuery(origin="Vídeň", destination="Rotterdam", departure=at(10))
+
+    def trip(provider, dep, price=None):
+        j = make_journey(provider=provider, origin="Wien", destination="Rotterdam", dep=at(*dep),
+                         arr=at(23, 40), price=price, line="ICE 1214")
+        j.legs.append(Leg("Köln", "Rotterdam", at(20), at(23, 40), Mode.TRAIN, "NS", "IC 2880"))
+        return j
+
+    obb, ns, cd = trip("ÖBB", (11, 14)), trip("NS", (11, 18)), trip("ČD", (11, 28), price=8528)
+    other = make_journey(provider="FlixBus", origin="Wien", destination="Rotterdam", dep=at(12),
+                         arr=at(23, 50), line="N 123", mode=Mode.BUS)
+    kept = SameTrip().apply([obb, ns, cd, other], query)
+    assert kept == [cd, other]
+    # dva stejné spoje bez ceny: zůstane jeden
+    assert len(SameTrip().apply([trip("ÖBB", (11, 14)), trip("IDS", (11, 14))], query)) == 1
+
+
+def test_transitous_foreign_city_is_not_czech_village():
+    results = [{"type": "STOP", "name": "Vídeň", "id": "cz-JDF-merged_jdf:stop:761"},
+               {"type": "STOP", "name": "Wien Hauptbahnhof", "id": "at-oebb_1290401"},
+               {"type": "STOP", "name": "Wien", "id": "at-oebb_1"}]
+    assert transitous.pick_place("Vídeň", results) == "at-oebb_1"
+    assert transitous._query_text("Vídeň") == "Wien"
+
+
+def test_european_sleeper_knows_idos_abbreviation():
+    from vyhledavac.providers.european_sleeper import pick_station
+
+    assert pick_station("Ústí n. L. hl. n.") == pick_station("Ústí nad Labem") is not None

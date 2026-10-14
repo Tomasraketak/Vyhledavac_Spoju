@@ -203,7 +203,10 @@ class EuropeanSleeperProvider(HttpProvider):
 # ---- pomůcky ---------------------------------------------------------------------
 def pick_station(place: str) -> str | None:
     """ID stanice European Sleeper pro jméno místa (``None`` = na trase není)."""
-    wanted = normalize(place)
+    import re
+
+    # zkratky z IDOS/ÖBB: „Ústí n. L. hl. n.“, „Usti n.L.“
+    wanted = re.sub(r"\bn l\b", "nad labem", normalize(place))
     if not wanted:
         return None
     for sid, name, _, aliases in STATIONS:

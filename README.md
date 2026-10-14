@@ -525,6 +525,21 @@ dotaz na dopravce trvá 3–20 s. Proto:
   (`⏱ hack idos_complete: 127 s`).
 
 Trnava → Rotterdam: 8,3 min → 2,2–2,6 min.
+
+### Kolik spojů má cenu
+
+Přes Německo prodává většinu vlaků jen DB a ta z některých IP adres (i domácích)
+odmítá dotazy (Akamai „OPS_BLOCKED“) – to program neobchází. Ceny se proto
+skládají z jiných prodejců:
+
+* tentýž vlakový spoj od několika zdrojů (ÖBB, NS, IDOS, Transitous, plánovač)
+  se ukáže jen jednou – přednostně ten s cenou (filtr `same_trip`);
+* hack `idos_complete` oceňuje až 10 různých tras (každou trasu jen jednou)
+  i ze spojů ÖBB/NS/ČD a z Transitous, které cenu nemají: ÖBB do Ústí, European
+  Sleeper do Amersfoortu, NS do Rotterdamu;
+* `obb_partial` doplní částečné jízdenky ÖBB (do Utrechtu, Berlína…).
+
+Vídeň → Rotterdam: s cenou 38 % → 63 % spojů, Trnava → Rotterdam 17 % → 52 %.
 Amsterdam → Bratislava vlakem: 7,8 min → 3,7 min.
 
 ### MHD po městě

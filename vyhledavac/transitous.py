@@ -126,20 +126,27 @@ def _hhmm(value: Any) -> str:
 
 def pick_place(name: str, results: list[dict[str, Any]]) -> str | None:
     """Zastávka se stejným jménem (data země, kde místo leží – „Trnava“ je
-    slovenská, ne obec u Třebíče; jinak česká data přednostně), jinak obec
-    jako „lat,lon“."""
+    slovenská, ne obec u Třebíče; „Vídeň“ je Wien, ne česká obec Vídeň), jinak
+    obec jako „lat,lon“."""
+    from . import stations
     from .geo import country_of
 
-    wanted = normalize(name)
-    home = f"{(country_of(name) or 'CZ').lower()}-"
+    country = country_of(name) or "CZ"
+    home = f"{country.lower()}-"
+    city = stations.place(name)
+    wanted = {normalize(name)} | ({normalize(city.local), normalize(city.name)} - {""} if city else set())
     stops = [r for r in results if r.get("type") == "STOP" and r.get("id")]
+    if country != "CZ":
+        # zahraniční místo: české zastávky stejného jména (obec Vídeň) nebrat
+        foreign = [r for r in stops if not str(r["id"]).startswith("cz-")]
+        stops = foreign or stops
     stops.sort(key=lambda r: not str(r["id"]).startswith(home))
-    exact = [r for r in stops if normalize(str(r.get("name") or "")) == wanted]
+    exact = [r for r in stops if normalize(str(r.get("name") or "")) in wanted]
     exact.sort(key=lambda r: (not str(r["id"]).startswith(home), not str(r["id"]).startswith("cz-")))
     places = [r for r in results if r.get("type") == "PLACE" and r.get("lat") is not None]
     if exact:
         return str(exact[0]["id"])
-    if places and normalize(str(places[0].get("name") or "")) == wanted.split(" ")[0]:
+    if places and normalize(str(places[0].get("name") or "")) in wanted | {normalize(name).split(" ")[0]}:
         return f"{places[0]['lat']},{places[0]['lon']}"
     if stops:
         return str(stops[0]["id"])
@@ -148,16 +155,29 @@ def pick_place(name: str, results: list[dict[str, Any]]) -> str | None:
     return None
 
 
+def _query_text(name: str) -> str:
+    """Zahraniční město se hledá místním jménem (Vídeň → Wien)."""
+    from . import stations
+    from .geo import country_of
+
+    if (country_of(name) or "CZ") == "CZ":
+        return name
+    city = stations.place(name)
+    if city is not None and city.local and normalize(city.name) == normalize(name):
+        return city.local
+    return name
+
+
 async def search(client: Any, cache: Any, namespace: str, origin: str, destination: str,
                  when: dt.datetime, until: dt.datetime, pages: int = 3) -> list[IdosConnection]:
     """Spojení z Transitous od ``when`` do ``until`` (``client`` = náš HttpClient)."""
     headers = {"User-Agent": USER_AGENT}
     ends = []
     for name in (origin, destination):
-        key = f"transitous-place2:{normalize(name)}"
+        key = f"transitous-place3:{normalize(name)}"
         place = cache.get(namespace, key)
         if not place:
-            found = await client.get_json(f"{API}/v1/geocode", params={"text": name, "language": "cs"},
+            found = await client.get_json(f"{API}/v1/geocode", params={"text": _query_text(name), "language": "cs"},
                                           headers=headers)
             place = pick_place(name, found or [])
             if place is None:

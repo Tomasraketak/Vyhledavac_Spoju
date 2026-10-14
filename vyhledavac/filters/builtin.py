@@ -195,6 +195,41 @@ class Deduplicate(Filter):
 
 
 @FILTERS.register()
+class SameTrip(Filter):
+    """Tentýž vlakový spoj od několika zdrojů (ÖBB, NS, IDOS, Transitous…) jen jednou.
+
+    Spoj bez ceny se schová, když jiný spoj jede stejnými vlaky (aspoň dvě
+    společná čísla spojů) a odjíždí stejně nebo později a přijede stejně nebo
+    dřív – nejlépe s cenou. Vídeň → Rotterdam: ICE 1214 + ICE 912 + ICE 120
+    + IC 2880 vrátilo pět zdrojů, s cenou jen ČD; ve výpisu zůstane ten s cenou.
+    """
+
+    name = "same_trip"
+    label = "Sloučit tentýž spoj z více zdrojů"
+
+    def apply(self, journeys: list[Journey], query: SearchQuery) -> list[Journey]:
+        cores = [_train_numbers(j) for j in journeys]
+        drop: set[int] = set()
+        for i, x in enumerate(journeys):
+            if x.price is not None or x.fare_status is FareStatus.SOLD_OUT or len(cores[i]) < 1:
+                continue
+            for k, y in enumerate(journeys):
+                if k == i or k in drop:
+                    continue
+                shared = cores[i] & cores[k]
+                if len(shared) < min(2, len(cores[i])):
+                    continue
+                if not (y.departure >= x.departure and y.arrival <= x.arrival):
+                    continue
+                same_times = y.departure == x.departure and y.arrival == x.arrival
+                if y.price is None and same_times and (_stop_count(y), -k) <= (_stop_count(x), -i):
+                    continue          # rovnocenná dvojice bez ceny: nechá se ta podrobnější
+                drop.add(i)
+                break
+        return [j for n, j in enumerate(journeys) if n not in drop]
+
+
+@FILTERS.register()
 class ParetoOptimal(Filter):
     """Nechá jen nedominované spoje.
 

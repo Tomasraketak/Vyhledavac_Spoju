@@ -77,6 +77,7 @@ SERVER_FILTERS: list[Any] = [
     "drop_sold_out",
     "deduplicate",
     "price_backfill",
+    "same_trip",
     ("limit", {"count": 120}),
 ]
 

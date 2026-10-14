@@ -54,7 +54,7 @@ from .base import SearchFn, TravelHack, combine
 
 log = logging.getLogger(__name__)
 
-MAX_JOURNEYS = 6
+MAX_JOURNEYS = 10
 #: Kdo prodává jízdenky na úseky mimo IDS (bez prohlížeče).
 SELLERS = ["Arriva", "Bileto", "RegioJet", "FlixBus", "LeoExpress"]
 #: Prodejci jízdenek na vlaky ČD přes prohlížeč – ptáme se jich, jen když je
@@ -129,7 +129,7 @@ class IdosCompleteHack(TravelHack):
         todo = [j for j in todo if j.provider == "IDS" or (j.departure, j.arrival) not in from_idos]
         # nejdřív spoje bez ceny, pak ty, kde jde jen o možnou úsporu; IDOS před plánovačem
         todo.sort(key=lambda j: (j.price is not None, j.provider != "IDS", j.provider not in ROUTE_SOURCES))
-        todo = todo[:MAX_JOURNEYS]
+        todo = _distinct_trips(todo, journeys)[:MAX_JOURNEYS]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
         # vrátí i vlak v 10:10, další spoj se tedy už ptát nemusí.
         self._seen: dict[tuple[str, str, bool], list[Journey]] = {}
@@ -1047,9 +1047,36 @@ def _same(option: Journey, first: Leg, last: Leg) -> bool:
             and abs(option.arrival - last.arrival) <= SAME_ARRIVAL)
 
 
+def _distinct_trips(todo: list[Journey], journeys: Sequence[Journey]) -> list[Journey]:
+    """Každá trasa (tytéž vlaky) jen jednou a ne ta, kterou jiný spoj se stejnými
+    vlaky už má s cenou – Vídeň → Rotterdam vrátilo ICE 1214 … IC 2880 pět
+    zdrojů; oceňovat ho pětkrát by spotřebovalo čas na jiné trasy."""
+    from ..filters.builtin import _train_numbers
+
+    priced = [(_train_numbers(j), j) for j in journeys if j.price is not None and not j.raw.get("partial")]
+    out: list[Journey] = []
+    seen: list[set[str]] = []
+    for journey in todo:
+        core = _train_numbers(journey)
+        need = min(2, len(core))
+        if core and any(len(core & other) >= need and len(core) == len(other) for other in seen):
+            continue
+        if core and any(len(core & numbers) >= need and p.departure >= journey.departure
+                        and p.arrival <= journey.arrival for numbers, p in priced):
+            continue
+        seen.append(core)
+        out.append(journey)
+    return out
+
+
 def _bare_route(journey: Journey) -> bool:
-    """Spoj dopravce bez ceny s víc úseky (ne hack, ne zdroj tras, ne dílčí ÖBB)."""
+    """Spoj dopravce bez ceny s víc úseky (ne hack, ne dílčí ÖBB) – i trasa
+    z Transitous (bez rozpisu jízdenek)."""
     rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+    if journey.provider == "Transitous":
+        return (journey.price is None and len(rides) > 1
+                and any(leg.mode in (Mode.TRAIN, Mode.BUS) for leg in rides)
+                and all(leg.mode in (Mode.TRAIN, Mode.BUS, Mode.METRO, Mode.TRAM) for leg in rides))
     return (journey.price is None and not journey.is_hack and journey.provider not in NOT_SELLERS
             and journey.fare_status in (FareStatus.UNKNOWN, FareStatus.NOT_BOOKABLE)
             and not journey.raw.get("partial") and not journey.raw.get("plans") and len(rides) > 1

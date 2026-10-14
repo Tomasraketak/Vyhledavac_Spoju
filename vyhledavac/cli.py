@@ -117,6 +117,7 @@ def build_filters(args: argparse.Namespace) -> list[Any]:
         # Musí být až za deduplikací – ta spáruje stejné spoje od více
         # dopravců a backfill pak doplní, co po ní zbylo bez ceny.
         spec.append("price_backfill")
+    spec.append("same_trip")
     if args.only_priced:
         spec.append("require_price")
     if args.pareto:
