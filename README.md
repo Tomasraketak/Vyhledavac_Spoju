@@ -537,9 +537,19 @@ skládají z jiných prodejců:
 * hack `idos_complete` oceňuje až 10 různých tras (každou trasu jen jednou)
   i ze spojů ÖBB/NS/ČD a z Transitous, které cenu nemají: ÖBB do Ústí, European
   Sleeper do Amersfoortu, NS do Rotterdamu;
-* `obb_partial` doplní částečné jízdenky ÖBB (do Utrechtu, Berlína…).
+* `obb_partial` doplní částečné jízdenky ÖBB (do Utrechtu, Berlína…);
+* **německé regionální vlaky** (RE, RB, S-Bahn), které prodává jen DB, se ocení
+  odhadem podle pevného ceníku (`de_regional.py`): Deutschlandtarif – oficiální
+  Preisliste (Teil J, stav 14. 12. 2025), cena pro každý km 1–2000 km, 2. třída
+  (`data/de_nahverkehr.json.gz`); vzdálenost ze zastávek vzdušnou čarou + 10 %.
+  V NRW se bere i levnější NRW-Tarif 2026 (eezy.nrw 1,88 € + ~0,28 €/km vzdušnou
+  čarou, EinzelTicket NRW 25,80 €). Děti 6–14 polovic, do 6 let zdarma. Úsek
+  je v rozpisu „DB regionální (odhad)“ s odkazem na bahn.de a cena kombinace
+  „součet dílčích jízdenek (část odhadem)“. Dálkové vlaky (ICE, IC, EC) se
+  neodhadují – ceny mají podle poptávky; prodává je i ÖBB.
 
-Vídeň → Rotterdam: s cenou 38 % → 63 % spojů, Trnava → Rotterdam 17 % → 52 %.
+Vídeň → Rotterdam: s cenou 38 % → 66 % spojů, Trnava → Rotterdam 17 % → 56 %
+(Duisburg → Venlo regionálními vlaky ≈ 22,90 €, dál NS).
 Amsterdam → Bratislava vlakem: 7,8 min → 3,7 min.
 
 ### MHD po městě

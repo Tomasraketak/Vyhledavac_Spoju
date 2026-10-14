@@ -100,6 +100,10 @@ def combine(
     note_list = list(notes)
     if not complete:
         note_list.append("⚠️ U některého úseku se nepodařilo zjistit cenu")
+    estimated = [s for s in segments if s.raw.get("estimate") and s.price is not None]
+    if estimated:
+        # odhad (regionální vlaky v Německu podle ceníku) – ať je vidět, která část
+        note_list.extend(n for s in estimated for n in s.notes if n.startswith("≈"))
 
     journey = Journey(
         provider=provider_label,
@@ -115,7 +119,8 @@ def combine(
 
         journey.fares = [
             Fare(amount=total, currency="CZK", amount_czk=total,
-                 label="součet dílčích jízdenek", bookable=complete)
+                 label="součet dílčích jízdenek" + (" (část odhadem)" if estimated else ""),
+                 bookable=complete)
         ]
     return journey
 

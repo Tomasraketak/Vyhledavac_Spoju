@@ -548,6 +548,8 @@ class IdosCompleteHack(TravelHack):
         if not plain and not browser:
             trace(f"– {origin} → {destination} ({', '.join(sorted(crossed))}): nikdo neprodává tuhle "
                   "kombinaci zemí, neptám se")
+            if catchable and "DE" in crossed:
+                return await _de_regional(query, run)
             return None
         trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
               f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
@@ -673,7 +675,26 @@ class IdosCompleteHack(TravelHack):
             if ids is not None:
                 trace(f"✓ tarif {ids.provider}: {ids.price:.0f} Kč (regionální linka v IDS – jízdenka u řidiče / v aplikaci)")
                 return ids
+        if catchable and "DE" in crossed:
+            regional = await _de_regional(query, run)
+            if regional is not None:
+                trace(f"≈ odhad podle ceníku regionálních vlaků v Německu: {regional.price:.0f} Kč "
+                      f"({regional.fares[0].tariff})")
+                return regional
         trace("✗ tentýž spoj nikdo neprodává")
+        return None
+
+
+async def _de_regional(query: SearchQuery, run: list[Leg]) -> Journey | None:
+    """Německé regionální vlaky (RE, RB, S-Bahn) prodává jen DB – cena podle
+    pevného ceníku (Deutschlandtarif, NRW-Tarif), označená jako odhad."""
+    from ..de_regional import regional_journey
+    from ..money import get_converter
+
+    try:
+        return await regional_journey(run, query.passengers, get_converter())
+    except Exception:                        # odhad nesmí shodit oceňování
+        log.exception("odhad ceny regionálních vlaků selhal")
         return None
 
 

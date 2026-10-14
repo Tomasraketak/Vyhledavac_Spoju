@@ -101,6 +101,8 @@ class ObbPartialHack(TravelHack):
         if missing_tail:
             rest = await self._cover(query, obb, search, MAX_DEPTH)
             if rest is None:
+                rest = await self._regional_rest(query, journey, obb, search)
+            if rest is None:
                 trace(f"✗ zbytek {obb.destination} → {query.destination} nikdo neprodává")
                 return None
             parts += rest
@@ -128,6 +130,30 @@ class ObbPartialHack(TravelHack):
         if combo is not None and not combo.deep_link:
             combo.deep_link = journey.deep_link
         return combo
+
+    async def _regional_rest(self, query: SearchQuery, journey: Journey, obb: Journey,
+                             search: SearchFn) -> list[Journey] | None:
+        """Zbytek tímtéž spojem, když za jízdenkou ÖBB jedou německé regionální
+        vlaky (Duisburg → Venlo): ty podle ceníku (odhad), dál zase prodejci (NS)."""
+        from ..de_regional import is_regional, regional_journey
+        from ..money import get_converter
+
+        rest = [leg for leg in _span(journey.legs, obb.destination, journey.legs[-1].destination)
+                if leg.mode.value != "walk"]
+        k = 0
+        while k < len(rest) and is_regional(rest[k]):
+            k += 1
+        if k == 0:
+            return None
+        regional = await regional_journey(rest[:k], query.passengers, get_converter())
+        if regional is None:
+            return None
+        trace(f"≈ regionální vlaky {regional.origin} → {regional.destination} podle ceníku: "
+              f"{regional.price:.0f} Kč ({regional.fares[0].tariff})")
+        if k == len(rest):
+            return [regional]
+        tail = await self._cover(query, regional, search, MAX_DEPTH - 1)
+        return None if tail is None else [regional, *tail]
 
     async def _cover(self, query: SearchQuery, prev: Journey, search: SearchFn,
                      depth: int) -> list[Journey] | None:
