@@ -160,3 +160,19 @@ def test_flixbus_stop_at_station_is_same_station():
 
     assert transfer.same_station("Regensburg central train station", "Regensburg Hbf")
     assert not transfer.same_station("Berlin Südkreuz", "Berlin Hauptbahnhof")
+
+
+def test_same_train_with_other_arrival_station_is_merged_and_not_bookable_ec_is_priced():
+    from vyhledavac.filters.builtin import SameTrip
+    from vyhledavac.hacks.idos_complete import _bare_route
+    from vyhledavac.models import FareStatus
+
+    query = SearchQuery(origin="Ostrava", destination="Krakov", departure=at(8))
+    obb = make_journey(provider="ÖBB", origin="Ostrava hl.n.", destination="Krakow Glowny", dep=at(11, 59),
+                       arr=at(14, 18), line="LEO 411")
+    leo = make_journey(provider="LeoExpress", origin="Ostrava hl.n.", destination="Krakov Główny",
+                       dep=at(11, 59), arr=at(14, 25), price=139, line="LE 411")
+    assert SameTrip().apply([obb, leo], query) == [leo]
+    ec = make_journey(provider="ÖBB", origin="Ostrava hl.n.", destination="Krakow Glowny", line="EC 117")
+    ec.fare_status = FareStatus.NOT_BOOKABLE
+    assert _bare_route(ec)

@@ -1158,7 +1158,9 @@ def _bare_route(journey: Journey) -> bool:
                 and all(leg.mode in (Mode.TRAIN, Mode.BUS, Mode.METRO, Mode.TRAM) for leg in rides))
     return (journey.price is None and not journey.is_hack and journey.provider not in NOT_SELLERS
             and journey.fare_status in (FareStatus.UNKNOWN, FareStatus.NOT_BOOKABLE)
-            and not journey.raw.get("partial") and not journey.raw.get("plans") and len(rides) > 1
+            and not journey.raw.get("partial") and not journey.raw.get("plans")
+            # jedním vlakem jen to, co dopravce sám neprodá (ÖBB EC 117 Ostrava → Kraków)
+            and (len(rides) > 1 or (rides and journey.fare_status is FareStatus.NOT_BOOKABLE))
             and all(leg.mode in (Mode.TRAIN, Mode.BUS) for leg in rides))
 
 

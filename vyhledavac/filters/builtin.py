@@ -220,7 +220,12 @@ class SameTrip(Filter):
                 if len(shared) < min(2, len(cores[i])):
                     continue
                 if not (y.departure >= x.departure and y.arrival <= x.arrival):
-                    continue
+                    # tytéž vlaky, stejný odjezd – zdroje se liší jen v cílové
+                    # stanici ve městě (ÖBB LEO 411 do 14:18, Leo Express 14:25)
+                    if not (y.price is not None and cores[i] == cores[k]
+                            and abs(y.departure - x.departure) <= dt.timedelta(minutes=2)
+                            and abs(y.arrival - x.arrival) <= dt.timedelta(minutes=15)):
+                        continue
                 same_times = y.departure == x.departure and y.arrival == x.arrival
                 if y.price is None and same_times and (_stop_count(y), -k) <= (_stop_count(x), -i):
                     continue          # rovnocenná dvojice bez ceny: nechá se ta podrobnější
