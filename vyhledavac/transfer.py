@@ -60,7 +60,8 @@ _MAIN = {"hbf", "hauptbahnhof", "hl", "n", "st", "hlavni", "nadrazi", "stanica",
          "centrale", "centralstation", "c", "h", "s", "u", "main", "bahnhof", "bf", "gl", "glowny",
          "bahnsteige", "bahnsteig", "zugang", "station", "gare", "stazione", "estacion", "donau", "am",
          "an", "der", "im", "ob", "pu", "palyaudvar", "hlavna", "dworzec", "glavni", "kolodvor",
-         "centralny", "termini", "centrum", "de", "la", "l", "le", "du", "des", "del", "di"}
+         "centralny", "termini", "centrum", "de", "la", "l", "le", "du", "des", "del", "di", "train",
+         "railway"}
 
 
 async def transfer_time(a: str, b: str, when: dt.datetime) -> dt.timedelta:
@@ -109,18 +110,44 @@ async def _transitous(a: str, b: str, when: dt.datetime) -> dt.timedelta:
         return max(result, SAME)
     except Exception as exc:  # noqa: BLE001 - přestup neznám = opatrná rezerva
         log.debug("přestup %s → %s: %s", a, b, exc)
+        walk = await _walk(a, b)
+        if walk is not None:
+            trace(f"⇄ přestup {a} → {b}: Transitous cestu nedal ({exc}) – pěšky {walk.seconds // 60} min "
+                  f"(vč. {RESERVE.seconds // 60} min rezervy)")
+            return walk
         trace(f"⇄ přestup {a} → {b}: nezjištěn ({exc}) – počítám {UNKNOWN.seconds // 60} min")
         return UNKNOWN
+
+
+#: Pěšky jen na krátkou vzdálenost (zastávka FlixBusu před nádražím).
+WALK_KM = 1.5
+#: Chůze 4,5 km/h, cesta o čtvrtinu delší než vzdušnou čarou.
+WALK_KMH = 4.5 / 1.25
+
+
+async def _walk(a: str, b: str) -> dt.timedelta | None:
+    """Přestup pěšky podle vzdálenosti, když jsou obě zastávky blízko (``None`` = neznámo/daleko)."""
+    from .providers.planner import _km
+
+    here, there = await locate(a, stop=True), await locate(b, stop=True)
+    if here is None or there is None:
+        return None
+    km = _km(*here, *there)
+    if km > WALK_KM:
+        return None
+    return max(SAME, dt.timedelta(hours=km / WALK_KMH) + RESERVE)
 
 
 _located: dict[str, tuple[float, float] | None] = {}
 
 
-async def locate(name: str) -> tuple[float, float] | None:
+async def locate(name: str, stop: bool = False) -> tuple[float, float] | None:
     """Souřadnice místa: z databáze měst, jinak z geokodéru Transitous
-    (česká místa v databázi souřadnice nemají)."""
+    (česká místa v databázi souřadnice nemají). ``stop`` = poloha samotné
+    zastávky, ne středu města („Berlin Südkreuz“ není střed Berlína)."""
     place = stations.place(name)
-    if place is not None and place.lat is not None:
+    if place is not None and place.lat is not None and not (stop and place.kind == "c"
+                                                           and normalize(name) != normalize(place.name)):
         return place.lat, place.lon
     key = normalize(name)
     if key in _located:

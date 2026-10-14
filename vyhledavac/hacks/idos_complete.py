@@ -103,6 +103,8 @@ QUERY_BUDGET = 40
 BROWSER_BUDGET = 6
 #: … a za celé hledání (dotazy přes prohlížeč jdou po jednom – 10 × ~25 s).
 BROWSER_TOTAL = 10
+#: Dotazů na e-shop IDOS (ČD bez prohlížeče) za celé hledání – šetří limity IDOS.
+IDOS_TOTAL = 16
 #: Nejvýš tolik sekund nových dotazů na jeden spoj – pak už jen známé odpovědi
 #: (spoj, který nejde ocenit, jinak zkoušel lomy i šest minut).
 JOURNEY_TIME = 100
@@ -118,6 +120,7 @@ class IdosCompleteHack(TravelHack):
     label = "Spoje z IDOS a plánovače: úseky ocení dopravci"
     default_min_saving_pct = 0.0
     _browser_left = BROWSER_TOTAL
+    _idos_left = IDOS_TOTAL
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
                    search: SearchFn) -> list[Journey]:
@@ -158,6 +161,7 @@ class IdosCompleteHack(TravelHack):
         # souběžné stránky prohlížeče nestíhaly časový limit
         self._browser_locks: dict[str, asyncio.Lock] = {}
         self._browser_left = BROWSER_TOTAL
+        self._idos_left = IDOS_TOTAL
         self._hard_stop = time.monotonic() + TOTAL_TIME
         found: list[Journey] = []
         for part in await asyncio.gather(*(one(n, j) for n, j in enumerate(todo, 1))):
@@ -579,8 +583,10 @@ class IdosCompleteHack(TravelHack):
             return None
         ends = _end_countries(run)
         # e-shop IDOS (ČD) prodá jízdenku z Česka do ciziny i bez prohlížeče –
-        # Plzeň → Schwandorf (autobus ALEX), když DB nejde a fronta ČD je plná
-        idos_ask = catchable and abroad and "CZ" in ends and _SOURCE.get() != "IDS"
+        # Plzeň → Schwandorf (autobus ALEX), když DB nejde a fronta ČD je plná;
+        # po Česku vlak ČD dřív, než by se čekalo na prohlížeč
+        idos_ask = (catchable and "CZ" in ends and _SOURCE.get() != "IDS"
+                    and (abroad or bool(browser)))
         trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
               f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
               + (" | e-shop IDOS" if idos_ask else "")
@@ -595,6 +601,10 @@ class IdosCompleteHack(TravelHack):
             if (allow_browser or tuple(only) == ("IDS",)) and catchable and any(
                     _same(o, first, last) and _sells(o) for o in options):
                 continue                     # tentýž spoj už prodá někdo bez prohlížeče (ÖBB)
+            if tuple(only) == ("IDS",) and not any(_same(o, first, last) and _sells(o) for o in cached):
+                if self._idos_left <= 0:
+                    continue                 # limit dotazů na IDOS za hledání vyčerpán
+                self._idos_left -= 1
             if allow_browser and self._browser_unpriced(ends):
                 trace(f"– prohlížeč ({', '.join(only)}): z/do {' → '.join(c or '?' for c in ends)} "
                       "cenu nedává (zjištěno dřív) – neptám se")

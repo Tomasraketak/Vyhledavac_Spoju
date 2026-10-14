@@ -121,3 +121,42 @@ def test_rer_from_airport_into_paris_is_city_transport():
             Leg("Aéroport CDG 1 (Terminal 3)", "Saint-Michel Notre-Dame", at(20, 20), at(20, 58), Mode.TRAIN,
                 "RER", "B (KOKO32)")]
     assert main_part(legs, "Praha", "Paříž") == (0, 1)
+
+
+@pytest.mark.asyncio
+async def test_czech_train_piece_priced_by_idos_eshop_before_browser():
+    import vyhledavac.hacks.idos_complete as ic
+    from vyhledavac.models import Journey, Leg, Mode
+    from vyhledavac.registry import load_plugins
+
+    load_plugins()
+    rj = Leg("Praha hl.n.", "Děčín hl.n.", at(10, 31), at(11, 58), Mode.TRAIN, "České dráhy, a.s.", "rj 382")
+    ec = Leg("Děčín hl.n.", "Dresden Hbf", at(12, 2), at(12, 48), Mode.TRAIN, "DSB", "EC 382")
+    route = Journey(provider="Plánovač", legs=[rj, ec],
+                    raw={"plans": [[{"kind": "buy", "from": [0, 0], "to": [0, 1]},
+                                    {"kind": "buy", "from": [1, 0], "to": [1, 1]}]]})
+    idos = make_journey(provider="IDS", origin="Praha hl.n.", destination="Děčín hl.n.", dep=at(10, 31),
+                        arr=at(11, 58), price=249, line="rj 382")
+    obb = make_journey(provider="ÖBB", origin="Děčín hl.n.", destination="Dresden Hbf", dep=at(12, 2),
+                       arr=at(12, 48), price=300, line="EC 382")
+    browser = []
+
+    async def search(q, allow_browser=False, only=None):
+        if allow_browser:
+            browser.append(q)
+        if only == ["IDS"]:
+            return [idos]
+        return [obb] if q.origin.startswith("Děčín") else []
+
+    query = SearchQuery(origin="Praha", destination="Drážďany", departure=at(10))
+    hack = ic.IdosCompleteHack()
+    hack._browser_locks = {}
+    found = await hack.find(query, [route], search)
+    assert found and found[0].price == 549 and not browser
+
+
+def test_flixbus_stop_at_station_is_same_station():
+    from vyhledavac import transfer
+
+    assert transfer.same_station("Regensburg central train station", "Regensburg Hbf")
+    assert not transfer.same_station("Berlin Südkreuz", "Berlin Hauptbahnhof")
