@@ -586,6 +586,30 @@ Vídeň → Rotterdam: s cenou 38 % → 66 % spojů, Trnava → Rotterdam 17 % �
 (Duisburg → Venlo regionálními vlaky ≈ 22,90 €, dál NS).
 Amsterdam → Bratislava vlakem: 7,8 min → 3,7 min.
 
+Test 12 tras z Česka (odjezd 27. 10. 2026 od 8:00, dospělý 26 let, všichni
+dopravci a výchozí hacky, přes webové rozhraní) – podíl spojů s celkovou cenou
+a doba hledání, před úpravami v říjnu 2026 a po nich:
+
+| Trasa | Předtím | Teď |
+|---|---|---|
+| Praha → Berlín | 82 %, 137 s | 97 %, 91 s |
+| Brno → Vídeň | 86 %, 153 s | 94 %, 104 s |
+| Praha → Mnichov | 70 %, 175 s (a chybná „cena“ 76 Kč za Mnichovice) | 88 %, 67 s |
+| Praha → Budapešť | 81 %, 159 s | 92 %, 129 s |
+| Ostrava → Krakov | 59 %, 153 s | 84 %, 83 s |
+| Praha → Amsterdam | 74 %, 162 s | 76 %, 138 s |
+| Brno → Benátky | 72 %, 163 s | 96 %, 163 s |
+| Praha → Paříž | 69 %, 164 s | 76 %, 144 s |
+| Plzeň → Curych | 22 %, 163 s (a podhodnocená cena bez Regensburg → München) | 50 %, 164 s |
+| Olomouc → Varšava | 44 %, 163 s | 61 %, 153 s |
+| České Budějovice → Linec | 82 %, 134 s | 92 %, 157 s |
+| Praha → Kodaň | 50 %, 164 s | 81 %, 163 s |
+
+Co zůstává bez ceny: vlaky, které online prodává jen DB (ICE 224 Mnichov →
+Amsterdam – ÖBB ho vrací bez ceny), osobní vlaky Kolejí Śląskich Bohumín →
+Katovice (přes hranici je neprodá Koleo ani e-shop IDOS) a dlouhé kombinace
+FlixBus + DB + SNCF, na které v limitu 3 minut nezbude čas.
+
 ### MHD po městě
 
 Cesta po jednom městě („Praha, Anděl“ → „Praha, Letňany“, „Wien
