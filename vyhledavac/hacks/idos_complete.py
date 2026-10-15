@@ -818,7 +818,7 @@ def ids_fare(query: SearchQuery, run: list[Leg], valid_minutes: float | None = N
 
     Autobus: číslo licence (6 číslic, „340100“) v seznamu linek IDS; vlak:
     jen ČD a jen kategorie, kde IDS platí (Os, Sp, R; ne EC/RJ)."""
-    from ..hacks.ids_ticket import SYSTEMS, IdsTicketHack, _stop, train_systems
+    from ..hacks.ids_ticket import SYSTEMS, IdsTicketHack, _stop, limit_region, train_systems
     from ..providers.ids_idos import line_systems
 
     allowed = set(SYSTEMS)
@@ -841,12 +841,14 @@ def ids_fare(query: SearchQuery, run: list[Leg], valid_minutes: float | None = N
     route = []
     for leg in run:
         stops = leg.stops or [Stop(leg.origin, departure=leg.departure), Stop(leg.destination, arrival=leg.arrival)]
+        own = []
         for n, stop in enumerate(stops):
-            if route and n == 0:
-                continue                     # přestupní zastávka jen jednou
             stop_time = stop.departure or stop.arrival
-            route.append(_stop(stop.name, time=stop_time))
-            route[-1].rail = leg.mode is Mode.TRAIN
+            own.append(_stop(stop.name, time=stop_time))
+            own[-1].rail = leg.mode is Mode.TRAIN
+        if leg.mode is Mode.TRAIN:
+            limit_region(own, leg.line or "")    # EC Jižní expres: IDESKA jen v jižních Čechách
+        route.extend(own[1:] if route else own)  # přestupní zastávka jen jednou
     if len(route) < 2:
         return None
     allowed &= set(route[0].systems) & set(route[-1].systems)

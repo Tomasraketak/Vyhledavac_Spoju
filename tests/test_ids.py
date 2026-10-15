@@ -148,7 +148,7 @@ async def test_not_offered_when_not_cheaper_or_express():
         return []
 
     cheap = cd_journey("České Budějovice", "Tábor", at(10), at(11), 20)
-    express = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="EC 335")
+    express = cd_journey("České Budějovice", "Tábor", at(10), at(11), 300, line="EC 172")
     assert await IdsTicketHack().find(query, [cheap, express], search) == []
 
 
@@ -164,7 +164,7 @@ async def test_ideska_valid_on_intercity_but_pid_is_not():
     (found,) = await IdsTicketHack().find(query, [ic], search)
     assert found.provider == "IDESKA" and found.price < Decimal(300)
     from vyhledavac.hacks.ids_ticket import train_systems
-    assert train_systems("IC 536") == {"IDESKA"} and train_systems("EC 335") == set()
+    assert train_systems("IC 536") == {"IDESKA"} and train_systems("EC 172") == set() and train_systems("EC 335") == {"IDESKA"}
     assert train_systems("R 722") is None
 
 

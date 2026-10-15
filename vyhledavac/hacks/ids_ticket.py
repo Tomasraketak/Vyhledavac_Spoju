@@ -65,11 +65,15 @@ NOT_IDS = re.compile(r"^\s*(EC|IC|SC|EN|ES|Ex|rj|RJ|RJX|LE|LET|NJ|ICE|IR|AEx|TLX
 #: zón IDESKA; EC a railjety ne. Zdroj: cd.cz, IDESKA (2026).
 LONG_DISTANCE = re.compile(r"^\s*(Ex|IC)\b")
 LONG_DISTANCE_SYSTEMS = frozenset({"IDESKA"})
+#: EC Jižní expres (Praha – Linz, EC 330–339): IDESKA platí jen mezi Táborem
+#: a Horním Dvořištěm, tedy jen v Jihočeském kraji (ne do Benešova jako na IC/Ex).
+JIZNI_EXPRES = re.compile(r"^\s*EC\s*(33\d\b|.*jižní\s+expres)", re.IGNORECASE)
+JIZNI_EXPRES_REGION = "Jihočeský kraj"
 
 
 def train_systems(label: str) -> set[str] | None:
     """Systémy, ve kterých platí jízdenka IDS na vlak ČD; ``None`` = ve všech."""
-    if LONG_DISTANCE.match(label or ""):
+    if LONG_DISTANCE.match(label or "") or JIZNI_EXPRES.match(label or ""):
         return set(LONG_DISTANCE_SYSTEMS)
     if NOT_IDS.match(label or ""):
         return set()
@@ -124,6 +128,22 @@ def eligible(journey: Journey) -> bool:
     return True
 
 
+def region_limit(label: str) -> str | None:
+    """Kraj, mimo který jízdenka IDS na tomto vlaku neplatí (EC Jižní expres)."""
+    return JIZNI_EXPRES_REGION if JIZNI_EXPRES.match(label or "") else None
+
+
+def limit_region(stops: list[RouteStop], label: str) -> None:
+    """Zastávkám mimo kraj platnosti vlaku (EC Jižní expres: Benešov, Praha)
+    vezme zóny IDESKA – jízdenka IDESKA tam na tomto vlaku nekončí ani nezačíná."""
+    region = region_limit(label)
+    if region is None:
+        return
+    for stop in stops:
+        if stop.kraj != region:
+            stop.systems = {k: v for k, v in stop.systems.items() if k not in LONG_DISTANCE_SYSTEMS}
+
+
 def allowed_systems(journey: Journey) -> set[str] | None:
     """Systémy, které smějí platit na všech vlacích spoje (``None`` = bez omezení)."""
     allowed = None
@@ -163,6 +183,10 @@ class IdsTicketHack(TravelHack):
                 if guess and route:
                     known = await self._known_stops(client, journey, journeys)
                     _mark_halts(route, known)
+        for route, journey in zip(routes, base):
+            for leg in journey.legs:
+                if leg.mode is Mode.TRAIN:
+                    limit_region(route, leg.line or "")
         await self._prefetch(routes, query)
 
         # Úseky, na které se musí zeptat ČD – jedna otázka na stanici lomu.

@@ -249,3 +249,25 @@ async def test_cd_train_asks_idos_eshop_even_when_arriva_sells_sjt():
     assert [s.provider for s in found[0].segments] == ["FlixBus", "Arriva"]
     assert ["IDS"] not in [only for only, _ in asked]
     assert any("SJT – platí i ve vlaku ČD" in n for n in found[0].notes)
+
+
+def test_ideska_valid_on_jizni_expres_ec_only_tabor_to_horni_dvoriste():
+    from vyhledavac.hacks.idos_complete import ids_fare
+    from vyhledavac.hacks.ids_ticket import train_systems
+    from vyhledavac.models import Leg, Mode, Stop
+
+    assert train_systems("EC 334 Jižní expres") == {"IDESKA"} == train_systems("EC 332")
+    assert train_systems("EC 172") == set()
+    query = SearchQuery(origin="Třeboň", destination="Praha", departure=at(13))
+
+    def ec(to, arrival):
+        stops = [Stop("České Budějovice", departure=at(13, 58)), Stop("Veselí nad Lužnicí", arrival=at(14, 20)),
+                 Stop("Tábor", arrival=at(14, 37))]
+        if to != "Tábor":
+            stops.append(Stop(to, arrival=arrival))
+        return Leg("České Budějovice", to, at(13, 58), arrival, Mode.TRAIN, "České dráhy, a.s.",
+                   "EC 334 Jižní expres", stops=stops)
+
+    fare = ids_fare(query, [ec("Tábor", at(14, 37))])
+    assert fare is not None and fare.provider == "IDESKA"
+    assert ids_fare(query, [ec("Benešov u Prahy", at(15, 10))]) is None

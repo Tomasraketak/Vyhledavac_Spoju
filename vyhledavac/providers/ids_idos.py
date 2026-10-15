@@ -271,7 +271,7 @@ class IdsIdosProvider(HttpProvider):
         kde staví) a hack ``idos_complete`` dokoupí zbytek u dopravců a vybere
         nejlevnější rozpis.
         """
-        from ..hacks.ids_ticket import SYSTEMS, RouteStop, train_systems
+        from ..hacks.ids_ticket import SYSTEMS, RouteStop, limit_region, train_systems
 
         from ..ids import odis
 
@@ -354,6 +354,8 @@ class IdsIdosProvider(HttpProvider):
                                        place.kraj if place else "",
                                        idos.display_name(name) if rail else "", rail=rail,
                                        km=distances[i]))
+            if rail:
+                limit_region(stops, leg.train_label)     # EC Jižní expres: IDESKA jen v jižních Čechách
             infos.append((stops, systems, ok))
             route_systems.extend(st.systems for st in stops if st.systems)
             legs.append(Leg(origin=idos.display_name(leg.origin),
