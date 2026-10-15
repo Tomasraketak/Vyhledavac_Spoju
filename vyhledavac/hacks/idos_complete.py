@@ -140,8 +140,10 @@ class IdosCompleteHack(TravelHack):
         # spoje mimo hledané okno (RegioJet vrací i další dny) se stejně neukážou
         todo = [j for j in todo if query.departure - dt.timedelta(minutes=30) <= j.departure
                 <= query.window_end + query.window]
+        # jednodušší spoje dřív: přímý EC Olomouc → Varšava se ocení snáz (a víc
+        # zajímá) než pět přestupů přes osobáky, které online nikdo neprodá
         todo.sort(key=lambda j: (not query.within_window(j.departure), j.price is not None,
-                                 j.provider != "IDS", j.provider not in ROUTE_SOURCES))
+                                 j.provider != "IDS", _ride_count(j) > 2, j.provider not in ROUTE_SOURCES))
         todo = _distinct_trips(todo, journeys)
         todo, later = todo[:MAX_JOURNEYS], todo[MAX_JOURNEYS:MAX_JOURNEYS + MAX_FROM_MEMORY]
         # Výsledky dotazů podle (odkud, kam): dotaz z 8:00 Budějovice → Praha
@@ -745,6 +747,10 @@ class IdosCompleteHack(TravelHack):
                 return regional
         trace("✗ tentýž spoj nikdo neprodává")
         return None
+
+
+def _ride_count(journey: Journey) -> int:
+    return sum(1 for leg in journey.legs if leg.mode is not Mode.WALK)
 
 
 def _coach(leg: Leg) -> bool:
