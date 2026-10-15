@@ -150,6 +150,9 @@ CITY_TRAIN_MINUTES = 15
 #: … příměstskou železnicí (RER, S-Bahn, S-tog) i déle.
 SUBURBAN_MINUTES = 45
 _SUBURBAN = re.compile(r"\b(RER|S-?Bahn|S-tog|SKM|Cercan[ií]as|Rodalies)\b", re.IGNORECASE)
+#: … a vlakem z letiště do centra (Kraków Lotnisko → Główny, 17 min).
+_AIRPORT = re.compile(r"airport|letiště|lotnisko|flughafen|a[ée]roport|aeropuerto|aeroporto|lufthavn|"
+                      r"flygplats|repülőtér|schiphol", re.IGNORECASE)
 
 
 def city_leg(leg: Leg) -> bool:
@@ -159,7 +162,8 @@ def city_leg(leg: Leg) -> bool:
     minutes = leg.duration.total_seconds() / 60
     if leg.mode is Mode.TRAIN:
         # příměstská železnice po městě i delší (RER B z letiště CDG do centra Paříže)
-        suburban = _SUBURBAN.search(f"{leg.carrier} {leg.line}") is not None
+        suburban = (_SUBURBAN.search(f"{leg.carrier} {leg.line}") is not None
+                    or _AIRPORT.search(f"{leg.origin} {leg.destination}") is not None)
         return minutes <= (SUBURBAN_MINUTES if suburban else CITY_TRAIN_MINUTES)
     if leg.mode in (Mode.BUS, Mode.FERRY):
         return "flix" not in (leg.carrier or "").lower() and minutes <= CITY_MINUTES

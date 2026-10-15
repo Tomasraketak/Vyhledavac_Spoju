@@ -176,3 +176,14 @@ def test_same_train_with_other_arrival_station_is_merged_and_not_bookable_ec_is_
     ec = make_journey(provider="ÖBB", origin="Ostrava hl.n.", destination="Krakow Glowny", line="EC 117")
     ec.fare_status = FareStatus.NOT_BOOKABLE
     assert _bare_route(ec)
+
+
+def test_airport_train_into_krakow_is_city_transport():
+    from vyhledavac.city import main_part
+    from vyhledavac.models import Leg, Mode
+
+    legs = [Leg("Ostrava (Nám. Republiky, ÚAN)", "Krakow, Krakow-Balice Airport", at(16), at(18, 45), Mode.BUS,
+                "FlixBus-eu", "Bus FlixBus N1309"),
+            Leg("Kraków Lotnisko", "Kraków Główny", at(18, 47), at(19, 4), Mode.TRAIN, "Koleje Małopolskie",
+                "33254/5")]
+    assert main_part(legs, "Ostrava", "Krakov") == (0, 1)

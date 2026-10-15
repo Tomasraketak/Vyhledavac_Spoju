@@ -1150,12 +1150,16 @@ def _distinct_trips(todo: list[Journey], journeys: Sequence[Journey]) -> list[Jo
     """Každá trasa (tytéž vlaky) jen jednou a ne ta, kterou jiný spoj se stejnými
     vlaky už má s cenou – Vídeň → Rotterdam vrátilo ICE 1214 … IC 2880 pět
     zdrojů; oceňovat ho pětkrát by spotřebovalo čas na jiné trasy."""
-    from ..filters.builtin import _train_numbers
+    from ..filters.builtin import _same_coach, _single_coach, _train_numbers
 
     priced = [(_train_numbers(j), j) for j in journeys if j.price is not None and not j.raw.get("partial")]
+    coaches = [c for _, j in priced if (c := _single_coach(j)) is not None]
     out: list[Journey] = []
     seen: list[set[str]] = []
     for journey in todo:
+        coach = _single_coach(journey)
+        if coach is not None and any(_same_coach(coach, other) for other in coaches):
+            continue                     # tentýž FlixBus má cenu od dopravce (jen jinou zastávku ve městě)
         core = _train_numbers(journey)
         need = min(2, len(core))
         if core and any(len(core & other) >= need and len(core) == len(other) for other in seen):
