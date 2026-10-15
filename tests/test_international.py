@@ -187,3 +187,13 @@ def test_airport_train_into_krakow_is_city_transport():
             Leg("Kraków Lotnisko", "Kraków Główny", at(18, 47), at(19, 4), Mode.TRAIN, "Koleje Małopolskie",
                 "33254/5")]
     assert main_part(legs, "Ostrava", "Krakov") == (0, 1)
+
+
+def test_rail_replacement_bus_counts_as_german_regional():
+    from vyhledavac.de_regional import is_regional
+    from vyhledavac.models import Leg, Mode
+
+    alex = Leg("Furth im Wald", "Schwandorf", at(10, 45), at(12, 5), Mode.BUS, "alex - Die Länderbahn GmbH DLB",
+               "Bus 061360")
+    flix = Leg("München", "Zürich", at(14, 30), at(18, 20), Mode.BUS, "FlixBus-eu", "Bus FlixBus X06")
+    assert is_regional(alex) and not is_regional(flix)

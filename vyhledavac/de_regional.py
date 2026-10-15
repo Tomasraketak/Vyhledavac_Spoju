@@ -49,8 +49,11 @@ _LONG = re.compile(r"\b(ICE|IC|EC|ECE|RJ|RJX|NJ|EN|FLX|TGV|THA|ES|EST|IR|D)\b", 
 _REGIONAL = re.compile(r"\b(RE|RB|S|IRE|MEX|RS|ERB|NWB|BRB|HLB|ALX|SE|RER)\s?\d|\bS\s*\d|\b(RE|RB)\d", re.I)
 _REGIONAL_CARRIER = ("regio", "eurobahn", "national express", "vias", "nordwestbahn", "abellio",
                      "arverio", "rheinruhrbahn", "bayerische regiobahn", "agilis", "erixx", "metronom",
-                     "odeg", "landerbahn", "laenderbahn", "s bahn", "s-bahn", "trilex", "hanseatische",
-                     "start ", "go-ahead", "mitteldeutsche regiobahn", "cantus", "vlexx", "westfalenbahn")
+                     "odeg", "landerbahn", "laenderbahn", "länderbahn", "s bahn", "s-bahn", "trilex",
+                     "hanseatische", "start ", "go-ahead", "mitteldeutsche regiobahn", "cantus", "vlexx",
+                     "westfalenbahn", "db regio")
+#: Náhradní autobusová doprava za vlak (Schienenersatzverkehr) – jízdenka jako na vlak.
+_RAIL_REPLACEMENT = re.compile(r"\b(SEV|Bsv|Ersatz)", re.I)
 
 
 @cache
@@ -67,7 +70,12 @@ def table_price(km: int) -> Decimal:
 
 
 def is_regional(leg: Leg) -> bool:
-    """Regionální vlak (RE/RB/S-Bahn…), ne dálkový (ICE, IC, EC, RJ, NJ, FLX)."""
+    """Regionální vlak (RE/RB/S-Bahn…), ne dálkový (ICE, IC, EC, RJ, NJ, FLX) –
+    i náhradní autobus železničního dopravce (ALEX Furth im Wald → Schwandorf)."""
+    if leg.mode is Mode.BUS:
+        carrier = (leg.carrier or "").lower()
+        return (_RAIL_REPLACEMENT.search(leg.line or "") is not None
+                or any(k in carrier for k in _REGIONAL_CARRIER if k not in ("regio", "start ")))
     if leg.mode is not Mode.TRAIN:
         return False
     line = leg.line or ""

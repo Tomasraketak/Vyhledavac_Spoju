@@ -17,6 +17,7 @@ Výsledky se pamatují (stejná dvojice stanic ve stejnou hodinu).
 
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import logging
 from typing import Any
@@ -34,6 +35,8 @@ NEAR_KM = 25.0
 
 _memo: dict[tuple[str, str, int], dt.timedelta] = {}
 _client = None
+#: Bez síťových dotazů (oceňování z paměti) – přestup jen z už zjištěných hodnot.
+OFFLINE: contextvars.ContextVar[bool] = contextvars.ContextVar("transfer_offline", default=False)
 
 
 def same_station(a: str, b: str) -> bool:
@@ -77,6 +80,14 @@ async def transfer_time(a: str, b: str, when: dt.datetime) -> dt.timedelta:
     if known is not None:
         result = dt.timedelta(minutes=known.minutes) + RESERVE
         trace(f"⇄ přestup {a} → {b}: {known.how} {result.seconds // 60} min")
+    elif OFFLINE.get():
+        here, there = _located.get(normalize(a)), _located.get(normalize(b))
+        if here is None or there is None:
+            return UNKNOWN                   # bez sítě nevím – opatrně, a nepamatovat si to
+        from .providers.planner import _km
+
+        km = _km(*here, *there)
+        return max(SAME, dt.timedelta(hours=km / WALK_KMH) + RESERVE) if km <= WALK_KM else UNKNOWN
     else:
         result = await _transitous(a, b, when)
     _memo[key] = result

@@ -151,6 +151,8 @@ class IdosCompleteHack(TravelHack):
         self._base = [j for j in journeys if j.provider not in NOT_SELLERS and j.price is not None]
         async def one(n: int, journey: Journey, ask: SearchFn = search) -> list[Journey]:
             set_tag(f"#{n}")             # spoje běží souběžně – v trasování je rozliší číslo
+            if ask is not search:
+                transfer.OFFLINE.set(True)       # z paměti: ani přestupy po síti
             try:
                 return await self._complete(query, journey, ask)
             except Exception:
