@@ -575,6 +575,11 @@ class IdosCompleteHack(TravelHack):
         plain, browser = sellers_for(origin, destination, run, crossed)
         if browser and _SOURCE.get() != "IDS" and not any(leg.mode is Mode.TRAIN for leg in run):
             browser = []                     # autobus z plánovače: ČD přes prohlížeč (pomalé) neptat
+        # FlixBus + vlaky jednou jízdenkou nikdo neprodá – ČD ani IDOS se neptat,
+        # kus se rovnou ocení po dopravcích (Praha → Amsterdam: 46 s fronty zbytečně)
+        coach_mix = len(run) > 1 and any(_coach(leg) for leg in run) and any(leg.mode is Mode.TRAIN for leg in run)
+        if coach_mix:
+            browser = []
         if not plain and not browser:
             trace(f"– {origin} → {destination} ({', '.join(sorted(crossed))}): nikdo neprodává tuhle "
                   "kombinaci zemí, neptám se")
@@ -585,7 +590,7 @@ class IdosCompleteHack(TravelHack):
         # e-shop IDOS (ČD) prodá jízdenku z Česka do ciziny i bez prohlížeče –
         # Plzeň → Schwandorf (autobus ALEX), když DB nejde a fronta ČD je plná;
         # po Česku vlak ČD dřív, než by se čekalo na prohlížeč
-        idos_ask = (catchable and "CZ" in ends and _SOURCE.get() != "IDS"
+        idos_ask = (catchable and "CZ" in ends and _SOURCE.get() != "IDS" and not coach_mix
                     and (abroad or bool(browser)))
         trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
               f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
@@ -729,6 +734,12 @@ class IdosCompleteHack(TravelHack):
                 return regional
         trace("✗ tentýž spoj nikdo neprodává")
         return None
+
+
+def _coach(leg: Leg) -> bool:
+    """Dálkový autobus (FlixBus, autobus RegioJet) – jízdenku prodává jen jeho dopravce."""
+    text = f"{leg.carrier} {leg.line}".lower()
+    return leg.mode is Mode.BUS and ("flix" in text or "regiojet" in text)
 
 
 def _sells(journey: Journey) -> bool:
