@@ -605,6 +605,10 @@ class IdosCompleteHack(TravelHack):
               + (" | e-shop IDOS" if idos_ask else "")
               + (f" | prohlížeč: {', '.join(browser)}" if browser else ""))
         asks = [(plain, False)] + ([(["IDS"], False)] if idos_ask else []) + ([(browser, True)] if browser else [])
+        # vlak ČD po Česku: Arriva prodá jízdenku SJT, ale ČD (e-shop IDOS) se
+        # zeptat i tak – bývá stejně drahá nebo levnější a je to dopravce vlaku
+        # (nabídku dává IDOS jen jednomu dospělému bez slev – jinak se neptat)
+        cd_run = not abroad and _cd_trains(run) and _idos_offer_possible(query)
         options: list[Journey] = []
         for only, allow_browser in asks:
             if not only:
@@ -612,7 +616,8 @@ class IdosCompleteHack(TravelHack):
             key = (normalize(origin), normalize(destination), allow_browser, tuple(only) == ("IDS",))
             cached = self._seen.get(key, [])
             if (allow_browser or tuple(only) == ("IDS",)) and catchable and any(
-                    _same(o, first, last) and _sells(o) for o in options):
+                    _same(o, first, last) and _sells(o) and (allow_browser or not cd_run or _cd_seller(o))
+                    for o in options):
                 continue                     # tentýž spoj už prodá někdo bez prohlížeče (ÖBB)
             if tuple(only) == ("IDS",) and not any(_same(o, first, last) and _sells(o) for o in cached):
                 if self._idos_left <= 0:
@@ -681,7 +686,8 @@ class IdosCompleteHack(TravelHack):
             trace("odpovědi z místa do místa: " + (", ".join(
                 f"{name} {n} (s cenou {p})" for name, (n, p) in sorted(counts.items())) or "žádné"))
             if same:
-                best = min(same, key=lambda o: o.price)
+                # při stejné ceně dopravce vlaku (ČD) před prodejcem jízdenky SJT
+                best = min(same, key=lambda o: (o.price, cd_run and not _cd_seller(o)))
                 trace(f"✓ tentýž spoj: {best.provider} {best.price:.0f} Kč"
                       + (f" (další: {', '.join(f'{o.provider} {o.price:.0f}' for o in same if o is not best)})"
                          if len(same) > 1 else ""))
@@ -731,7 +737,7 @@ class IdosCompleteHack(TravelHack):
             chosen = min(other, key=lambda o: o.price)
             trace(f"✓ jiný spoj ve stejný čas / navazující: {chosen.provider} {chosen.departure:%H:%M}–"
                   f"{chosen.arrival:%H:%M} {chosen.price:.0f} Kč", )
-            return Journey(provider=chosen.provider, legs=list(chosen.legs), fares=list(chosen.fares),
+            return Journey(provider=_seller_name(chosen), legs=list(chosen.legs), fares=list(chosen.fares),
                            fare_status=chosen.fare_status, deep_link=chosen.deep_link,
                            notes=list(chosen.notes), raw={**chosen.raw, "other_route": True})
         if catchable and not abroad:
@@ -757,6 +763,31 @@ def _coach(leg: Leg) -> bool:
     """Dálkový autobus (FlixBus, autobus RegioJet) – jízdenku prodává jen jeho dopravce."""
     text = f"{leg.carrier} {leg.line}".lower()
     return leg.mode is Mode.BUS and ("flix" in text or "regiojet" in text)
+
+
+def _cd_trains(run: list[Leg]) -> bool:
+    """Jede kus vlakem Českých drah?"""
+    return any(leg.mode is Mode.TRAIN and ("ceske drahy" in normalize(leg.carrier or "")
+                                           or "cd" in normalize(leg.carrier or "").split())
+               for leg in run)
+
+
+def _idos_offer_possible(query: SearchQuery) -> bool:
+    """Dá e-shop IDOS cenu jízdenky ČD? Jen jednomu dospělému bez slevových karet."""
+    people = query.passengers
+    return len(people) == 1 and not people[0].cards and 26 <= people[0].age < 65
+
+
+def _cd_seller(journey: Journey) -> bool:
+    """Jízdenka přímo od ČD (web ČD, nebo e-shop IDOS, který prodává za ČD)."""
+    return journey.provider == "ČD" or (journey.provider == "IDS" and _seller_name(journey) == "ČD")
+
+
+def _seller_name(journey: Journey) -> str:
+    """Kdo jízdenku prodává: nabídka e-shopu IDOS je jízdenka ČD, ne „IDS“."""
+    if journey.provider == "IDS" and journey.fares and journey.fares[0].label == "IDOS":
+        return "ČD"
+    return journey.provider
 
 
 def _sells(journey: Journey) -> bool:
@@ -1017,9 +1048,20 @@ SYSTEMS_IDS = {"PID", "IDESKA", "IDS JMK", "IDOL", "IREDO", "DÚK", "IDPK", "VDV
 
 def _merge(segments: Sequence[Journey], title: str) -> Journey | None:
     lines = "; ".join(f"{s.origin} → {s.destination}: {s.provider} "
-                      + (f"{s.price:.0f} Kč" if s.price is not None else "cena neznámá") for s in segments)
+                      + (f"{s.price:.0f} Kč" if s.price is not None else "cena neznámá") + _sjt_note(s)
+                      for s in segments)
     return combine(" + ".join(dict.fromkeys(s.provider for s in segments)), segments,
                    notes=[f"{title}: {lines}."])
+
+
+def _sjt_note(segment: Journey) -> str:
+    """Arriva prodává jízdenky SJT i na vlaky ČD – ať je jasné, že platí."""
+    tariff = segment.fares[0].tariff if segment.fares else ""
+    if segment.provider != "Arriva" or "SJT" not in (tariff or ""):
+        return ""
+    if not _cd_trains(segment.legs):
+        return ""
+    return " (jízdenka SJT – platí i ve vlaku ČD)"
 
 
 _TRAIN_NO = re.compile(r"\b(\d{2,6})\b")
@@ -1051,7 +1093,7 @@ def _match(options: Sequence[Journey], first: Leg, last: Leg, origin: str, desti
 
 def _on_route(option: Journey, run: list[Leg]) -> Journey:
     """Jízdenka prodejce na kus ``run`` – s úseky z IDOS (zastávky, dopravci úseků)."""
-    copy = Journey(provider=option.provider, legs=list(run), fares=list(option.fares),
+    copy = Journey(provider=_seller_name(option), legs=list(run), fares=list(option.fares),
                    fare_status=option.fare_status, deep_link=option.deep_link, notes=list(option.notes),
                    raw=dict(option.raw))
     copy.raw.pop("other_route", None)

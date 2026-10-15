@@ -197,3 +197,55 @@ def test_rail_replacement_bus_counts_as_german_regional():
                "Bus 061360")
     flix = Leg("München", "Zürich", at(14, 30), at(18, 20), Mode.BUS, "FlixBus-eu", "Bus FlixBus X06")
     assert is_regional(alex) and not is_regional(flix)
+
+
+@pytest.mark.asyncio
+async def test_cd_train_asks_idos_eshop_even_when_arriva_sells_sjt():
+    import vyhledavac.hacks.idos_complete as ic
+    from vyhledavac.models import Fare, Journey, Leg, Mode
+    from vyhledavac.registry import load_plugins
+
+    load_plugins()
+    bus = Leg("Třeboň, aut.nádr.", "České Budějovice, aut.nádr.", at(13, 5), at(13, 45), Mode.BUS,
+              "ČSAD AUTOBUSY České Budějovice a.s.", "Bus 300")
+    ec = Leg("České Budějovice", "Praha hl.n.", at(13, 58), at(15, 39), Mode.TRAIN, "České dráhy, a.s.",
+             "EC 334 Jižní expres")
+    route = Journey(provider="Plánovač", legs=[bus, ec],
+                    raw={"plans": [[{"kind": "buy", "from": [0, 0], "to": [0, 1]},
+                                    {"kind": "buy", "from": [1, 0], "to": [1, 1]}]]})
+    flix = make_journey(provider="FlixBus", origin="Třeboň, aut.nádr.", destination="České Budějovice, aut.nádr.",
+                        dep=at(13, 5), arr=at(13, 45), price=24, line="Bus 300", mode=Mode.BUS)
+    arriva = make_journey(provider="Arriva", origin="České Budějovice", destination="Praha hl.n.",
+                          dep=at(13, 58), arr=at(15, 39), price=176, line="EC 334")
+    cd = make_journey(provider="IDS", origin="České Budějovice", destination="Praha hl.n.",
+                      dep=at(13, 58), arr=at(15, 39), price=176, line="EC 334")
+    cd.fares = [Fare(amount=176, currency="CZK", amount_czk=176, label="IDOS")]
+    asked = []
+
+    async def search(q, allow_browser=False, only=None):
+        asked.append((only, allow_browser))
+        if q.origin.startswith("Třeboň"):
+            return [flix]
+        return [cd] if only == ["IDS"] else [arriva]
+
+    query = SearchQuery(origin="Třeboň", destination="Praha", departure=at(13))
+    hack = ic.IdosCompleteHack()
+    hack._browser_locks = {}
+    found = await hack.find(query, [route], search)
+    assert found and found[0].price == 200
+    assert [s.provider for s in found[0].segments] == ["FlixBus", "ČD"]
+    assert not any(browser for _, browser in asked)
+    # student s ISIC: IDOS cenu ČD nedá – zbytečně se neptat; Arriva (SJT) s vysvětlením
+    from vyhledavac.models import Passenger
+
+    arriva.fares = [Fare(amount=176, currency="CZK", amount_czk=176, label="Arriva",
+                         tariff="SJT (Systém jednotného tarifu)")]
+    asked.clear()
+    student = SearchQuery(origin="Třeboň", destination="Praha", departure=at(13),
+                          passengers=(Passenger(age=19, cards=["isic"]),))
+    hack = ic.IdosCompleteHack()
+    hack._browser_locks = {}
+    found = await hack.find(student, [route], search)
+    assert [s.provider for s in found[0].segments] == ["FlixBus", "Arriva"]
+    assert ["IDS"] not in [only for only, _ in asked]
+    assert any("SJT – platí i ve vlaku ČD" in n for n in found[0].notes)
