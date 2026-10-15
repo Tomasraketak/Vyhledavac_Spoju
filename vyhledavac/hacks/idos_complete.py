@@ -204,7 +204,11 @@ class IdosCompleteHack(TravelHack):
                    tuple(sorted(kw.get("only") or ())))
             if key in asked:                 # tentýž dotaz znovu = odpověď z paměti enginu
                 return await search(q, **kw)
-            if time.monotonic() > min(until[0], hard_stop):
+            now = time.monotonic()
+            # po vyčerpání času na spoj už jen rychlé dotazy bez prohlížeče (FlixBus
+            # Mnichov → Curych), do celkového limitu hacku
+            slow = kw.get("allow_browser") or list(kw.get("only") or ()) == ["IDS"]
+            if now > hard_stop or (now > until[0] and slow):
                 if "time" not in warned:
                     warned.add("time")
                     trace(f"⚠ vyčerpán čas na spoj ({JOURNEY_TIME} s) – dál jen z už známých odpovědí")
@@ -622,17 +626,22 @@ class IdosCompleteHack(TravelHack):
                 locks = getattr(self, "_browser_locks", None) if allow_browser else None
                 if locks is not None:
                     # každý prodejce přes prohlížeč (ČD, ZSSK) má svou frontu – běží souběžně
+                    deadline_box = _DEADLINE.get()
+                    extended = [0.0]
+
                     async def ask(name: str) -> tuple[float, list[Journey]]:
                         asked_at = time.monotonic()
                         async with locks.setdefault(name, asyncio.Lock()):
                             wait = time.monotonic() - asked_at
+                            # fronta na prohlížeč není práce na spoji – posunout limit
+                            # hned, jinak by se po čekání dotaz už vůbec neodeslal
+                            if deadline_box is not None and wait > extended[0]:
+                                deadline_box[0] += wait - extended[0]
+                                extended[0] = wait
                             return wait, await search(query.leg_query(origin, destination, since),
                                                       allow_browser=True, only=[name])
                     answers = await asyncio.gather(*(ask(name) for name in only))
                     waited = max(w for w, _ in answers)
-                    deadline_box = _DEADLINE.get()
-                    if deadline_box is not None:
-                        deadline_box[0] += waited          # fronta na prohlížeč není práce na spoji
                     fresh = [j for _, found in answers for j in found]
                 else:
                     waited = 0.0
