@@ -36,7 +36,7 @@ from typing import Any
 
 from .. import geo
 from ..errors import BlockedError, StationNotFoundError, TransientProviderError
-from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery, Stop
+from ..models import DEFAULT_TZ, DiscountCard, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
 from .base import HttpProvider
@@ -50,6 +50,8 @@ PLACE_TTL = 30 * 24 * 3600
 #: Země, kde má smysl ptát se DB (cíl nebo začátek cesty).
 COUNTRIES = {"DE", "NL", "BE", "FR", "CH", "DK", "LU"}
 PRODUCTS = ["ICE", "EC_IC", "IR", "REGIONAL", "SBAHN", "BUS", "SCHIFF", "UBAHN", "TRAM", "ANRUFPFLICHTIG"]
+#: Volba „jen regionální vlaky“: bez ICE, IC/EC a IR.
+REGIONAL_PRODUCTS = ["REGIONAL", "SBAHN", "BUS", "SCHIFF", "UBAHN", "TRAM", "ANRUFPFLICHTIG"]
 
 
 #: Po zjištěné blokaci (403 i v prohlížeči) se DB tak dlouho neptáme.
@@ -156,10 +158,12 @@ class DbProvider(HttpProvider):
         data = await self._call("POST", "angebote/fahrplan", body={
             "abfahrtsHalt": origin["id"], "ankunftsHalt": destination["id"],
             "anfrageZeitpunkt": when, "ankunftSuche": "ABFAHRT", "klasse": "KLASSE_2",
-            "produktgattungen": PRODUCTS, "reisende": travellers(query.passengers),
+            "produktgattungen": REGIONAL_PRODUCTS if query.regional_only else PRODUCTS,
+            "reisende": travellers(query.passengers),
             "schnelleVerbindungen": True, "sitzplatzOnly": False, "bikeCarriage": False,
             "reservierungsKontingenteVorhanden": False, "nurDeutschlandTicketVerbindungen": False,
-            "deutschlandTicketVorhanden": False})
+            # cena s Deutschlandticketem: regionální úseky už zaplacené (jako na bahn.de)
+            "deutschlandTicketVorhanden": has_deutschlandticket(query.passengers)})
         journeys = []
         for raw in (data or {}).get("verbindungen") or []:
             journey = self.to_journey(raw)
@@ -179,6 +183,12 @@ class DbProvider(HttpProvider):
                                             label="DB", tariff=str(raw.get("angebotsPreisKlasse") or ""))]
             journey.fare_status = FareStatus.PRICED
         return journey
+
+
+def has_deutschlandticket(passengers: tuple[Passenger, ...]) -> bool:
+    """Mají Deutschlandticket všichni, kdo platí (děti do 6 let jezdí zdarma)?"""
+    payers = [p for p in passengers if p.age >= 6]
+    return bool(payers) and all(p.has(DiscountCard.DE_DEUTSCHLANDTICKET) for p in payers)
 
 
 def travellers(passengers: tuple[Passenger, ...]) -> list[dict[str, Any]]:

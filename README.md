@@ -157,6 +157,7 @@ python -m vyhledavac Bratislava Košice --providers ZSSK --card sk_free
 python -m vyhledavac Praha Brno --json        # strojově čitelný výstup
 python -m vyhledavac Třeboň Lublaň --hacks idos_complete --trace   # vypisuje, jak hledá lomy jízdenek
 python -m vyhledavac Rijeka Olomouc --trains --hacks idos_complete  # jen vlaky (IDOS „vlaky“, plánovač RAIL)
+python -m vyhledavac Praha Mnichov --dticket --regional   # mám Deutschlandticket, v DE/AT jen regionální vlaky
 
 # webové rozhraní (otevře prohlížeč)
 python -m vyhledavac.web
@@ -932,6 +933,30 @@ Státní svátky se počítají jako víkend (rakouské, u Bayern-Ticketu bavors
 Velikonoce se dopočítají). Děti do 6 let jezdí zdarma, rodinné jízdenky
 hlídají počet dospělých a dětí do 15 let. Ceny jsou z října 2026 – přesahy
 do sousedních zemí („vybrané přesahy“) hack nezná, ověřte je u svazu.
+
+### Deutschlandticket a jen regionální vlaky
+
+**Deutschlandticket** (`--dticket`, ve webu přepínač u cestujícího, v GUI
+zaškrtávátko): DB dostane „mám Deutschlandticket“ (`deutschlandTicketVorhanden`)
+a počítá cenu jen za úseky, na které předplatné neplatí. Hack `regional_pass`
+pak nabídne:
+
+* cestu po Německu jen regionálními vlaky, autobusy a MHD bez další jízdenky
+  (München → Augsburg RE místo jízdenky DB),
+* z Česka jízdenku ČD na první stanici v Německu (Furth im Wald, Bayerisch
+  Eisenstein, Schirnding, Marktredwitz, Bad Schandau) a dál s předplatným.
+
+Nabídne se jen, když ho mají všichni cestující od 6 let. Za hranicí platí
+jen na vybraných úsecích (hack zná Freilassing – Salzburg Hbf).
+
+**Jen regionální vlaky** (`--regional`, ve webu *Pokročilé možnosti*, v GUI
+zaškrtávátko): v Německu a Rakousku zůstanou jen spoje s vlaky, ve kterých
+platí Deutschlandticket, Einfach-Raus-Ticket a zemské jízdenky (RE, RB, S,
+ALX, REX, R, CJX …). Spoje s ICE, IC, EC, railjetem, WESTbahn nebo nočním
+vlakem po DE/AT vypadnou, jinde se spoje neomezují. DB se pak ptá jen na
+regionální produkty a shop ÖBB s filtrem „Nur Nahverkehr“, aby se mezi
+výsledky dostaly regionální spoje a nezůstal jen zbytek po rychlících
+(živě zatím neověřeno – z vývojového prostředí jsou DB i ÖBB blokované).
 
 ### Noční vlak s návazností (`night_train`)
 

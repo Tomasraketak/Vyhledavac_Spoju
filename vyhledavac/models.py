@@ -97,6 +97,7 @@ class DiscountCard(str, Enum):
     AT_VORTEILSCARD = "at_vorteilscard"
     DE_BAHNCARD_25 = "de_bahncard_25"
     DE_BAHNCARD_50 = "de_bahncard_50"
+    DE_DEUTSCHLANDTICKET = "de_deutschlandticket"   # předplatné: regionální spoje v Německu
 
 
 class FareCategory(str, Enum):
@@ -421,6 +422,10 @@ class SearchQuery:
     #: Zpáteční cesta: ``"day"`` = návrat tentýž den, ``"24h"`` = do 24 hodin,
     #: ``None`` = jen tam. Ke spojům se pak dopočítá cena tam i zpět (``round_trip``).
     round_trip: str | None = None
+    #: Jen regionální vlaky v Německu a Rakousku (ty, ve kterých platí
+    #: Deutschlandticket, Einfach-Raus-Ticket a zemské jízdenky) – žádné
+    #: ICE/IC/EC/RJ/NJ. Jinde se spoje neomezují.
+    regional_only: bool = False
 
     @property
     def trains_only(self) -> bool:

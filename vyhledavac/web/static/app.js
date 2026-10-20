@@ -59,10 +59,10 @@
     const saved = store.get('pax', null);
     if (Array.isArray(saved) && saved.length) {
       return saved.slice(0, MAX_PAX).map(p => ({
-        age: Math.max(0, Math.min(120, parseInt(p.age, 10) || 0)), isic: !!p.isic, skFree: !!p.skFree,
+        age: Math.max(0, Math.min(120, parseInt(p.age, 10) || 0)), isic: !!p.isic, skFree: !!p.skFree, dTicket: !!p.dTicket,
       }));
     }
-    return [{ age: store.get('age', 26), isic: store.get('isic', false), skFree: store.get('skFree', false) }];
+    return [{ age: store.get('age', 26), isic: store.get('isic', false), skFree: store.get('skFree', false), dTicket: false }];
   }
   // Předplatné IDS: [{pax: index cestujícího | 'all', system: 'PID', zones: 'P, 0, B'}]
   function loadPasses() {
@@ -88,6 +88,8 @@
     direct: false,
     buffer: 0,
     onlyPriced: store.get('onlyPriced', false),
+    // jen regionální vlaky v Německu a Rakousku – posílá se se hledáním (ptá se tak i DB a ÖBB)
+    regional: store.get('regional', false),
     pareto: store.get('pareto', true),
     sameDep: store.get('sameDep', true),   // skrýt horší spoje se stejným odjezdem
     sort: store.get('sort', 'earliest'),
@@ -281,8 +283,8 @@
     if (!providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
     const body = {
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
-      passengers: S.pax.map((p, i) => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree, passes: passesFor(i) })),
-      providers, hacks: [...S.hacksOn],
+      passengers: S.pax.map((p, i) => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree, dTicket: p.dTicket, passes: passesFor(i) })),
+      providers, hacks: [...S.hacksOn], regional: S.regional,
       roundTrip: fRet.value || null,
     };
     store.set('roundTrip', fRet.value);
@@ -549,6 +551,7 @@
         <span class="pax-cat">${esc(passengerCategory(p))}</span>
         ${paxSwitch('pax-isic', i, p.isic, 'ISIC')}
         ${paxSwitch('pax-sk', i, p.skFree, 'SK 100%')}
+        ${paxSwitch('pax-dt', i, p.dTicket, 'Deutschlandticket')}
         ${S.pax.length > 1 ? `<button type="button" class="btn btn-ghost pax-del" data-act="pax-del" data-key="${i}" aria-label="Odebrat cestujícího ${i + 1}">${icon('x', 16)}</button>` : ''}
       </div>`).join('');
     box.innerHTML = `<div class="adv-grid">
@@ -559,6 +562,7 @@
       <div class="adv-cell"><span class="adv-title">Slevy</span>
         <span class="adv-hint"><strong>ISIC</strong> – studentské jízdné do 26 let: RegioJet Student 18–25, ČD Junior se žákovským průkazem, FlixBus a OneTicket student, ZSSK karta ISIC, studentské jízdné integrovaných systémů.</span>
         <span class="adv-hint"><strong>SK 100%</strong> – bezplatná přeprava ve vlacích ZSSK pro registrované žáky a studenty do 26 let a seniory 62+. Ostatní dopravci ji neznají.</span>
+        <span class="adv-hint"><strong>Deutschlandticket</strong> – předplatné na regionální vlaky, autobusy a MHD v Německu: DB počítá cenu jen za dálkové úseky, hack Síťové jízdenky nabídne cestu přes Německo regionálními vlaky bez další jízdenky.</span>
         <span class="adv-hint">ZSSK a ÖBB umí cenu jen pro jednoho cestujícího; ÖBB vždy pro dospělého bez slevy.</span></div>
     </div>`;
   }
@@ -577,6 +581,8 @@
         ${sw('onlyPriced', S.onlyPriced, 'Jen spoje se známou cenou')}
         ${sw('sameDep', S.sameDep, 'Stejný odjezd: skrýt pozdější a dražší')}
         ${sw('pareto', S.pareto, 'Skrýt dražší i pomalejší')}</div>
+      <div class="adv-cell pax-cell"><span class="adv-title">Jen regionální vlaky</span>${sw('regional', S.regional, S.regional ? 'Zapnuto' : 'Vypnuto')}
+        <span class="adv-hint">V Německu a Rakousku jen vlaky, ve kterých platí Deutschlandticket, Einfach-Raus-Ticket a zemské jízdenky (RE, RB, S, REX, R, CJX …) – bez ICE, IC, EC, railjetů a nočních vlaků. Platí od příštího hledání.</span></div>
       ${renderPassesCell()}
     </div>`;
   }
@@ -952,6 +958,7 @@
     store.set('pax', S.pax);
     store.set('passes', S.passes);
     store.set('onlyPriced', S.onlyPriced);
+    store.set('regional', S.regional);
     store.set('pareto', S.pareto);
     store.set('sameDep', S.sameDep);
     store.set('sort', S.sort);
@@ -986,7 +993,7 @@
     },
     reset() { S.modes = [...ALL_GROUPS]; S.maxT = 'any'; S.direct = false; S.buffer = 0; S.onlyPriced = false; S.off.clear(); },
     'reset-all'() { ACTIONS.reset(); S.pareto = false; S.sameDep = false; },
-    'pax-add'() { if (S.pax.length < MAX_PAX) S.pax.push({ age: 26, isic: false, skFree: false }); },
+    'pax-add'() { if (S.pax.length < MAX_PAX) S.pax.push({ age: 26, isic: false, skFree: false, dTicket: false }); },
     'pax-del'(key) {
       const k = Number(key);
       if (S.pax.length <= 1) return;
@@ -1000,6 +1007,7 @@
     'pass-del'(key) { S.passes.splice(Number(key), 1); },
     'pax-isic'(key) { const p = S.pax[Number(key)]; if (p) p.isic = !p.isic; },
     'pax-sk'(key) { const p = S.pax[Number(key)]; if (p) p.skFree = !p.skFree; },
+    'pax-dt'(key) { const p = S.pax[Number(key)]; if (p) p.dTicket = !p.dTicket; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
     'prov-fast'() { S.providersOn = new Set(S.meta.providers.filter(p => !p.browser).map(p => p.name)); },
     'prov-region'(key) {

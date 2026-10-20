@@ -78,6 +78,7 @@ SERVER_FILTERS: list[Any] = [
     "deduplicate",
     "price_backfill",
     "same_trip",
+    "regional_only",                   # jen když hledání chce regionální vlaky
     ("limit", {"count": 120}),
 ]
 
@@ -374,7 +375,8 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
     passengers = tuple(_passenger(item if isinstance(item, dict) else {}) for item in raw)
     back = str(body.get("roundTrip") or "")
     return SearchQuery(origin=origin, destination=destination, departure=when,
-                       passengers=passengers, round_trip=back if back in ("day", "24h") else None)
+                       passengers=passengers, round_trip=back if back in ("day", "24h") else None,
+                       regional_only=bool(body.get("regional")))
 
 
 MAX_PASSENGERS = 9
@@ -388,7 +390,8 @@ def _passenger(item: dict[str, Any]) -> Passenger:
     if not 0 <= age <= 120:
         raise ValueError("Věk musí být mezi 0 a 120.")
     cards = tuple(card for card, on in ((DiscountCard.ISIC, item.get("isic")),
-                                        (DiscountCard.SK_FREE, item.get("skFree"))) if on)
+                                        (DiscountCard.SK_FREE, item.get("skFree")),
+                                        (DiscountCard.DE_DEUTSCHLANDTICKET, item.get("dTicket"))) if on)
     return Passenger(age=age, cards=cards, passes=_passes(item.get("passes")))
 
 

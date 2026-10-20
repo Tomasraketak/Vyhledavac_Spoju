@@ -51,6 +51,8 @@ OEBB_PROFILE = HafasProfile(
 
 # Bitová maska produktů: všechny druhy dopravy.
 ALL_PRODUCTS = 1023
+#: Bez railjetů/ICE (1), IC/EC (2, 4) a D/EN/NJ (8): regionální vlaky, S-Bahn, bus, loď, metro, tram.
+REGIONAL_PRODUCTS = 16 | 32 | 64 | 128 | 256 | 512
 #: Stejný spoj v HAFASu a v shopu se může o chvilku lišit (zaokrouhlení).
 MATCH_TOLERANCE = dt.timedelta(seconds=90)
 #: Kolik času smí zabrat zjišťování cen. Musí zůstat pod časovým limitem
@@ -139,7 +141,7 @@ class ObbProvider(HttpProvider):
             query.departure,
             count=int(self.options.get("count", 6)),
             passlist=True,
-            products=ALL_PRODUCTS,
+            products=REGIONAL_PRODUCTS if query.regional_only else ALL_PRODUCTS,
         )
         journeys = parse_connections(res, self.name)
         for journey in journeys:
@@ -154,7 +156,7 @@ class ObbProvider(HttpProvider):
             shop = OebbShop(self.name, self._direct_transport())
             try:
                 return await shop.search(query.origin, query.destination, query.departure,
-                                         pages=pages)
+                                         pages=pages, regional=query.regional_only)
             except BlockedError:
                 self._http_blocked = True
                 log.info("ÖBB: shop blokuje přímé dotazy, zkouším prohlížeč")
@@ -172,7 +174,8 @@ class ObbProvider(HttpProvider):
                 engine=self.options.get("engine", "chromium"),
             ))
         return await self._browser_shop.search(query.origin, query.destination,
-                                               query.departure, pages=pages)
+                                               query.departure, pages=pages,
+                                               regional=query.regional_only)
 
     def _direct_transport(self):
         """Přímé dotazy: s TLS otiskem Chromu, když je ``curl_cffi`` k dispozici."""

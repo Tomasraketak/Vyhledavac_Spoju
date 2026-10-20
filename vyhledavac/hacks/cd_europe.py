@@ -329,9 +329,8 @@ class RegionalPassHack(TravelHack):
                     total = head.price + price[1]
                     if not self.is_worth_it(total, baseline):
                         continue
-                    note = (f"🎟️ Jízdenka ČD do {entry} ({head.price:.0f} Kč) a dál {pass_.name} "
-                            f"za {price[0]:.2f} € (≈ {price[1]:.0f} Kč) – zbytek cesty jede jen "
-                            f"regionálními spoji ({_lines(legs)}).").replace(".00 €", " €")
+                    note = (f"🎟️ Jízdenka ČD do {entry} ({head.price:.0f} Kč) a dál {_paying(pass_, price)}"
+                            f" – zbytek cesty jede jen regionálními spoji ({_lines(legs)}).")
                     journey = combine(f"ČD + {pass_.name}", [head, self._ticket(query, pass_, legs, price)],
                                       notes=[note, self._warning(pass_)])
                     if journey is not None:
@@ -358,9 +357,10 @@ class RegionalPassHack(TravelHack):
                 if journey.price is not None and not self.is_worth_it(price[1], journey.price):
                     continue
                 was = journey.price if journey.price is not None else baseline
-                note = (f"🎟️ {pass_.name} za {price[0]:.2f} € (≈ {price[1]:.0f} Kč)"
+                paying = _paying(pass_, price)
+                note = (f"🎟️ {paying[0].upper()}{paying[1:]}"
                         + (f" místo {was:.0f} Kč" if was is not None else "")
-                        + f" – spoj jede jen regionálními spoji ({_lines(legs)}).").replace(".00 €", " €")
+                        + f" – spoj jede jen regionálními spoji ({_lines(legs)}).")
                 ticket = self._ticket(query, pass_, legs, price)
                 merged = combine(pass_.name, [ticket], notes=[note, self._warning(pass_)])
                 if merged is not None:
@@ -378,6 +378,13 @@ class RegionalPassHack(TravelHack):
                     return journey, rest
                 return None
         return None
+
+
+def _paying(pass_: geo.RegionalPass, price) -> str:
+    """„Freizeit-Ticket Steiermark za 30 € (≈ 759 Kč)“, u předplatného „s vaším Deutschlandticketem“."""
+    if pass_.card is not None:
+        return f"s vaším {pass_.name}em bez další jízdenky"
+    return f"{pass_.name} za {price[0]:.2f} € (≈ {price[1]:.0f} Kč)".replace(".00 €", " €")
 
 
 def _lines(legs) -> str:

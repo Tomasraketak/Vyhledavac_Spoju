@@ -139,6 +139,22 @@ class OnlyModes(Filter):
 
 
 @FILTERS.register()
+class RegionalOnly(Filter):
+    """Jen regionální vlaky v Německu a Rakousku (``SearchQuery.regional_only``
+    nebo ``enabled=True``): spoj s ICE/IC/EC/RJ/NJ po DE/AT vypadne."""
+
+    name = "regional_only"
+    label = "Jen regionální vlaky (DE, AT)"
+
+    def apply(self, journeys: list[Journey], query: SearchQuery) -> list[Journey]:
+        if not (query.regional_only or self.options.get("enabled")):
+            return journeys
+        from .. import geo
+
+        return [j for j in journeys if all(geo.is_regional_leg(leg) for leg in j.legs)]
+
+
+@FILTERS.register()
 class RequirePrice(Filter):
     """Jen spoje se známou cenou (pro řazení podle ceny)."""
 

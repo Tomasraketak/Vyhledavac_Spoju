@@ -40,7 +40,8 @@ def filter_spec(*, direct: bool = False, only_priced: bool = False,
     spec: list[Any] = [("departure_window", {"hours": 12})]
     if direct:
         spec.append(("max_transfers", {"limit": 0}))
-    spec += ["drop_sold_out", "deduplicate", "price_backfill", "same_trip"]
+    spec += ["drop_sold_out", "deduplicate", "price_backfill", "same_trip",
+             "regional_only"]                 # řídí se SearchQuery.regional_only
     if only_priced:
         spec.append("require_price")
     if pareto:

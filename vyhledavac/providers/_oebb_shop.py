@@ -426,8 +426,9 @@ class OebbShop:
         return stations[idx]
 
     async def search(self, origin: str, destination: str, when: dt.datetime,
-                     *, pages: int = 2) -> list[ShopOffer]:
-        """Spoje od ``when`` i s cenami. ``pages`` × cca 5 spojů."""
+                     *, pages: int = 2, regional: bool = False) -> list[ShopOffer]:
+        """Spoje od ``when`` i s cenami. ``pages`` × cca 5 spojů; ``regional`` = jen
+        regionální vlaky (filtr „Nur Nahverkehr“ shopu)."""
         headers = await self._headers()
         start, end = await self.station(origin), await self.station(destination)
         when_utc = when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -447,7 +448,7 @@ class OebbShop:
             "travelActionId": action_id,
             "sortType": "DEPARTURE",
             "filter": {"bikes": False, "changeTime": 0, "direct": False,
-                       "regionaltrains": False, "trains": False, "wheelchair": False},
+                       "regionaltrains": regional, "trains": False, "wheelchair": False},
         }
         offers: dict[str, ShopOffer] = {}
         last_id: str | None = None

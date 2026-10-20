@@ -399,6 +399,40 @@ def is_day_off(day: dt.date, country: str) -> bool:
     return day.weekday() >= 5 or day in holidays(day.year, country)
 
 
+# ---- regionální vlaky v Německu a Rakousku -------------------------------------------
+#: Druhy vlaků, ve kterých platí regionální jízdenky (Deutschlandticket, Einfach-Raus,
+#: zemské jízdenky): Rakousko, Německo (i soukromí dopravci) a české Os/Sp/R přes hranici.
+REGIONAL_TRAINS = frozenset({
+    "R", "REX", "S", "CJX", "IR",
+    "RB", "RE", "ALX", "AG", "BRB", "MEX", "OPB", "ERB", "IRE", "M", "FEX", "RS", "BOB", "ERX",
+    "EB", "HLB", "NWB", "VIA", "STB", "WFB", "ME", "EVB", "NBE", "SWE", "TLX", "TL", "ABR", "RT",
+    "BLB", "OS", "SP"})
+#: Dálkové vlaky – v Německu a Rakousku je volba „jen regionální vlaky“ vyřadí.
+LONG_DISTANCE_TRAINS = frozenset({
+    "ICE", "IC", "EC", "ECE", "RJ", "RJX", "NJ", "EN", "D", "TGV", "FLX", "WB", "ES", "EST",
+    "IRX", "ICN", "EX", "RX", "SC", "LE", "RGJ", "NIGHTJET", "WESTBAHN"})
+_REGIONAL_COUNTRIES = ("DE", "AT")
+
+
+def train_category(line: str) -> str:
+    """Druh vlaku z označení linky: „REX 7“ → „REX“, „ICE123“ → „ICE“."""
+    return (re.match(r"[A-Za-zäöüÄÖÜ]+", line or "") or [""])[0].upper()
+
+
+def is_regional_leg(leg) -> bool:
+    """Projde úsek volbou „jen regionální vlaky“? Autobusy, MHD a pěší přesuny ano,
+    vlak v Německu/Rakousku jen regionální; mimo DE/AT se nehlídá."""
+    if leg.mode.value != "train":
+        return True
+    countries = {country_of(leg.origin), country_of(leg.destination)}
+    if not countries & set(_REGIONAL_COUNTRIES):
+        return True
+    category = train_category(leg.line)
+    if category in REGIONAL_TRAINS:
+        return True
+    return category not in LONG_DISTANCE_TRAINS and category not in ("", "VLAK", "ZUG")
+
+
 # ---- regionální síťové jízdenky --------------------------------------------------
 @dataclass(frozen=True)
 class RegionalPass:
@@ -426,11 +460,20 @@ class RegionalPass:
     until: int = 3                    # platí do této hodiny následujícího dne (0 = do půlnoci)
     hours: int | None = None          # místo kalendářního dne platí N hodin od začátku
     local: bool = False               # i autobusy, tramvaje a metro v oblasti
+    card: str | None = None           # předplatné (``DiscountCard``): kdo ho má, jede zdarma
+    beyond: tuple[str, ...] = ()      # klíčová slova stanic za hranicí, kam jízdenka ještě platí
     validity: str = "ve všední dny od 9:00, o víkendu celý den"
 
     def price(self, passengers) -> Decimal | None:
         """Cena v EUR za skupinu; ``passengers`` = počet dospělých nebo ``Passenger``-y.
         Děti do 6 let jezdí zdarma a nepočítají se. ``None`` = skupina se nevejde."""
+        if self.card is not None:                             # předplatné (Deutschlandticket)
+            if isinstance(passengers, int):
+                return None
+            payers = [p for p in passengers if p.age >= 6]
+            if not payers or not all(self.card in {c.value for c in p.cards} for p in payers):
+                return None
+            return Decimal(0)
         ages = [26] * passengers if isinstance(passengers, int) else [p.age for p in passengers]
         ages = [a for a in ages if a >= 6]
         children = sum(1 for a in ages if a < 15)
@@ -460,6 +503,8 @@ class RegionalPass:
 
     def valid_until(self, start: dt.datetime, end: dt.datetime) -> bool:
         """Stihne se cesta, než jízdenka propadne?"""
+        if self.card is not None:
+            return True                                       # měsíční předplatné
         if self.hours is not None:
             return end - start <= dt.timedelta(hours=self.hours)
         midnight = dt.datetime.combine(start.date() + dt.timedelta(days=1), dt.time(),
@@ -467,11 +512,14 @@ class RegionalPass:
         return end <= midnight + dt.timedelta(hours=self.until)
 
     def train_ok(self, line: str) -> bool:
-        prefix = (re.match(r"[A-Za-zäöü]+", line or "") or [""])[0].upper()
-        return prefix in self.categories
+        return train_category(line) in self.categories
 
     def covers(self, destination: str) -> bool:
         """Leží stanice v oblasti jízdenky?"""
+        if self.beyond:
+            n = " " + normalize(destination) + " "
+            if any(f" {w} " in n for w in self.beyond):
+                return True
         if self.states:
             return state_of(destination) in self.states
         if not self.area:
@@ -541,6 +589,15 @@ PASSES = [
         first=Decimal(34), extra=Decimal(10), min_people=1, max_people=5,
         url="https://www.bahn.de/angebot/regio/laender-tickets/bayern-ticket",
         validity="ve všední dny od 9:00, o víkendu a svátcích celý den, do 3:00 dalšího dne"),
+    RegionalPass(
+        "Deutschlandticket", "DE",
+        entries=("Furth im Wald", "Bayerisch Eisenstein", "Schirnding", "Marktredwitz", "Bad Schandau"),
+        area=(), categories=tuple(sorted(REGIONAL_TRAINS - {"R", "REX", "CJX", "IR", "OS", "SP"})),
+        first=Decimal(0), extra=Decimal(0), min_people=1, max_people=9, weekday_from=None,
+        local=True, card="de_deutschlandticket", beyond=("salzburg",),
+        url="https://www.bahn.de/angebot/regio/deutschland-ticket",
+        validity="vaše předplatné – regionální vlaky (RB, RE, S, ALX …), autobusy a MHD v celém "
+                 "Německu kdykoli, za hranici jen na vybrané úseky (Freilassing – Salzburg Hbf)"),
     # ---- rakouské zemské jízdenky na den (ceny 2026, ověřte u dopravce) -----------
     RegionalPass(
         "VOR Freizeitticket", "AT", entries=_ENTRIES_NO, area=(), states=("N", "B"),

@@ -39,6 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--time", help="čas odjezdu HH:MM (výchozí teď)")
     parser.add_argument("--age", type=int, default=26, help="věk cestujícího")
     parser.add_argument("--isic", action="store_true", help="mám ISIC")
+    parser.add_argument("--dticket", action="store_true",
+                        help="mám Deutschlandticket (regionální vlaky, bus a MHD v Německu)")
     parser.add_argument("--card", action="append", default=[],
                         help="další slevová karta (lze opakovat)")
     parser.add_argument("--providers", nargs="+", default=DEFAULT_PROVIDERS,
@@ -68,6 +70,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="podrobnější log (-vv pro ladění)")
     parser.add_argument("--trains", action="store_true",
                         help="jen vlaky (čistě vlakové spojení, bez autobusů)")
+    parser.add_argument("--regional", action="store_true",
+                        help="v Německu a Rakousku jen regionální vlaky (RE, RB, S, REX, R …), "
+                             "ve kterých platí Deutschlandticket a Einfach-Raus-Ticket")
     parser.add_argument("--zpet", choices=["day", "24h"], default=None,
                         help="cena i za cestu zpět: day = tentýž den, 24h = do 24 hodin "
                              "(dvě jednosměrné jízdenky, nebo celodenní jízdenka IDS)")
@@ -121,6 +126,7 @@ def build_filters(args: argparse.Namespace) -> list[Any]:
         # dopravců a backfill pak doplní, co po ní zbylo bez ceny.
         spec.append("price_backfill")
     spec.append("same_trip")
+    spec.append("regional_only")             # řídí se SearchQuery.regional_only
     if args.only_priced:
         spec.append("require_price")
     if args.pareto:
@@ -133,6 +139,8 @@ def build_passenger(args: argparse.Namespace) -> Passenger:
     cards: list[DiscountCard] = []
     if args.isic:
         cards.append(DiscountCard.ISIC)
+    if getattr(args, "dticket", False):
+        cards.append(DiscountCard.DE_DEUTSCHLANDTICKET)
     for raw in args.card:
         try:
             cards.append(DiscountCard(raw.lower()))
@@ -271,6 +279,7 @@ async def run(args: argparse.Namespace) -> int:
         max_results=args.limit,
         modes=frozenset({Mode.TRAIN}) if args.trains else None,
         round_trip=args.zpet,
+        regional_only=args.regional,
     )
 
     engine = SearchEngine.build(

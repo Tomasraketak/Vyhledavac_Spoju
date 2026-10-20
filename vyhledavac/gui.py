@@ -203,6 +203,12 @@ class App(tk.Tk):
         self.var_isic = tk.BooleanVar(value=False)
         tk.Checkbutton(opts, text="ISIC", variable=self.var_isic, bg=CARD,
                        activebackground=CARD, font=("Segoe UI", 9)).pack(anchor=tk.W)
+        self.var_dticket = tk.BooleanVar(value=False)
+        tk.Checkbutton(opts, text="Deutschlandticket", variable=self.var_dticket, bg=CARD,
+                       activebackground=CARD, font=("Segoe UI", 9)).pack(anchor=tk.W)
+        self.var_regional = tk.BooleanVar(value=False)
+        tk.Checkbutton(opts, text="Jen regionální vlaky (DE, AT)", variable=self.var_regional, bg=CARD,
+                       activebackground=CARD, font=("Segoe UI", 9)).pack(anchor=tk.W)
 
         self.btn_search = tk.Button(
             inner, text="Hledat", command=self.start_search, bg=ACCENT, fg="white",
@@ -374,9 +380,12 @@ class App(tk.Tk):
             messagebox.showwarning("Neplatné datum", str(exc))
             return None
 
-        cards = (DiscountCard.ISIC,) if self.var_isic.get() else ()
+        cards = tuple(card for card, on in ((DiscountCard.ISIC, self.var_isic.get()),
+                                            (DiscountCard.DE_DEUTSCHLANDTICKET, self.var_dticket.get()))
+                      if on)
         return SearchQuery(origin=origin, destination=destination, departure=when,
-                           passengers=(Passenger(age=age, cards=cards),))
+                           passengers=(Passenger(age=age, cards=cards),),
+                           regional_only=self.var_regional.get())
 
     def start_search(self) -> None:
         if self.searching:
