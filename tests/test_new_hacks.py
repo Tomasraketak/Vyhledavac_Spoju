@@ -134,8 +134,9 @@ def test_same_train_or_transfer():
 
 # ---- regionální jízdenky -----------------------------------------------------------
 def test_regional_pass_rules():
-    era, bayern = geo.PASSES
-    assert era.price(1) is None and era.price(3) == Decimal(46)          # jen skupina 2–5
+    era, bayern = geo.PASSES[:2]
+    assert era.price(1) is None and era.price(3) == Decimal(42)          # jen skupina 2–5
+    assert [era.price(n) for n in (2, 4, 5, 6)] == [Decimal(38), Decimal(46), Decimal(50), None]
     assert bayern.price(1) == Decimal(34) and bayern.price(3) == Decimal(54)
     assert era.train_ok("REX 7") and not era.train_ok("RJX 66")
     assert bayern.train_ok("ALX 84110") and not bayern.train_ok("EC 360")

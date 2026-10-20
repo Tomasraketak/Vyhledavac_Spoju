@@ -126,7 +126,8 @@ def test_country_from_route_context():
              Stop("Ljubljana", arrival=at(23, 18))]
     d39 = Leg("Villach Hbf", "Ljubljana", at(21, 38), at(23, 18), mode=Mode.TRAIN, line="D 39", stops=stops)
     assert idos_complete._run_countries([d39]) == {"AT", "SI"}
-    assert idos_complete._split_points([d39]) == [(0, 2)]          # lom v Jesenicích (Rosenbach neznáme)
+    # lom v Rosenbachu (poslední v Rakousku, z geo.AT_STATES) i v Jesenicích (první ve Slovinsku)
+    assert idos_complete._split_points([d39]) == [(0, 1), (0, 2)]
 
 
 def test_cd_sells_far_abroad_and_city_names():

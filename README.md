@@ -904,11 +904,34 @@ hack na to upozorní; vystoupení dřív je na riziko cestujícího.
 
 ### Regionální síťové jízdenky (`regional_pass`)
 
-Jízdenka ČD na první stanici za hranicí a dál **Einfach-Raus-Ticket**
-(Rakousko, 46 € pro 2–5 osob, jen R/REX/S/CJX) nebo **Bayern-Ticket**
-(34 € + 10 € za další osobu, RB/RE/S/ALX…), obojí ve všední dny od 9:00.
-Nabídne se jen, když zbytek nalezeného spoje jede výhradně vlaky, ve kterých
+**Z Česka:** jízdenka ČD na první stanici za hranicí a dál síťová jízdenka –
+**Einfach-Raus-Ticket** (celé Rakousko, 2–5 osob 38/42/46/50 €, jen
+R/REX/S/CJX), **Bayern-Ticket** (34 € + 10 € za další osobu, RB/RE/S/ALX…),
+**VOR Freizeitticket** (Dolní Rakousko a Burgenland 19,90 €, s Vídní 29,60 €
+za osobu, jen o víkendu a svátcích; vstup Gmünd, Hohenau, Bernhardsthal,
+Retz, Laa) nebo **Freizeit-Ticket OÖ** (Horní Rakousko přes Summerau).
+Nabídne se jen, když zbytek nalezeného spoje jede výhradně spoji, ve kterých
 síťová jízdenka platí (ne RJ/IC/EC/ICE – např. EC Praha – Mnichov ne).
+
+**Cesta celá v Rakousku** (Graz → Leoben v sobotu): místo jízdenky ÖBB
+zemská jízdenka na den, když spoj jede jen regionálními vlaky/autobusy
+a nevyjede z oblasti (podle spolkových zemí stanic, `geo.AT_STATES`):
+
+| Jízdenka | Cena | Kdy | Oblast |
+|---|---|---|---|
+| Freizeit-Ticket Steiermark | 15 € / os. | So, Ne, svátky 0–24 h | Štýrsko; S, R, REX, IR, bus |
+| Freizeit-Ticket Kärnten | 14,90 € (dítě 7,90 €) | So, Ne, svátky do 3:00 | Korutany; S, REX, R, IR, Kärntner Linien |
+| VOR Freizeitticket (Plus) | 19,90 € (29,60 € s Vídní) / os. | So, Ne, svátky | Dolní Rakousko, Burgenland (+ Vídeň) |
+| Freizeit-Ticket OÖ | 26,50 € / 2 dosp. + 4 děti | všední dny od 9:00, víkend celý | Horní Rakousko |
+| Freizeit-Ticket Salzburg | 25 € / 2 dosp. + 4 děti | celý den do 3:00 | Salcbursko |
+| Tagesticket Tirol 2Plus | 42,60 € / 2 dosp. + 3 děti | celý den | Tyrolsko (VVT) |
+| VMOBIL MAXIMO | 18,40 € / os. | 24 h | celé Vorarlbersko |
+| Einfach-Raus-Ticket | 38–50 € / 2–5 os. | všední dny od 9:00, víkend celý | celé Rakousko, jen vlaky |
+
+Státní svátky se počítají jako víkend (rakouské, u Bayern-Ticketu bavorské;
+Velikonoce se dopočítají). Děti do 6 let jezdí zdarma, rodinné jízdenky
+hlídají počet dospělých a dětí do 15 let. Ceny jsou z října 2026 – přesahy
+do sousedních zemí („vybrané přesahy“) hack nezná, ověřte je u svazu.
 
 ### Noční vlak s návazností (`night_train`)
 
@@ -931,7 +954,8 @@ před odjezdem bývají levné kategorie vyprodané (sedadlo 170 €).
 ### Šetrnost k dopravcům
 
 Hacky běží v pořadí od levných po ty s prohlížečem (IDS, lomená jízdenka,
-přestup v Praze/Brně, skryté město, Včasná Evropa, síťové jízdenky). Každý
+přestup v Praze/Brně, skryté město, Včasná Evropa, síťové jízdenky – ty se
+na ČD ptají nejvýš na dvě vstupní stanice, uvnitř Rakouska vůbec). Každý
 se ptá jen tehdy, když trasa podmínky splňuje (zastávka na trase, země,
 kategorie vlaků), dílčí dotazy se sdílí přes cache a dotaz na úsek jde jen
 na dopravce, kteří ho můžou prodat (`only=["ČD"]` …). Na ČD se každý hack

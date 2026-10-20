@@ -13,8 +13,11 @@ a ten se musí použít v celé jeho trase; slevy pro děti a studenty jen v ČR
    Linz): jízdenka ČD až do Horního Dvořiště (přes Linz) nebo Břeclavi
    (přes Vídeň) bývá levnější než jízdenka ÖBB; vystoupíte dřív.
 3. ``regional_pass`` – jízdenka ČD na první stanici za hranicí a dál
-   Einfach-Raus-Ticket (Rakousko, 2–5 osob) nebo Bayern-Ticket, pokud zbytek
-   cesty jede jen regionálními vlaky, ve kterých síťová jízdenka platí.
+   Einfach-Raus-Ticket (Rakousko, 2–5 osob), Bayern-Ticket, VOR
+   Freizeitticket nebo Freizeit-Ticket OÖ, pokud zbytek cesty jede jen
+   regionálními spoji, ve kterých síťová jízdenka platí; cesta celá
+   v Rakousku (Graz → Leoben v sobotu) místo jízdenky ÖBB zemskou
+   jízdenkou na den (Steiermark, Kärnten, Salzburg, Tirol 2Plus, VMOBIL …).
 
 Šetrnost: každý hack se ptá ČD (prohlížeč) nejvýš jednou nebo dvakrát
 a jen tehdy, když trasa podmínky opravdu splňuje (zastávka na trase,
@@ -265,63 +268,120 @@ async def _until_border_train(client, candidate: Journey, destination: str) -> J
 @HACKS.register()
 class RegionalPassHack(TravelHack):
     name = "regional_pass"
-    label = "ČD za hranici + Einfach-Raus-Ticket / Bayern-Ticket (jen regionální vlaky)"
+    label = ("Síťové jízdenky: ČD za hranici + Einfach-Raus / Bayern-Ticket / VOR, "
+             "v Rakousku zemské Freizeit-Tickety (jen regionální vlaky)")
     default_min_saving_pct = 5.0
+
+    #: Nejvýš tolik různých vstupních stanic se ptáme ČD (prohlížeč).
+    MAX_ENTRIES = 2
 
     async def find(self, query: SearchQuery, journeys: Sequence[Journey],
                    search: SearchFn) -> list[Journey]:
-        if geo.country_of(query.origin) != "CZ":
-            return []
-        people = len(query.passengers)
         baseline = self.baseline_price(journeys)
+        if geo.country_of(query.origin) == "CZ":
+            found = await self._from_czechia(query, journeys, search, baseline)
+        else:
+            found = self._inside(query, journeys, baseline)
+        return _best_per_departure(found)
+
+    def _priced(self, query: SearchQuery, pass_: geo.RegionalPass):
+        price_eur = pass_.price(query.passengers)
+        if price_eur is None:
+            return None
+        pass_czk = get_converter().to_czk(price_eur, "EUR")
+        return None if pass_czk is None else (price_eur, pass_czk)
+
+    def _ticket(self, query: SearchQuery, pass_: geo.RegionalPass, legs, price) -> Journey:
+        price_eur, pass_czk = price
+        return Journey(provider=pass_.name, legs=list(legs), fare_status=FareStatus.PRICED,
+                       fares=[Fare(amount=price_eur, currency="EUR", amount_czk=pass_czk,
+                                   label=pass_.name, tariff=f"{len(query.passengers)} os.")],
+                       deep_link=pass_.url)
+
+    @staticmethod
+    def _warning(pass_: geo.RegionalPass) -> str:
+        return (f"⚠️ {pass_.name} ({pass_.area_label}): {pass_.validity}. "
+                f"Neplatí v RJ/RJX/IC/EC/ICE/NJ ani u WESTbahn; ceny a přesahy ověřte na {pass_.url}.")
+
+    async def _from_czechia(self, query: SearchQuery, journeys: Sequence[Journey],
+                            search: SearchFn, baseline: Decimal | None) -> list[Journey]:
+        """Jízdenka ČD na první stanici za hranicí, dál síťová jízdenka."""
         found: list[Journey] = []
-        asked = 0
+        heads_at: dict[str, list[Journey]] = {}
         for pass_ in geo.PASSES:
-            price_eur = pass_.price(people)
-            if price_eur is None or not pass_.covers(query.destination):
-                continue
-            pass_czk = get_converter().to_czk(price_eur, "EUR")
-            if pass_czk is None:
+            price = self._priced(query, pass_)
+            if price is None or not pass_.entries or not pass_.covers(query.destination):
                 continue
             for entry in pass_.entries:
                 plans = [p for p in (self._tail(j, entry, pass_) for j in journeys) if p]
-                if not plans or asked >= 2:
+                if not plans:
                     continue
-                asked += 1
-                heads = [j for j in await search(query.leg_query(query.origin, entry),
-                                                 allow_browser=True, only=[CD]) if j.price is not None]
+                if entry not in heads_at:
+                    if len(heads_at) >= self.MAX_ENTRIES:
+                        continue
+                    heads_at[entry] = [j for j in await search(query.leg_query(query.origin, entry),
+                                                               allow_browser=True, only=[CD])
+                                       if j.price is not None]
                 for base, legs in plans:
-                    head = _cheapest_arriving(heads, legs[0].departure)
+                    head = _cheapest_arriving(heads_at[entry], legs[0].departure)
                     if head is None:
                         continue
-                    total = head.price + pass_czk
+                    total = head.price + price[1]
                     if not self.is_worth_it(total, baseline):
                         continue
-                    rest = Journey(provider=pass_.name, legs=legs, fare_status=FareStatus.PRICED,
-                                   fares=[Fare(amount=price_eur, currency="EUR", amount_czk=pass_czk,
-                                               label=pass_.name, tariff=f"{people} os.")],
-                                   deep_link=pass_.url)
                     note = (f"🎟️ Jízdenka ČD do {entry} ({head.price:.0f} Kč) a dál {pass_.name} "
-                            f"za {price_eur:.0f} € (≈ {pass_czk:.0f} Kč) – zbytek cesty jede jen "
-                            f"regionálními vlaky ({', '.join(sorted({l.line.split()[0] for l in legs}))}).")
-                    warn = (f"⚠️ {pass_.name} platí jen v regionálních vlacích "
-                            f"({', '.join(pass_.categories)}), ve všední dny od 9:00; ne v RJ/IC/EC/ICE.")
-                    journey = combine(f"ČD + {pass_.name}", [head, rest], notes=[note, warn])
+                            f"za {price[0]:.2f} € (≈ {price[1]:.0f} Kč) – zbytek cesty jede jen "
+                            f"regionálními spoji ({_lines(legs)}).").replace(".00 €", " €")
+                    journey = combine(f"ČD + {pass_.name}", [head, self._ticket(query, pass_, legs, price)],
+                                      notes=[note, self._warning(pass_)])
                     if journey is not None:
                         found.append(journey)
-        return _best_per_departure(found)
+        return found
+
+    def _inside(self, query: SearchQuery, journeys: Sequence[Journey],
+                baseline: Decimal | None) -> list[Journey]:
+        """Cesta celá uvnitř oblasti síťové jízdenky – místo jízdenky ÖBB koupit tu."""
+        found: list[Journey] = []
+        for pass_ in geo.PASSES:
+            if not pass_.covers(query.origin) or not pass_.covers(query.destination):
+                continue
+            price = self._priced(query, pass_)
+            if price is None or not self.is_worth_it(price[1], baseline):
+                continue
+            for journey in journeys:
+                if journey.is_hack or not journey.legs:
+                    continue
+                legs = journey.legs
+                if not (pass_.covers_legs(legs) and pass_.valid_at(legs[0].departure)
+                        and pass_.valid_until(legs[0].departure, legs[-1].arrival)):
+                    continue
+                if journey.price is not None and not self.is_worth_it(price[1], journey.price):
+                    continue
+                was = journey.price if journey.price is not None else baseline
+                note = (f"🎟️ {pass_.name} za {price[0]:.2f} € (≈ {price[1]:.0f} Kč)"
+                        + (f" místo {was:.0f} Kč" if was is not None else "")
+                        + f" – spoj jede jen regionálními spoji ({_lines(legs)}).").replace(".00 €", " €")
+                ticket = self._ticket(query, pass_, legs, price)
+                merged = combine(pass_.name, [ticket], notes=[note, self._warning(pass_)])
+                if merged is not None:
+                    found.append(merged)
+        return found
 
     @staticmethod
     def _tail(journey: Journey, entry: str, pass_: geo.RegionalPass):
-        """Úseky spoje od vstupní stanice dál – jen když všechny jedou regionálními vlaky."""
+        """Úseky spoje od vstupní stanice dál – jen když je celé pokryje síťová jízdenka."""
         for i, leg in enumerate(journey.legs):
             if matches_station(entry, leg.origin):
                 rest = journey.legs[i:]
-                if all(pass_.train_ok(l.line) for l in rest if l.mode.value != "walk") \
-                        and pass_.valid_at(rest[0].departure):
+                if pass_.covers_legs(rest) and pass_.valid_at(rest[0].departure) \
+                        and pass_.valid_until(rest[0].departure, rest[-1].arrival):
                     return journey, rest
                 return None
         return None
+
+
+def _lines(legs) -> str:
+    return ", ".join(sorted({(l.line or "?").split()[0] for l in legs if l.mode.value != "walk"}))
 
 
 # ---- pomůcky ---------------------------------------------------------------------
