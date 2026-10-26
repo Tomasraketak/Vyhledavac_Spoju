@@ -118,8 +118,8 @@ class SearchSession:
                             and not classes[name].multi_passenger)
             if single:
                 self._problem(", ".join(single),
-                              "umí cenu jen pro jednoho cestujícího – ukazuje cenu za prvního "
-                              "z nich, ne za celou skupinu.", "soft")
+                              "umí cenu jen pro jednoho cestujícího – za skupinu ji dopočítávám "
+                              "(děti odhadem); u ZSSK se smíšenou skupinou cenu neukazuji.", "soft")
         for name in unknown or ():
             self._problem(name, "tento server dopravce nezná – nejspíš běží starší verze "
                                 "programu. Zavřete všechna okna aplikace a spusťte ji znovu.", "error")

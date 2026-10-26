@@ -373,8 +373,18 @@ FlixBus 238 → 123 Kč, OneTicket 537 → 268 Kč, ZSSK Bratislava → Košice
 Když se slevu u prohlížečového dopravce nepodaří nastavit, program to
 napíše žlutě u dopravce – nikdy tiše neukáže cenu za dospělého.
 
-² ÖBB počítá slevy (Vorteilscard, děti) až v košíku; program ukáže cenu
-za dospělého a upozorní na to.
+² ÖBB počítá slevy (Vorteilscard, děti) až v košíku; e-shop vrací cenu
+za jednoho dospělého. Pro skupinu ji program dopočítá: dospělí, senioři
+i studenti platí u ÖBB bez karty plnou cenu, děti 6–14 let polovic, do 6 let
+zdarma (odhad – přesně až v košíku). Stejně Koleo (PKP, děti do 4 let zdarma).
+ZSSK umí cenu jen za prvního cestujícího – u skupiny různých lidí ji program
+raději neukáže, než aby byla nízká. SBB počítá skupinu správně samo.
+
+**Skupina a různé slevy:** každá jízdenka se počítá za všechny cestující
+(senioři 65+, studenti s ISIC a děti mají v IDS i ve vlacích ČD/SJT 50 %).
+Rozdělení cesty mezi jízdenky (kde končí IDS, kde začíná prodejce) se volí
+pro celou skupinu dohromady – u slev ve stejném poměru vyjde pro všechny
+stejně.
 
 ---
 
@@ -610,6 +620,51 @@ Co zůstává bez ceny: vlaky, které online prodává jen DB (ICE 224 Mnichov �
 Amsterdam – ÖBB ho vrací bez ceny), osobní vlaky Kolejí Śląskich Bohumín →
 Katovice (přes hranici je neprodá Koleo ani e-shop IDOS) a dlouhé kombinace
 FlixBus + DB + SNCF, na které v limitu 3 minut nezbude čas.
+
+### Nejlevnější skladba jízdenek (`ticketplan.py`)
+
+Hacky skládají cenu spoje po kusech a o každém kusu rozhodují zvlášť. Celek
+pak nemusel být nejlevnější: Třeboň → Mariánské Lázně (skupina dvou seniorů,
+dvou dospělých a studenta) vyšla IDESKA do Strakonic 345 Kč + IDPK do Plzně
+294 Kč + SJT z Plzně 602 Kč = 1241 Kč. Když se v Plzni přesedne na spěšný vlak
+místo IC, platí v něm IDPK – a síťová jízdenka IDPK ze Strakonic (240 minut)
+pokryje celý zbytek cesty: **639 Kč**.
+
+Nakonec se proto každé spojení rozloží na uzly (zastávky; přestup je jeden
+uzel) a dynamickým programováním se vybere **nejlevnější pokrytí celé cesty**
+ze všech kandidátů:
+
+* jízdenky, které hack už našel (prodejci, e-shop IDOS, tarif IDS),
+* jízdenky IDS podle tarifu na **libovolný souvislý kus**, kde systém platí –
+  po jízdách: vlak ČD či SJT kategorie, ve které IDS platí (osobní, spěšný,
+  rychlík; IC/Ex jen IDESKA; EC Jižní expres jen v jižních Čechách),
+  autobus linky systému, MHD; jízda se musí vejít do platnosti jízdenky
+  a lom smí být jen v zastávce, kde vůz staví,
+* **odpovědi prodejců, které už přišly**, přesně na kus mezi dvěma uzly
+  (tentýž odjezd i příjezd) – i jízdenky e-shopu IDOS (ČD) na část jiné trasy
+  (Praha → Offenburg nočním vlakem 1394 Kč místo 7212 Kč u ÖBB) a částečné
+  jízdenky ÖBB (jen München → Zürich).
+
+Žádné nové dotazy na dopravce – jen ceny online tarifů IDS (VDV, IREDO, IDOL,
+DÚK, IDZK), které ještě nejsou v paměti. Jízdenka e-shopu na víc oddělených
+úseků (cena jen u prvního) se nikdy nerozdělí.
+
+Kde se to projeví:
+
+* **varianty se zbytkem cesty** (`idos_complete`): každý navazující spoj se
+  ocení nejlevnější skladbou – spěšný vlak s IDS vyhraje nad dražším IC,
+* **spoje s přestupy od ČD, OneTicketu a Arrivy** (`ids_ticket`): řetěz
+  systémů IDS po jízdách (IDESKA do Strakonic, IDPK do Plzně) a zbytek
+  u prodejce (SJT na IC z Plzně) – dřív jen jeden systém a zbytek u ČD,
+* **kus, který žádný e-shop neprodá** (regionální autobus z plánovače),
+  doplní tarif IDS – spoj má celou cenu místo „cenu zná jen část jízdenek“.
+
+Lomená jízdenka (`split_ticket`) na dlouhé cestě zkouší z každého města jen
+jednu stanici (Děčín hl. n. místo tří děčínských zastávek), stanice na hranici
+i **velká města na trase** (Drážďany, Frankfurt, Kolín) a nabídne kombinaci
+i tehdy, když je levnější jen autobus v jiný čas – stačí, že ji žádný nalezený
+spoj nepřekoná zároveň cenou i časem. Do ciziny se e-shopu IDOS (ČD) ptá
+souběžně s ostatními prodejci i tehdy, když tentýž vlak prodá ÖBB.
 
 ### MHD po městě
 

@@ -82,6 +82,8 @@ def train_systems(label: str) -> set[str] | None:
 
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
 MAX_JOURNEYS = 8
+#: Kolik dotazů na zbytek (začátek) cesty za koncem řetězu jízdenek IDS.
+MAX_CHAIN_ASKS = 4
 
 
 @dataclass
@@ -170,10 +172,23 @@ class IdsTicketHack(TravelHack):
                    search: SearchFn) -> list[Journey]:
         if not stations.is_domestic(query.origin, query.destination):
             return []
+        # dotazy na zbytek cesty za řetězem jízdenek IDS hned a souběžně – dotazy
+        # na ČD přes prohlížeč níž trvají desítky sekund
+        chain_task = asyncio.create_task(self._chain_answers(query, journeys, search))
+        try:
+            found, answers = await self._single_system(query, journeys, search)
+        finally:
+            chain_answers = await chain_task
+        return await self._chains(query, journeys, found, [*answers, *chain_answers])
+
+    async def _single_system(self, query: SearchQuery, journeys: Sequence[Journey],
+                             search: SearchFn) -> tuple[list[Journey], list[list[Journey]]]:
+        """Jízdenka IDS na celou cestu, řetěz systémů po trase vlaku, nebo systém
+        + zbytek u ČD (trasa vlaku z cd.cz, jinak ze sítě)."""
         base = sorted((j for j in journeys if eligible(j)), key=lambda j: j.departure)
         base = base[: int(self.options.get("max_journeys", MAX_JOURNEYS))]
         if not base:
-            return []
+            return [], []
         fallback = [_stop(n) for n in railnet.route(query.origin, query.destination)]
         async with httpx.AsyncClient() as client:
             routes = await asyncio.gather(*(self._route(client, query, j) for j in base))
@@ -220,7 +235,69 @@ class IdsTicketHack(TravelHack):
                 continue
             if plan is not None and self.is_worth_it(plan.total, journey.price):
                 found.append(self._result(journey, route, plan))
-        return found
+        return found, [*cd_tails.values(), *cd_heads.values()]
+
+    def _chained(self, journeys: Sequence[Journey]) -> list[Journey]:
+        chained = sorted((j for j in journeys if _chain_candidate(j)), key=lambda j: j.departure)
+        return chained[: int(self.options.get("max_journeys", MAX_JOURNEYS))]
+
+    async def _chain_answers(self, query: SearchQuery, journeys: Sequence[Journey],
+                             search: SearchFn) -> list[list[Journey]]:
+        """Odpovědi prodejců na zbytek (začátek) cesty tam, kde u spojů s přestupy
+        končí (začíná) řetěz jízdenek IDS – Plzeň → Mariánské Lázně na IC."""
+        from .. import ticketplan
+
+        asks: dict[tuple[str, str], dt.datetime] = {}
+        for journey in self._chained(journeys):
+            rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+            path = ticketplan.Path(rides)
+            try:
+                pieces = await ticketplan.ids_pieces(query, path)
+            except Exception:
+                log.exception("ids_ticket: jízdenky IDS po úsecích selhaly")
+                continue
+            forward, backward = ticketplan.reach(path, pieces)
+            if 0 < forward < path.last and path.departure(forward) is not None:
+                key = (path.name_from(forward), query.destination)
+                asks[key] = min(asks.get(key, path.departure(forward)), path.departure(forward))
+            if 0 < backward < path.last:
+                key = (query.origin, path.name_to(backward))
+                asks[key] = min(asks.get(key, journey.departure), journey.departure)
+        todo = list(asks.items())[:MAX_CHAIN_ASKS]
+        results = await asyncio.gather(*(search(query.leg_query(origin, destination, when - dt.timedelta(minutes=2)))
+                                         for (origin, destination), when in todo), return_exceptions=True)
+        return [r for r in results if isinstance(r, list)]
+
+    async def _chains(self, query: SearchQuery, journeys: Sequence[Journey],
+                      found: list[Journey], answers: list[list[Journey]]) -> list[Journey]:
+        """Spoje s přestupy (zastávky známe od dopravce): nejlevnější skladba
+        jízdenek po úsecích (``ticketplan``) – řetěz systémů IDS (IDESKA do
+        Strakonic, IDPK dál) a zbytek u prodejce, nebo naopak. Systém platí
+        po jízdách: IC z Plzně IDPK nebere, ale rychlík do Plzně ano."""
+        from .. import ticketplan
+        from .idos_complete import _same_city
+
+        chained = self._chained(journeys)
+        if not chained:
+            return found
+        options = [j for part in answers for j in part] + [j for j in journeys if j.price is not None]
+        out = list(found)
+        for journey in chained:
+            try:
+                segments = await ticketplan.improve(query, [journey], options=options, same_place=_same_city)
+            except Exception:
+                log.exception("ids_ticket: skladba jízdenek selhala")
+                continue
+            price = ticketplan.total(segments)
+            if price is None or len(segments) < 2 or not self.is_worth_it(price, journey.price):
+                continue
+            old = next((r for r in out if r.legs == journey.legs), None)
+            if old is not None and old.price is not None and old.price <= price:
+                continue
+            if old is not None:
+                out.remove(old)
+            out.append(_chain_result(journey, segments, price))
+        return out
 
     async def _prefetch(self, routes: list[list[RouteStop]], query: SearchQuery) -> None:
         """Systémy, jejichž ceny se zjišťují online (VDV), si je stáhnou předem.
@@ -500,6 +577,39 @@ class IdsTicketHack(TravelHack):
 
 
 # ---- pomůcky ---------------------------------------------------------------------
+def _chain_candidate(journey: Journey) -> bool:
+    """Spoj dopravce s cenou a přestupy, u kterého známe zastávky všech jízd –
+    jízdenky IDS se dají skládat po jízdách (na některé IDS platí, na jiné ne)."""
+    from .. import ticketplan
+
+    if journey.is_hack or journey.price is None or journey.provider == "IDS":
+        return False
+    rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+    if len(rides) < 2 or any(len(leg.stops) < 2 or leg.mode not in (Mode.TRAIN, Mode.BUS) for leg in rides):
+        return False
+    return any(ticketplan.ride_systems(leg) != set() for leg in rides)
+
+
+def _chain_result(journey: Journey, segments: list[Journey], price: Decimal) -> Journey:
+    """Výsledek skladby po jízdách: tytéž vlaky, víc jízdenek."""
+    lines = "; ".join(f"{s.origin} → {s.destination}: {s.provider} "
+                      + (f"({s.fares[0].tariff}) " if s.raw.get("ids_tariff") and s.fares else "")
+                      + f"{s.price:.0f} Kč" for s in segments)
+    note = (f"✂️ Stejné vlaky a přestupy jako u {journey.provider}, jen {len(segments)} jízdenky "
+            f"(lom jen ve stanicích, kde vlak staví): {lines}. Celkem {price:.0f} Kč místo "
+            f"{journey.price:.0f} Kč – ušetříte {journey.price - price:.0f} Kč.")
+    notes = [note]
+    if any(s.raw.get("ids_tariff") for s in segments):
+        notes.append("Jízdenky IDS platí v regionálních vlacích ČD (Os, Sp, R) zařazených do systému; "
+                     "koupíte je v aplikaci systému, v aplikaci ČD Můj vlak nebo u průvodčího.")
+    return Journey(
+        provider=" + ".join(dict.fromkeys(s.provider for s in segments)), legs=list(journey.legs),
+        fares=[Fare(amount=price, currency="CZK", amount_czk=price, label="součet jízdenek",
+                    tariff=" + ".join(s.fares[0].tariff or s.provider for s in segments if s.fares))],
+        fare_status=FareStatus.PRICED, notes=notes, segments=segments, deep_link=journey.deep_link,
+    )
+
+
 def _with_times(route: list[RouteStop], journey: Journey) -> list[RouteStop]:
     """Odhad časů na trase ze sítě, když trasu vlaku z cd.cz nemáme.
 

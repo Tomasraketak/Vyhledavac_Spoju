@@ -77,6 +77,7 @@ class SbbProvider(HttpProvider):
     hack_legs = False
     referer = None
     min_interval = 0.4
+    multi_passenger = True        # cenu skupiny počítá ``group_price`` (dospělí, děti 6–15)
 
     async def search(self, query: SearchQuery) -> list[Journey]:
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]

@@ -21,11 +21,12 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+from decimal import Decimal
 from typing import Any, ClassVar
 
 from ..browser import playwright_available
 from ..errors import BlockedError, ProviderError, ProviderUnavailableError
-from ..models import FareCategory, FareStatus, Journey, Leg, Mode, SearchQuery
+from ..models import FareCategory, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery
 from ..registry import PROVIDERS
 from ._hafas import HafasClient, HafasProfile, parse_connections
 from ._oebb_shop import (
@@ -70,6 +71,8 @@ class ObbProvider(HttpProvider):
     countries = ("AT", "CZ", "SK", "DE", "HU", "SI", "IT", "CH", "HR", "PL", "DK", "NL", "BE")
     international_only = True
     min_interval = 0.6
+    #: E-shop počítá vždy jednoho dospělého – skupinu dopočítá ``Provider.run``.
+    price_basis = "adult"
 
     profile: ClassVar[HafasProfile] = OEBB_PROFILE
 
@@ -80,6 +83,13 @@ class ObbProvider(HttpProvider):
         # Když shop jednou zablokuje přímé dotazy, v téže relaci už to
         # nezkoušíme znovu – rovnou jdeme přes prohlížeč.
         self._http_blocked = False
+
+    def passenger_weight(self, passenger: Passenger) -> Decimal:
+        """ÖBB: děti do 6 let zdarma, 6–14 let za polovic (Kinder-Ermäßigung),
+        ostatní za dospělého – seniorská a studentská sleva jen s Vorteilscard."""
+        if passenger.age < 6:
+            return Decimal(0)
+        return Decimal("0.5") if passenger.age < 15 else Decimal(1)
 
     @property
     def hafas(self) -> HafasClient:
@@ -126,8 +136,9 @@ class ObbProvider(HttpProvider):
             except ProviderError as exc:
                 self.note(f"ceny ÖBB se nepodařilo zjistit ({exc.message})")
 
-        if offers and query.lead.category in (FareCategory.INFANT, FareCategory.CHILD):
-            self.note("ceny ÖBB jsou za dospělého – dětskou slevu e-shop počítá až v košíku")
+        if offers and any(p.category in (FareCategory.INFANT, FareCategory.CHILD) for p in query.passengers):
+            self.note("ceny ÖBB jsou za dospělého – děti dopočteny odhadem (do 6 let zdarma, "
+                      "do 15 let za polovic), přesně je e-shop spočítá až v košíku")
         return merge_offers(journeys, offers, self, query)
 
     async def _timetable(self, query: SearchQuery) -> list[Journey]:

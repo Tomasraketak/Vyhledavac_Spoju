@@ -78,10 +78,12 @@ def _place(name: str, rail: bool, near: set[str], towns: tuple[str, ...] = ()):
     na Moravě) vyhraje to, které leží ve stejném systému jako sousední zastávky.
     Zastávka MHD bez jména obce („Anděl“) se hledá v obcích cesty (``towns``)."""
     found = _place_by_name(name, rail, near)
-    if towns and (found is None or found.code):
+    if towns and not rail and (found is None or found.code):
         for town in towns:
             local = stations.place(f"{town}, {name}")
-            if local is not None and not local.code:
+            # jen konkrétní zastávka v obci – „Třeboň, Linz Hbf“ najde jen samotnou
+            # Třeboň (obec), a Linec by tak dostal zónu Třeboně
+            if local is not None and not local.code and local.kind != "c":
                 return local
     return found
 

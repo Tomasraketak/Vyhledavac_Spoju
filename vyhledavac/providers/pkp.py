@@ -24,7 +24,7 @@ from decimal import Decimal
 from typing import Any
 
 from ..errors import StationNotFoundError, TransientProviderError
-from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
+from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery, Stop
 from ..normalize import best_match, normalize
 from ..registry import PROVIDERS
 from .base import HttpProvider, PRICE_SCOPE_COUNT, price_scope
@@ -49,6 +49,13 @@ class PkpProvider(HttpProvider):
     international_only = True          # po Česku nemá smysl
     referer = f"{BASE}/"
     min_interval = 0.35
+    #: Koleo vrací normální jízdné jednoho dospělého – skupinu dopočítá ``Provider.run``.
+    price_basis = "adult"
+
+    def passenger_weight(self, passenger: Passenger) -> Decimal:
+        """Děti do 4 let jezdí v Polsku zdarma; jiné slevy (ustawowe) jen s polským
+        průkazem – počítá se normální jízdné."""
+        return Decimal(0) if passenger.age < 4 else Decimal(1)
 
     async def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         return await self.client.get_json(url, params=params, referer=self.referer, headers=HEADERS)
@@ -101,8 +108,6 @@ class PkpProvider(HttpProvider):
         journeys = price_scope(journeys, query, MAX_PRICED)     # cena = dotaz na každý spoj
         priced = [j for j in journeys if j.raw.get("purchasable")]
         await asyncio.gather(*(self._price(j) for j in priced))
-        if len(query.passengers) > 1 and priced:
-            self.note("Koleo: cena je za jednoho dospělého (normální jízdné)")
         return journeys
 
     async def _names(self) -> dict[int, str]:

@@ -86,6 +86,7 @@ def test_min_saving_threshold(total, baseline, expected):
 # ---- výběr bodů lomu --------------------------------------------------------
 def test_border_points_are_not_offered_as_split_nodes():
     assert not is_ticketable("Breclav statní hranice/Staatsgrenze")
+    assert not is_ticketable("CZ/PL - Petrovice u Karviné / Zebrzydowice")
     assert is_ticketable("Břeclav")
 
 
@@ -193,3 +194,43 @@ async def test_hidden_city_finds_saving_and_warns():
     assert len(found) == 1
     assert found[0].price == Decimal("500")
     assert any("propadá" in n for n in found[0].notes)
+
+
+def test_split_nodes_one_station_per_city_and_big_hubs_on_long_trip():
+    """Praha → Amsterdam: dřív se lomilo v Bad Schandau a třech zastávkách
+    Děčína (pro jízdenku totéž) – teď jedna za město a k tomu velké uzly."""
+    hack = SplitTicketHack()
+    journey = make_journey(destination="Amsterdam", stops=[
+        "Praha hl.n.", "Decin hl.n.", "Decin-Priper", "Decin-Prostredni Zleb", "Bad Schandau",
+        "Dresden Hbf", "Leipzig Hbf", "Erfurt Hbf", "Frankfurt(Main)Hbf", "Köln Hbf",
+        "Emmerich", "Arnhem Centraal", "Amsterdam Centraal"])
+    query = q(destination="Amsterdam")
+    nodes = hack._candidate_nodes(query, [journey])
+    decin = [n for n in nodes if n.lower().startswith("decin")]
+    assert len(decin) == 1
+    top = nodes[:6]
+    assert {"Bad Schandau", "Decin hl.n."} & set(top)              # hranice CZ|DE (jedna stanice)
+    assert {"Emmerich", "Arnhem Centraal"} & set(top)               # hranice DE|NL
+    assert {"Frankfurt(Main)Hbf", "Köln Hbf", "Dresden Hbf"} & set(top)   # velká města na trase
+    assert "Amsterdam Centraal" not in nodes                         # cílové město
+
+
+@pytest.mark.asyncio
+async def test_split_offered_when_cheaper_than_same_train_even_if_bus_is_cheapest():
+    """Lomená jízdenka na vlak (800) se nabídne, i když autobus stojí 300 –
+    autobus jede jindy a déle, vlak celý stojí 1200."""
+    direct = make_journey(provider="ČD", dep=at(8), arr=at(12), price=1200,
+                          line="EC 103", stops=["Praha", "Břeclav", "Vídeň"])
+    bus = make_journey(provider="FlixBus", dep=at(7), arr=at(13), price=300, line="FlixBus N1")
+
+    async def fake_search(query):
+        if query.destination == "Břeclav":
+            return [make_journey(provider="ČD", dep=at(8), arr=at(10), price=300,
+                                 line="EC 103", origin="Praha", destination="Břeclav")]
+        if query.origin == "Břeclav":
+            return [make_journey(provider="ÖBB", dep=at(10), arr=at(12), price=500,
+                                 line="EC 103", origin="Břeclav", destination="Vídeň")]
+        return []
+
+    found = await SplitTicketHack().find(q(), [direct, bus], fake_search)
+    assert [j.price for j in found] == [Decimal("800")]

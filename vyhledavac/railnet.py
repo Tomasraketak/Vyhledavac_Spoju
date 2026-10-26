@@ -83,7 +83,14 @@ def physical_route(origin: str, destination: str) -> list[str]:
     úseků osobních vlaků po téže trati. Potřeba pro tarify, které počítají
     všechny projeté zóny (IDPK).
     """
-    return route(origin, destination, power=2)
+    return list(_physical_route(origin, destination))
+
+
+@lru_cache(maxsize=16384)
+def _physical_route(origin: str, destination: str) -> tuple[str, ...]:
+    # tytéž dvojice sousedních stanic se ptá výpočet jízdenek IDS mnohokrát
+    # (každá varianta lomu znovu) – síť se nemění, výsledek se pamatuje
+    return tuple(route(origin, destination, power=2))
 
 
 def route(origin: str, destination: str, *, power: int = 1) -> list[str]:

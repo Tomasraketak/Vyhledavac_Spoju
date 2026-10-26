@@ -45,7 +45,7 @@ import time
 from decimal import Decimal
 from typing import Sequence
 
-from .. import geo, transfer
+from .. import geo, ticketplan, transfer
 from ..models import Fare, FareStatus, Journey, Leg, Mode, SearchQuery, Stop
 from ..normalize import matches_station, normalize, same_place
 from ..registry import HACKS, PROVIDERS
@@ -87,6 +87,8 @@ TRANSFER_SAME = transfer.SAME
 #: Navazující varianty zbytku cesty u jiných prodejců (FlixBus × ČD …).
 MAX_VARIANTS = 2
 VARIANT_WAIT = dt.timedelta(hours=3)
+#: Kolik navazujících spojů se ocení nejlevnější skladbou, než se vyberou varianty.
+MAX_VARIANT_OPTIONS = 12
 #: Zdroje, které jízdenky neprodávají (jen jízdní řád / tarif IDS).
 NOT_SELLERS = {"IDS", "Transitous", "Plánovač"}
 #: Zdroj spoje, který se právě oceňuje (souběžně běží víc spojů).
@@ -151,6 +153,10 @@ class IdosCompleteHack(TravelHack):
         self._seen: dict[tuple[str, str, bool, bool], list[Journey]] = {}
         # spoje z hlavního hledání: celá cesta jedním vlakem už může mít cenu
         self._base = [j for j in journeys if j.provider not in NOT_SELLERS and j.price is not None]
+        # spoje z IDOS s rozpisem a ÖBB s jízdenkou jen na část trasy: jejich
+        # jízdenky na kus cesty poslouží i jiným spojům se stejnými vlaky
+        self._routes = [j for j in journeys if (j.provider == "IDS" and j.raw.get("plans"))
+                        or (j.raw.get("partial") or {}).get("czk")]
         async def one(n: int, journey: Journey, ask: SearchFn = search) -> list[Journey]:
             set_tag(f"#{n}")             # spoje běží souběžně – v trasování je rozliší číslo
             if ask is not search:
@@ -246,11 +252,21 @@ class IdosCompleteHack(TravelHack):
                     f"{s.provider} {s.origin} → {s.destination} {s.price:.0f}" for s in segments))
                 if best is None or total < best[0]:
                     best = (total, segments)
+        # jiný spoj na některý kus (WESTbahn → ÖBB o pár minut později): úseky
+        # výsledku jsou pak z jízdenek, ne z trasy IDOS
+        rerouted = best is not None and any(s.raw.get("other_route") for s in best[1])
+        if best is not None:
+            # nejlevnější skladba na tytéž spoje: jízdenka IDS přes hranici kusů,
+            # odpovědi prodejců na části cesty, které už přišly
+            segments = await self._improve(query, best[1])
+            best = (ticketplan.total(segments), segments)
         if best is None and journey.provider != "IDS" and plans:
             # aspoň známé kusy – ať je vidět, který úsek chybí (z už známých odpovědí, bez dotazů)
             partial = await self._partial(query, rides, plans[0], limited)
             if partial is not None:
                 partial.deep_link = journey.deep_link
+                if partial.price is not None and not partial.raw.get("rerouted"):
+                    partial.legs = list(journey.legs)      # celá cena – časy a přesuny z trasy
                 return [partial]
         if best is None or (journey.price is not None and best[0] >= journey.price):
             trace("✗ spoj zůstane bez ceny" if best is None else "= tarif IDS sám vyjde levněji")
@@ -260,7 +276,7 @@ class IdosCompleteHack(TravelHack):
             # (jinak tentýž spoj už má z hledání stejnou nebo nižší cenu)
             merged = _merge(best[1], f"🧩 Spoj z {'IDOS' if journey.provider == 'IDS' else 'plánovače'} s jízdenkami")
             if merged is not None:
-                if not any(s.raw.get("other_route") for s in best[1]):
+                if not rerouted:
                     merged.legs = list(journey.legs)      # časy, zastávky a pěší přesuny z IDOS
                 else:
                     merged.legs = _join_split_trains(merged.legs)
@@ -277,13 +293,15 @@ class IdosCompleteHack(TravelHack):
         CFR z Giurgiu do Bukurešti, MÁV dál. Ptá se jen v rámci zbylého limitu
         dotazů (``search`` = omezené hledání spoje)."""
         pieces: list[Journey] = []
+        plan, linked = _join_offers(plan, rides)
         for seg in plan:
             part = _slice(rides, seg["from"], seg["to"])
             if seg["kind"] in ("local", "ids", "offer"):
                 price = Decimal(seg.get("price") or 0)
                 pieces.append(Journey(provider=seg.get("system") or "MHD", legs=part, fare_status=FareStatus.PRICED,
                                       fares=[Fare(amount=price, currency="CZK", amount_czk=price,
-                                                  label=seg.get("system") or "MHD")]))
+                                                  label=seg.get("system") or "MHD")],
+                                      raw={"linked": True} if linked and seg["kind"] == "offer" else {}))
                 continue
             units = _border_units(part)
             i = 0
@@ -301,6 +319,15 @@ class IdosCompleteHack(TravelHack):
                     i += 1
         if not any(p.price is not None and p.provider != "MHD" for p in pieces):
             return None                      # bez jediné skutečné jízdenky nemá smysl ukazovat
+        whole = await self._improve(query, pieces, quiet=True)
+        if ticketplan.total(whole) is not None:
+            # chybějící kus doplnil tarif IDS (autobus, který žádný e-shop neprodá)
+            trace("✓ chybějící kusy doplnil tarif IDS: " + " + ".join(
+                f"{s.provider} {s.origin} → {s.destination} {s.price:.0f}" for s in whole))
+            merged = _merge(whole, "🧩 Spoj s jízdenkami")
+            if merged is not None and any(p.raw.get("other_route") for p in pieces):
+                merged.raw["rerouted"] = True
+            return merged
         missing = [p for p in pieces if p.price is None]
         trace("◐ jen část ceny – chybí: " + ", ".join(f"{p.origin} → {p.destination} ({p.legs[0].line} "
                                                       f"[{p.legs[0].carrier}])" for p in missing))
@@ -376,21 +403,74 @@ class IdosCompleteHack(TravelHack):
             if (option.departure, option.arrival) == chosen:
                 continue
             fits.append(option)
-        picks: list[Journey] = []
-        for key in (lambda o: (o.price, o.arrival), lambda o: (o.arrival, o.price)):
-            for option in sorted(fits, key=key):
+        # každá varianta v nejlevnější skladbě: na spěšný vlak místo IC platí IDS
+        # a jízdenka IDS ze začátku cesty může pokrýt i ji (síťová IDPK do Mariánských Lázní)
+        scored: list[tuple[Decimal, Journey, list[Journey]]] = []
+        for option in sorted(fits, key=lambda o: (o.arrival, o.price))[:MAX_VARIANT_OPTIONS]:
+            parts = await self._improve(query, [*head, option], quiet=True)
+            price = ticketplan.total(parts)
+            if price is not None:
+                scored.append((price, option, parts))
+        picks: list[tuple[Decimal, Journey, list[Journey]]] = []
+        for key in (lambda s: (s[0], s[1].arrival), lambda s: (s[1].arrival, s[0])):
+            for item in sorted(scored, key=key):
+                option = item[1]
                 if all((option.departure, option.arrival, option.provider) !=
-                       (p.departure, p.arrival, p.provider) for p in picks):
-                    picks.append(option)
+                       (p[1].departure, p[1].arrival, p[1].provider) for p in picks):
+                    picks.append(item)
                     break
         variants = []
-        for option in picks[:MAX_VARIANTS]:
+        for price, option, parts in picks[:MAX_VARIANTS]:
             trace(f"↪ navazující varianta: {option.provider} {option.departure:%H:%M}–{option.arrival:%H:%M} "
-                  f"{option.price:.0f} Kč")
-            merged = _merge([*head, option], "🔀 Navazující varianta: jízdenky")
+                  f"{option.price:.0f} Kč – celkem {price:.0f} Kč"
+                  + ("" if [s.provider for s in parts] == [*(s.provider for s in head), option.provider]
+                     else " = " + " + ".join(f"{s.provider} {s.origin} → {s.destination} {s.price:.0f}"
+                                             for s in parts)))
+            merged = _merge(parts, "🔀 Navazující varianta: jízdenky")
             if merged is not None:
                 variants.append(merged)
         return variants
+
+    async def _improve(self, query: SearchQuery, segments: Sequence[Journey],
+                       quiet: bool = False) -> list[Journey]:
+        """Nejlevnější skladba jízdenek na tytéž spoje (``ticketplan``): jízdenka
+        IDS i přes hranici kusů z rozpisu a odpovědi prodejců, které už přišly."""
+        before = ticketplan.total(segments)
+        try:
+            better = await ticketplan.improve(query, segments, options=self._answers(), same_place=_same_city)
+        except Exception:
+            log.exception("idos_complete: skladba jízdenek selhala")
+            return list(segments)
+        after = ticketplan.total(better)
+        if not quiet and after is not None and (before is None or after < before):
+            trace(f"⚙ levnější skladba: {after:.0f} Kč" + (f" místo {before:.0f} Kč" if before is not None else "")
+                  + " = " + " + ".join(f"{s.provider} {s.origin} → {s.destination} {s.price:.0f}"
+                                       for s in better))
+        return better
+
+    def _answers(self) -> list[Journey]:
+        """Odpovědi prodejců s cenou, které už přišly (hlavní hledání i dotazy na
+        kusy) – i jízdenky e-shopu IDOS na část trasy (ČD Praha → Offenburg za
+        1394 Kč, když ÖBB za stejný vlak chce 7212 Kč)."""
+        seen: set[int] = set()
+        out: list[Journey] = []
+        pools = [getattr(self, "_base", []), getattr(self, "_routes", []), *getattr(self, "_seen", {}).values()]
+        for options in pools:
+            for option in options:
+                if id(option) in seen:
+                    continue
+                seen.add(id(option))
+                if _sells(option):
+                    out.append(option)
+                if option.provider == "IDS" and option.raw.get("plans"):
+                    out.extend(_plan_offers(option))
+                if (option.raw.get("partial") or {}).get("czk"):
+                    from .obb_partial import _piece   # ÖBB prodá jen část trasy (München → Zürich)
+
+                    piece = _piece(option)
+                    if piece is not None:
+                        out.append(piece)
+        return out
 
     async def _price_plan(self, query: SearchQuery, journey: Journey, plan: list[dict],
                           search: SearchFn) -> list[Journey] | None:
@@ -398,6 +478,7 @@ class IdosCompleteHack(TravelHack):
         plan = _cover_plan(plan, legs)
         if plan is None:
             return None                      # rozpis nepokrývá celou cestu
+        plan, linked = _join_offers(plan, legs)
         segments: list[Journey] = []
         for seg in plan:
             part = _slice(legs, seg["from"], seg["to"])
@@ -414,7 +495,9 @@ class IdosCompleteHack(TravelHack):
                 segments.append(Journey(
                     provider=seg["system"], legs=part, fare_status=FareStatus.PRICED,
                     fares=[Fare(amount=price, currency="CZK", amount_czk=price, label=seg["system"],
-                                tariff=seg["name"])]))
+                                tariff=seg["name"])],
+                    # jedna jízdenka na víc úseků s jinými mezi nimi – nesmí se rozdělit
+                    raw={"linked": True} if linked and seg["kind"] == "offer" else {}))
                 continue
             bought = await self._price_run(query, part, search, seg.get("splits", MAX_SPLITS))
             if bought is None:
@@ -598,17 +681,28 @@ class IdosCompleteHack(TravelHack):
         # e-shop IDOS (ČD) prodá jízdenku z Česka do ciziny i bez prohlížeče –
         # Plzeň → Schwandorf (autobus ALEX), když DB nejde a fronta ČD je plná;
         # po Česku vlak ČD dřív, než by se čekalo na prohlížeč
+        # (nabídku dává e-shop IDOS jen jednomu dospělému bez slev – skupině ne,
+        # dotaz by jen zdržel o 10–25 s)
         idos_ask = (catchable and "CZ" in ends and _SOURCE.get() != "IDS" and not coach_mix
-                    and (abroad or bool(browser)))
+                    and (abroad or bool(browser)) and _idos_offer_possible(query))
         trace(f"? {origin} → {destination} {first.departure:%H:%M}–{last.arrival:%H:%M} "
               f"({', '.join(sorted(crossed)) or '?'}): ptám se {', '.join(plain) or '–'}"
               + (" | e-shop IDOS" if idos_ask else "")
               + (f" | prohlížeč: {', '.join(browser)}" if browser else ""))
         asks = [(plain, False)] + ([(["IDS"], False)] if idos_ask else []) + ([(browser, True)] if browser else [])
         # vlak ČD po Česku: Arriva prodá jízdenku SJT, ale ČD (e-shop IDOS) se
-        # zeptat i tak – bývá stejně drahá nebo levnější a je to dopravce vlaku
-        # (nabídku dává IDOS jen jednomu dospělému bez slev – jinak se neptat)
-        cd_run = not abroad and _cd_trains(run) and _idos_offer_possible(query)
+        # zeptat i tak – bývá stejně drahá nebo levnější a je to dopravce vlaku;
+        # do ciziny taky – ČD bývá výrazně levnější než ÖBB (Praha → Offenburg
+        # nočním vlakem 1394 Kč místo 7212 Kč)
+        cd_run = (abroad or _cd_trains(run)) and idos_ask
+        if idos_ask and abroad and plain and self._idos_left > 0 and not any(
+                _same(o, first, last) and _sells(o) and _cd_seller(o)
+                for o in self._seen.get((normalize(origin), normalize(destination), False, True), [])):
+            # e-shop IDOS (pomalý) souběžně s ostatními prodejci, ne až po nich
+            since = _since(first, ready)
+            await asyncio.gather(search(query.leg_query(origin, destination, since), only=plain),
+                                 search(query.leg_query(origin, destination, since), only=["IDS"]),
+                                 return_exceptions=True)
         options: list[Journey] = []
         for only, allow_browser in asks:
             if not only:
@@ -790,6 +884,63 @@ def _seller_name(journey: Journey) -> str:
     return journey.provider
 
 
+def _plan_offers(journey: Journey) -> list[Journey]:
+    """Jízdenky z rozpisu spoje IDOS na část trasy: nabídka e-shopu IDOS (ČD)
+    a tarif IDS – samostatně použitelné kusy pro skladbu jízdenek jiných spojů
+    se stejnými vlaky."""
+    rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
+    out: list[Journey] = []
+
+    def piece(start, end, price: Decimal, system: str, name: str, offer: bool) -> None:
+        legs = _slice(rides, start, end)
+        if legs:
+            out.append(Journey(
+                provider="IDS" if offer else system, legs=legs,
+                fare_status=FareStatus.PRICED, deep_link=journey.deep_link,
+                fares=[Fare(amount=price, currency="CZK", amount_czk=price,
+                            label="IDOS" if offer else system,
+                            tariff=name or ("jízdenka z e-shopu IDOS" if offer else ""))]))
+
+    for plan in journey.raw.get("plans") or ():
+        offers = [seg for seg in plan if seg.get("kind") == "offer"]
+        # jízdenka e-shopu na víc úseků („Budějovice – Linz, Salzburg – Lublaň“)
+        # má cenu jen u prvního – použít ji jde jen celou, a jen když úseky navazují
+        if offers and all(_follows(rides, a["to"], b["from"]) for a, b in zip(offers, offers[1:])):
+            total = sum((Decimal(str(seg.get("price") or 0)) for seg in offers), Decimal(0))
+            piece(offers[0]["from"], offers[-1]["to"], total, "IDOS", offers[0].get("name") or "", True)
+        for seg in plan:
+            if seg.get("kind") == "ids" and seg.get("price") is not None:
+                piece(seg["from"], seg["to"], Decimal(str(seg["price"])), seg.get("system") or "IDS",
+                      seg.get("name") or "", False)
+    return out
+
+
+def _join_offers(plan: list[dict], rides: list[Leg]) -> tuple[list[dict], bool]:
+    """Jízdenka e-shopu IDOS na víc úseků má cenu jen u prvního úseku (ostatní
+    za 0 Kč). Navazující úseky se spojí do jedné jízdenky; zůstanou-li oddělené
+    (mezi nimi jiná jízdenka), vrátí se ``linked`` – skladba je nesmí rozdělit."""
+    out: list[dict] = []
+    for seg in plan:
+        prev = out[-1] if out else None
+        if (seg.get("kind") == "offer" and prev is not None and prev.get("kind") == "offer"
+                and _follows(rides, prev["to"], seg["from"])):
+            price = Decimal(str(prev.get("price") or 0)) + Decimal(str(seg.get("price") or 0))
+            out[-1] = {**prev, "to": seg["to"], "price": str(price)}
+            continue
+        out.append(dict(seg))
+    return out, sum(1 for seg in out if seg.get("kind") == "offer") > 1
+
+
+def _follows(rides: list[Leg], end: list[int], start: list[int]) -> bool:
+    """Navazuje úsek začínající ``start`` přímo na úsek končící ``end``
+    (``[jízda, zastávka]``; konec jízdy = začátek další)?"""
+    (k, i), (m, j) = end, start
+    if (k, i) == (m, j):
+        return True
+    last = max(len(rides[k].stops), 2) - 1 if 0 <= k < len(rides) else -1
+    return i >= last and m == k + 1 and j == 0
+
+
 def _sells(journey: Journey) -> bool:
     """Spoj s cenou od prodejce – i z IDOS, když ho celý ocení e-shop IDOS
     (ČD) nebo tarif IDS; Transitous a Plánovač ceny nemají."""
@@ -818,36 +969,21 @@ def ids_fare(query: SearchQuery, run: list[Leg], valid_minutes: float | None = N
 
     Autobus: číslo licence (6 číslic, „340100“) v seznamu linek IDS; vlak:
     jen ČD a jen kategorie, kde IDS platí (Os, Sp, R; ne EC/RJ)."""
-    from ..hacks.ids_ticket import SYSTEMS, IdsTicketHack, _stop, limit_region, train_systems
-    from ..providers.ids_idos import line_systems
+    from ..hacks.ids_ticket import SYSTEMS, IdsTicketHack
 
     allowed = set(SYSTEMS)
     for leg in run:
-        if leg.mode is Mode.BUS:
-            found = _LICENCE.search(leg.line or "")
-            if found is None:
-                return None
-            systems = line_systems(found.group(1), set())
-            if systems is not None:
-                allowed &= systems
-        elif leg.mode is Mode.TRAIN:
-            if "česk" not in (leg.carrier or "").lower() and "cd" not in normalize(leg.carrier or "").split():
-                return None
-            only = train_systems(leg.line or "")
-            if only is not None:
-                allowed &= only
-        else:
+        if leg.mode not in (Mode.BUS, Mode.TRAIN):
             return None
+        systems = ticketplan.ride_systems(leg)      # linka IDS / vlak ČD či SJT kategorie s IDS
+        if systems == set():
+            return None
+        if systems is not None:
+            allowed &= systems
+    # zóny zastávek; stejnojmenné obce rozliší sousední zastávky (Štěpánovice u Lišova)
+    rows = ticketplan.route_stops(query, [ticketplan._stops(leg) for leg in run], run)
     route = []
-    for leg in run:
-        stops = leg.stops or [Stop(leg.origin, departure=leg.departure), Stop(leg.destination, arrival=leg.arrival)]
-        own = []
-        for n, stop in enumerate(stops):
-            stop_time = stop.departure or stop.arrival
-            own.append(_stop(stop.name, time=stop_time))
-            own[-1].rail = leg.mode is Mode.TRAIN
-        if leg.mode is Mode.TRAIN:
-            limit_region(own, leg.line or "")    # EC Jižní expres: IDESKA jen v jižních Čechách
+    for own in rows:
         route.extend(own[1:] if route else own)  # přestupní zastávka jen jednou
     if len(route) < 2:
         return None

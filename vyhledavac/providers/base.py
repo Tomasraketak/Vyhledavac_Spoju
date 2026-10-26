@@ -11,6 +11,7 @@ from __future__ import annotations
 import abc
 import contextvars
 import copy
+import dataclasses
 import datetime as dt
 import logging
 import time
@@ -19,7 +20,7 @@ from typing import Any, Callable, ClassVar, Sequence
 
 from ..cache import Cache, get_cache
 from ..errors import ProviderError, ProviderUnavailableError
-from ..models import Fare, Journey, Mode, ProviderResult, SearchQuery, mark_walks
+from ..models import Fare, FareStatus, Journey, Mode, Passenger, ProviderResult, SearchQuery, mark_walks
 from ..money import CurrencyConverter, get_converter
 from ..registry import PROVIDERS
 
@@ -71,6 +72,10 @@ class Provider(abc.ABC):
     international_only: ClassVar[bool] = False
     #: Umí cenu pro skupinu různých cestujících (jinak se ptá za prvního).
     multi_passenger: ClassVar[bool] = False
+    #: Za koho je cena dopravce, který skupinu neumí: "lead" = za prvního
+    #: cestujícího (ZSSK), "adult" = vždy za dospělého bez slevy (ÖBB, Koleo).
+    #: Cenu za celou skupinu dopočítá ``run`` (``group_factor``).
+    price_basis: ClassVar[str] = "lead"
     #: Smí se ho ptát travel hacky na dílčí úseky? (IDS z IDOS ne – drahé dotazy.)
     hack_legs: ClassVar[bool] = True
     #: Místa vybírá přesně (číslo zastávky z našeptávače) – kontrola země podle
@@ -134,6 +139,26 @@ class Provider(abc.ABC):
             callback(snapshot)
         except Exception:
             log.exception("%s: průběžný výsledek se nepodařilo předat", self.name)
+
+    def passenger_weight(self, passenger: Passenger) -> Decimal:
+        """Kolik zaplatí cestující vůči dospělému bez slevy – pro dopočet ceny
+        skupiny u dopravců, kteří cenu umí jen za jednoho (``price_basis="adult"``).
+        Raději víc než míň: neznámou slevu nepočítáme."""
+        return Decimal(0) if passenger.age < 6 else Decimal(1)
+
+    def group_factor(self, query: SearchQuery) -> Decimal | None:
+        """Čím vynásobit cenu dopravce, aby byla za celou skupinu (1 = beze změny,
+        ``None`` = nejde odvodit – cena se raději zahodí, než aby byla nízká)."""
+        if self.multi_passenger or not self.provides_prices:
+            return Decimal(1)
+        people = list(query.passengers) or [query.lead]
+        if self.price_basis == "adult":
+            return sum((self.passenger_weight(p) for p in people), Decimal(0))
+        # cena je za prvního cestujícího: stejné ostatní = násobek, jinak neznámá
+        lead = people[0]
+        if all(p == lead for p in people):
+            return Decimal(len(people))
+        return None
 
     def make_fare(
         self,
@@ -199,6 +224,7 @@ class Provider(abc.ABC):
 
         mark_walks(journeys)
         local_times(journeys)
+        self._price_group(journeys, query, notes)
         journeys = [j for j in journeys if _is_sane(j)]
         kept = [j for j in journeys if self.exact_places or _right_place(j, query)]
         if len(kept) < len(journeys):
@@ -211,6 +237,45 @@ class Provider(abc.ABC):
             elapsed=time.monotonic() - started,
             notes=notes,
         )
+
+
+    def _price_group(self, journeys: list[Journey], query: SearchQuery, notes: list[str]) -> None:
+        """Cena za celou skupinu u dopravce, který ji umí jen za jednoho
+        cestujícího – jinak by se v kombinacích jízdenek (ÖBB za jednoho
+        + ČD za pět) sčítala nesrovnatelná čísla. Týká se i ceny jízdenky
+        na část trasy (``raw["partial"]`` u ÖBB)."""
+        factor = self.group_factor(query)
+        touched = [j for j in journeys if j.fares or (j.raw.get("partial") or {}).get("czk")]
+        if factor == 1 or not touched:
+            return
+        if factor is None:
+            for journey in touched:
+                journey.fares = []
+                if journey.fare_status is FareStatus.PRICED:
+                    journey.fare_status = FareStatus.UNKNOWN
+                journey.raw.pop("partial", None)
+            notes.append("cenu umí jen za jednoho cestujícího – pro tuto skupinu ji neukazuji")
+            return
+        count = len(query.passengers)
+        cents = Decimal("0.01")
+        for journey in touched:
+            journey.fares = [_scaled(fare, factor, count) for fare in journey.fares]
+            part = journey.raw.get("partial")
+            if part:
+                journey.raw["partial"] = {**part, **{key: str((Decimal(part[key]) * factor).quantize(cents))
+                                                     for key in ("eur", "czk") if part.get(key)}}
+        notes.append("cena za skupinu dopočtena z ceny za jednoho dospělého "
+                     "(děti do 6 let zdarma" + (", děti do 15 let za polovic" if factor % 1 else "") + ")"
+                     if self.price_basis == "adult" else f"cena za {count} stejné cestující (× {count})")
+
+
+def _scaled(fare: Fare, factor: Decimal, count: int) -> Fare:
+    """Cena dopravce přepočtená na skupinu."""
+    cents = Decimal("0.01")
+    return dataclasses.replace(
+        fare, amount=(fare.amount * factor).quantize(cents),
+        amount_czk=None if fare.amount_czk is None else (fare.amount_czk * factor).quantize(cents),
+        tariff=", ".join(t for t in (fare.tariff, f"cena za skupinu ({count} os.)") if t))
 
 
 class HttpProvider(Provider):
