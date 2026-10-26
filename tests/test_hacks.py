@@ -234,3 +234,34 @@ async def test_split_offered_when_cheaper_than_same_train_even_if_bus_is_cheapes
 
     found = await SplitTicketHack().find(q(), [direct, bus], fake_search)
     assert [j.price for j in found] == [Decimal("800")]
+
+
+def test_split_note_without_negative_saving():
+    """Kombinace dražší než nejlevnější spoj (autobus jindy) se nabídne bez „úspory −247 Kč“."""
+    from vyhledavac.hacks.split_ticket import _dominated, _similar_price
+
+    train = make_journey(provider="PKP", dep=at(8), arr=at(12), price=500, line="EIC 1")
+    assert _dominated(at(8), at(12), Decimal(600), [train]) is train
+    assert _dominated(at(8), at(11), Decimal(600), [train]) is None      # kombinace přijede dřív
+    assert _similar_price(at(8, 10), at(12, 20), [train]) == 500
+    assert _similar_price(at(11), at(15), [train]) is None
+
+
+@pytest.mark.asyncio
+async def test_split_note_mentions_saving_against_same_time_journey():
+    direct = make_journey(provider="ČD", dep=at(8), arr=at(12), price=1200,
+                          line="EC 103", stops=["Praha", "Břeclav", "Vídeň"])
+    bus = make_journey(provider="FlixBus", dep=at(6), arr=at(13), price=300, line="FlixBus N1")
+
+    async def fake_search(query):
+        if query.destination == "Břeclav":
+            return [make_journey(provider="ČD", dep=at(8), arr=at(10), price=300,
+                                 line="EC 103", origin="Praha", destination="Břeclav")]
+        if query.origin == "Břeclav":
+            return [make_journey(provider="ÖBB", dep=at(10), arr=at(12), price=500,
+                                 line="EC 103", origin="Břeclav", destination="Vídeň")]
+        return []
+
+    (found,) = await SplitTicketHack().find(q(), [direct, bus], fake_search)
+    assert "úspora 400 Kč proti spoji ve stejný čas" in found.notes[0]
+    assert "-" not in found.notes[0].split("úspora")[1]

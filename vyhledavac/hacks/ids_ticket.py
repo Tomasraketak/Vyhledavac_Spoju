@@ -83,7 +83,9 @@ def train_systems(label: str) -> set[str] | None:
 #: Kolik vlaků nejvýš prověřit (každý = jeden dotaz na cd.cz).
 MAX_JOURNEYS = 8
 #: Kolik dotazů na zbytek (začátek) cesty za koncem řetězu jízdenek IDS.
-MAX_CHAIN_ASKS = 4
+MAX_CHAIN_ASKS = 6
+#: … jeden dotaz pokryje spoje, které odjíždějí nejvýš tolik po něm.
+CHAIN_ASK_SPAN = dt.timedelta(hours=3)
 
 
 @dataclass
@@ -247,7 +249,7 @@ class IdsTicketHack(TravelHack):
         končí (začíná) řetěz jízdenek IDS – Plzeň → Mariánské Lázně na IC."""
         from .. import ticketplan
 
-        asks: dict[tuple[str, str], dt.datetime] = {}
+        asks: dict[tuple[str, str], list[dt.datetime]] = {}
         for journey in self._chained(journeys):
             rides = [leg for leg in journey.legs if leg.mode is not Mode.WALK]
             path = ticketplan.Path(rides)
@@ -258,14 +260,22 @@ class IdsTicketHack(TravelHack):
                 continue
             forward, backward = ticketplan.reach(path, pieces)
             if 0 < forward < path.last and path.departure(forward) is not None:
-                key = (path.name_from(forward), query.destination)
-                asks[key] = min(asks.get(key, path.departure(forward)), path.departure(forward))
+                asks.setdefault((path.name_from(forward), query.destination), []).append(path.departure(forward))
             if 0 < backward < path.last:
-                key = (query.origin, path.name_to(backward))
-                asks[key] = min(asks.get(key, journey.departure), journey.departure)
-        todo = list(asks.items())[:MAX_CHAIN_ASKS]
+                asks.setdefault((query.origin, path.name_to(backward)), []).append(journey.departure)
+        # jeden dotaz pokryje odjezdy zhruba na tři hodiny (prodejce vrátí pár spojů
+        # od zadaného času) – pozdější spoje se zeptají znovu (IC z Plzně v 18:04)
+        todo: list[tuple[str, str, dt.datetime]] = []
+        for (origin, destination), times in asks.items():
+            start = None
+            for when in sorted(times):
+                if start is None or when - start > CHAIN_ASK_SPAN:
+                    start = when
+                    todo.append((origin, destination, when))
+        todo.sort(key=lambda t: t[2])
         results = await asyncio.gather(*(search(query.leg_query(origin, destination, when - dt.timedelta(minutes=2)))
-                                         for (origin, destination), when in todo), return_exceptions=True)
+                                         for origin, destination, when in todo[:MAX_CHAIN_ASKS]),
+                                       return_exceptions=True)
         return [r for r in results if isinstance(r, list)]
 
     async def _chains(self, query: SearchQuery, journeys: Sequence[Journey],

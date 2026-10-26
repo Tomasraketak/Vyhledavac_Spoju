@@ -177,3 +177,20 @@ async def test_linked_ticket_parts_keep_original_combination():
     second.raw["linked"] = True
     same = await ticketplan.improve(query, [first, second])
     assert [s.price for s in same] == [463, 0]
+
+
+@pytest.mark.asyncio
+async def test_variant_after_first_ticket_abroad():
+    """Cesta do ciziny bez IDS: první jízdenka (FlixBus do Mnichova) zůstane,
+    na zbytek se z odpovědí, které už přišly, nabídne levnější pozdější vlak."""
+    query = SearchQuery(origin="Praha", destination="Curych", departure=at(8))
+    bus = Leg("Praha, Florenc", "München Hbf", at(8), at(12, 30), Mode.BUS, "FlixBus", "FlixBus N1")
+    ec = Leg("München Hbf", "Zürich HB", at(13, 51), at(18, 28), Mode.TRAIN, "ÖBB", "EC 190")
+    later = Leg("München Hbf", "Zürich HB", at(14, 51), at(19, 28), Mode.TRAIN, "ÖBB", "EC 194")
+    segments = [ticket("FlixBus", [bus], 558), ticket("ÖBB", [ec], 2027)]
+    cheap_later = ticket("ÖBB", [later], 900)
+    key = (normalize(ic._query_name("München Hbf", True)), normalize(ic._query_name("Zürich HB", True)),
+           False, False)
+    variants = await _hack({key: [ticket("ÖBB", [ec], 2027), cheap_later]})._variants(query, segments)
+    assert [v.price for v in variants] == [Decimal(1458)]
+    assert variants[0].segments[0].provider == "FlixBus" and variants[0].arrival == at(19, 28)

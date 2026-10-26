@@ -70,8 +70,9 @@ SAME_ARRIVAL = dt.timedelta(minutes=6)
 MAX_RUN_LEGS = 4
 #: Hloubka rekurzivního dělení kusu (= nejvýš tolik jízdenek navíc).
 MAX_SPLITS = 3
-#: Kolik různých míst lomu se ocení, než se vybere nejlevnější.
-MAX_SPLIT_OPTIONS = 2
+#: Kolik různých míst lomu se ocení, než se vybere nejlevnější (nejdelší začátek,
+#: první hranice a další) – zbytek doplní skladba z už známých odpovědí.
+MAX_SPLIT_OPTIONS = 3
 #: Prodejci přes prohlížeč: ČD prodá cestu z Česka (a do Česka) do celé Evropy
 #: – často levněji díky Včasné jízdence Evropa; ZSSK po Slovensku a ze Slovenska.
 BROWSER_FROM = {"ČD": "CZ", "ZSSK": "SK"}
@@ -375,7 +376,11 @@ class IdosCompleteHack(TravelHack):
         for k, seg in enumerate(segments):
             if seg.provider in SYSTEMS_IDS:
                 start = k + 1
-        if start >= len(segments):
+        if start == 0 and len(segments) >= 2:
+            # bez jízdenky IDS (cesta do ciziny): první jízdenka zůstane, zbytek jiným
+            # spojem – FlixBus do Mnichova a dál pozdější (levnější) vlak ÖBB
+            start = 1
+        if start == 0 or start >= len(segments):
             return []
         head, tail = segments[:start], segments[start:]
         ready = head[-1].arrival if head else query.departure
@@ -594,6 +599,15 @@ class IdosCompleteHack(TravelHack):
             if normalize(_query_name(head[-1].destination, True)) in ends:
                 continue                      # lom ve stejném městě (Malmö → Malmö Hyllie) nic nepřinese
             splits_to_try.append((point, head, tail))
+        # hned po nejdelším začátku lom na první hranici: vnitrostátní jízdenka
+        # k hranici a dál zahraniční prodejce (Praha → Děčín + Bad Schandau → …)
+        home = _end_countries(run)[0]
+        border = next((item for item in reversed(splits_to_try)
+                       if _end_countries(item[1])[1] not in (home, None)
+                       or item[0][1] > 0), None)
+        if border is not None and border in splits_to_try[1:]:
+            splits_to_try.remove(border)
+            splits_to_try.insert(1, border)
         # začátky několika lomů najednou – jinak se čeká na každý dotaz zvlášť
         await self._prefetch(query, [head for _, head, _ in splits_to_try[:PREFETCH]], search, ready)
         for point, head, tail in splits_to_try:

@@ -271,3 +271,32 @@ def test_foreign_station_is_not_taken_for_town_stop():
     assert found is None or found.code == "AT"
     stop_in_town = _place("Táboritská", False, set(), ("Třeboň",))
     assert stop_in_town is not None and stop_in_town.name == "Třeboň, Táboritská"
+
+
+@pytest.mark.asyncio
+async def test_chain_asks_rest_of_trip_again_for_later_departures():
+    """Zbytek cesty z Plzně se ptá zvlášť pro spoj ve 12:04 a v 18:04 – odpověď na
+    dotaz od poledne večerní IC už neobsahuje."""
+    from vyhledavac.hacks.ids_ticket import IdsTicketHack
+
+    def journey(shift):
+        os_ = Leg("Třeboň", "Veselí n.Lužnicí", at(8 + shift, 48), at(9 + shift, 12), Mode.TRAIN, "ČD", "Os 1",
+                  stops=[stop("Třeboň", 8 + shift, 48, start=True), stop("Veselí n.Lužnicí", 9 + shift, 12, end=True)])
+        r = Leg("Veselí n.Lužnicí", "Plzeň hl.n.", at(9 + shift, 28), at(11 + shift, 55), Mode.TRAIN, "ČD", "R 664",
+                stops=[stop("Veselí n.Lužnicí", 9 + shift, 28, start=True), stop("Strakonice", 10 + shift, 53),
+                       stop("Plzeň hl.n.", 11 + shift, 55, end=True)])
+        ic = Leg("Plzeň hl.n.", "Mariánské Lázně", at(12 + shift, 4), at(13 + shift, 5), Mode.TRAIN, "ČD", "IC 1",
+                 stops=[stop("Plzeň hl.n.", 12 + shift, 4, start=True),
+                        stop("Mariánské Lázně", 13 + shift, 5, end=True)])
+        return Journey(provider="ČD", legs=[os_, r, ic], fare_status=FareStatus.PRICED,
+                       fares=[Fare(amount=Decimal(1620), currency="CZK", amount_czk=Decimal(1620))])
+
+    asked = []
+
+    async def search(q, allow_browser=False, only=None):
+        asked.append((q.origin, q.departure.hour))
+        return []
+
+    query = SearchQuery(origin="Třeboň", destination="Mariánské Lázně", departure=at(8), passengers=GROUP)
+    await IdsTicketHack()._chain_answers(query, [journey(0), journey(6)], search)
+    assert sorted(asked) == [("Plzeň hl.n.", 12), ("Plzeň hl.n.", 18)]
