@@ -204,6 +204,91 @@ def test_option_must_match_both_ends_in_time_and_place():
     assert [(p.start, p.end, p.price) for p in pieces] == [(0, 1, 199)]
 
 
+def test_option_on_other_route_with_same_times_is_not_used():
+    """Arriva Třeboň → Plzeň přes Veselí a Budějovice (R 324 + R 660) dojede
+    do Plzně ve stejnou minutu jako spoj přes Prahu (R 324 + IC 554) – na
+    trasu přes Prahu ale jízdenka neplatí, ani když je levnější."""
+    from vyhledavac.hacks.idos_complete import _same_city
+
+    r324 = Leg("Třeboň", "Praha hl.n.", at(18, 4), at(20, 10), Mode.TRAIN, "ČD", "R 324 Lužnice",
+               stops=[stop("Třeboň", 18, 4, start=True), stop("Veselí n.Lužnicí", 18, 24),
+                      stop("Tábor", 18, 50), stop("Praha hl.n.", 20, 10, end=True)])
+    ic554 = Leg("Praha hl.n.", "Mariánské Lázně", at(20, 35), at(23, 3), Mode.TRAIN, "ČD", "IC 554",
+                stops=[stop("Praha hl.n.", 20, 35, start=True), stop("Plzeň hl.n.", 21, 53),
+                       stop("Mariánské Lázně", 23, 3, end=True)])
+    path = ticketplan.Path([r324, ic554])
+    via_budejovice = ticket("Arriva", [
+        Leg("Třeboň", "Veselí n.Lužnicí", at(18, 4), at(18, 24), Mode.TRAIN, "ČD", "R 324"),
+        Leg("Veselí n.Lužnicí", "Plzeň hl.n.", at(19, 28), at(21, 55), Mode.TRAIN, "ČD", "R 660 Rožmberk")], 1458)
+    via_praha = ticket("Arriva", [
+        Leg("Třeboň", "Praha hl.n.", at(18, 4), at(20, 10), Mode.TRAIN, "ČD", "R 324"),
+        Leg("Praha hl.n.", "Plzeň hl.n.", at(20, 35), at(21, 53), Mode.TRAIN, "ČD", "IC 554")], 1900)
+    pieces = ticketplan.option_pieces(path, [via_budejovice, via_praha], _same_city)
+    assert [(p.end, p.price) for p in pieces] == [(path.node(1, 1), 1900)]
+
+
+@pytest.mark.parametrize("seller, route, same", [
+    (["50 (ICE 1558)"], ["ICE 1558"], True),            # plánovač: linka i číslo vlaku
+    (["RJ 1005/1028"], ["RJ 1028"], True),
+    (["000358"], ["EX 358 Západní expres"], True),       # Transitous s nulami
+    (["NJ 40233"], ["NJ 233"], True),
+    (["EX RE25"], ["EC 358"], True),                     # bez čísla – rozhodnou časy
+    (["R 324", "R 660 Rožmberk"], ["R 324 Lužnice", "IC 554"], False),
+    (["IC 554"], ["R 324", "IC 554"], True),             # jízdenka na část vlaků kusu
+    (["Ex 358", "RE 3570"], ["EX RE25", "RE40 (Zug-Nr. 3570)"], True),   # ÖBB bez čísla českého vlaku
+    (["R 660"], ["EX RE25", "RE40 (Zug-Nr. 3570)"], False),              # v jinou dobu než úsek bez čísla
+])
+def test_same_trains_reads_numbers_of_all_sources(seller, route, same):
+    def legs(lines):
+        # n-tý vlak jede v n-tou hodinu
+        return [Leg("A", "B", at(8 + n), at(9 + n), Mode.TRAIN, "X", line) for n, line in enumerate(lines)]
+
+    seller_legs = legs(seller)
+    if seller == ["R 660"]:
+        seller_legs = [Leg("A", "B", at(9), at(10), Mode.TRAIN, "X", "R 660")]   # jako RE 3570, ne jako EX RE25
+    assert ticketplan.same_trains(seller_legs, legs(route)) is same
+    bus = [Leg("A", "B", at(8), at(9), Mode.BUS, "X", "Bus 300")]
+    assert ticketplan.same_trains(bus, [Leg("A", "B", at(8), at(9), Mode.BUS, "X", "330300 300")])
+
+
+def _venice_trip(end="Venezia Mestre", arrival=(8, 7), last_train="RE 3960"):
+    return [Leg("Brno hl.n.", "Wien Hbf", at(17, 18), at(18, 49), Mode.TRAIN, "ČD", "rj 255 Vindobona"),
+            Leg("Wien Hbf", "Bologna Centrale", at(20, 5), at(5, 38, day=2), Mode.TRAIN, "ÖBB", "NJ 40233"),
+            Leg("Bologna Centrale", end, at(6, 10, day=2), at(*arrival, day=2), Mode.TRAIN, "Trenitalia",
+                last_train)]
+
+
+@pytest.mark.asyncio
+async def test_ticket_to_farther_station_of_same_city_on_same_train():
+    """Spoj z IDOS končí ve Venezia Mestre (IDOS do Bologni 1542 + Trenitalia
+    357 Kč); ÖBB prodá tytéž vlaky až do Venezia S. Lucia za 1791 Kč –
+    vystoupit se smí dřív, takže je to nejlevnější jízdenka i do Mestre."""
+    from vyhledavac.hacks.idos_complete import _merge, _same_city
+
+    query = SearchQuery(origin="Brno", destination="Benátky", departure=at(8))
+    legs = _venice_trip()
+    idos = ticket("ČD", legs[:2], 1542)
+    italy = ticket("Trenitalia", legs[2:], 357)
+    obb = ticket("ÖBB", _venice_trip("Venezia Santa Lucia", (8, 20), "RE 3960 (Zug-Nr. 3960)"), 1791)
+    better = await ticketplan.improve(query, [idos, italy], options=[obb], same_place=_same_city)
+    assert [(s.provider, s.destination) for s in better] == [("ÖBB", "Venezia Mestre")]
+    assert ticketplan.total(better) == Decimal(1791)
+    assert "jízdenka až do Venezia Santa Lucia" in _merge(better, "🧩").notes[0]
+
+
+def test_ticket_beyond_only_same_train_and_same_city():
+    from vyhledavac.hacks.idos_complete import _same_city
+
+    path = ticketplan.Path(_venice_trip())
+    other_train = ticket("ÖBB", _venice_trip("Venezia Santa Lucia", (8, 50), "RV 2210"), 900)
+    other_city = ticket("ÖBB", _venice_trip("Trieste Centrale", (8, 30)), 900)
+    too_late = ticket("ÖBB", _venice_trip("Venezia Santa Lucia", (9, 30)), 900)
+    shorter = ticket("ÖBB", _venice_trip("Venezia Mestre", (8, 7)), 1700)
+    pieces = ticketplan.option_pieces(path, [other_train, other_city, too_late, shorter], _same_city)
+    assert [(p.start, p.end, p.price) for p in pieces] == [(0, path.last, 1700)]
+    assert "ticket_to" not in pieces[0].segment.raw
+
+
 # ---- kde jízdenka IDS platí ----------------------------------------------------------------
 def test_ride_systems_by_line_and_train_category():
     from vyhledavac.ticketplan import ride_systems

@@ -15,7 +15,8 @@ všech kandidátů se vybere nejlevnější pokrytí celé cesty:
   autobus linky systému, MHD; jízda se musí vejít do platnosti jízdenky a lom
   jen v zastávce, kde vůz staví,
 * odpovědi prodejců, které už přišly (``options``), přesně na kus mezi dvěma
-  uzly – tentýž odjezd i příjezd.
+  uzly – tentýž odjezd i příjezd a tytéž vlaky (``same_trains``); i jízdenka
+  do jiného nádraží cílového města, kam tentýž vlak jede dál.
 
 Na dopravce se nic znovu neptá; online tarify (VDV, IREDO, IDOL, DÚK, IDZK)
 si dotáhnou ceny dvojic zón, které ještě nemají v paměti.
@@ -46,8 +47,12 @@ MAX_CANDIDATES = 40
 #: Tentýž spoj u prodejce: odjezd a příjezd do pár minut (zaokrouhlení jízdních řádů).
 SAME_DEPARTURE = dt.timedelta(minutes=3)
 SAME_ARRIVAL = dt.timedelta(minutes=6)
+#: Jízdenka do jiného nádraží cílového města, kam tentýž vlak jede dál
+#: (Venezia S. Lucia, když spoj končí v Mestre) – vystoupit se smí dřív.
+BEYOND = dt.timedelta(minutes=45)
 
 _LICENCE = re.compile(r"\b(\d{6})\b")
+_TRAIN_NO = re.compile(r"\b(\d{2,6})\b")
 
 
 @dataclass
@@ -362,13 +367,80 @@ def option_pieces(path: Path, options: Sequence[Journey],
         ends = [n for n, when in arrivals if when is not None
                 and abs(rides[-1].arrival - when) <= SAME_ARRIVAL
                 and same_place(rides[-1].destination, path.name_to(n))]
+        beyond = not ends and _goes_beyond(rides[-1], path, same_place)
+        if beyond:
+            ends = [path.last]
         for a in starts:
             for b in ends:
                 key = (a, b, option.provider, option.price)
-                if a < b and key not in seen:
-                    seen.add(key)
-                    out.append(Piece(a, b, option.price, on_path(option, path.slice(a, b))))
+                if a >= b or key in seen:
+                    continue
+                legs = path.slice(a, b)
+                if not same_trains(rides, legs):
+                    continue
+                seen.add(key)
+                segment = on_path(option, legs)
+                if beyond:
+                    segment.raw["ticket_to"] = rides[-1].destination
+                out.append(Piece(a, b, option.price, segment))
     return out
+
+
+def _numbers(leg: Leg) -> set[str]:
+    """Čísla vlaku v označení – všechna: „50 (ICE 1558)“ (linka i vlak),
+    „RJ 1005/1028“, „000358“ = 358. Autobusy ne (linky se u zdrojů liší)."""
+    if leg.mode is not Mode.TRAIN:
+        return set()
+    return {n.lstrip("0") or "0" for n in _TRAIN_NO.findall(leg.line or "")}
+
+
+def _shares_number(a: set[str], b: set[str]) -> bool:
+    # „NJ 40233“ = „NJ 233“ u některých zdrojů
+    return any(x == y or (min(len(x), len(y)) >= 3 and (x.endswith(y) or y.endswith(x))) for x in a for y in b)
+
+
+def same_train(a: Leg, b: Leg, *, replacement: bool = False) -> bool:
+    """Tentýž vlak podle čísla („EC 352“ = „000352“ u Transitous). S
+    ``replacement`` i náhradní autobus za vlak („Bus 060354“ za vlak 354)."""
+    def numbers(leg: Leg) -> set[str]:
+        if replacement and leg.mode is Mode.BUS:
+            return {n.lstrip("0") or "0" for n in _TRAIN_NO.findall(leg.line or "")}
+        return _numbers(leg)
+
+    return _shares_number(numbers(a), numbers(b))
+
+
+def same_trains(option: Sequence[Leg], legs: Sequence[Leg]) -> bool:
+    """Jede jízdenka prodejce týmiž vlaky jako kus cesty? Samotné časy nestačí:
+    Arriva Třeboň → Plzeň přes Budějovice (18:04–21:55) dojede do Plzně ve
+    stejnou minutu jako spoj přes Prahu – tam ale jízdenka neplatí. Každý vlak
+    prodejce s číslem musí být na trase – nebo tam ve stejnou dobu jede úsek bez
+    čísla (ÖBB píše „EX RE25“, e-shop IDOS tentýž vlak „Ex 358“; náhradní
+    autobus). Bez čísel u prodejce rozhodují jen časy."""
+    ours = set().union(*(_numbers(leg) for leg in legs))
+    unnumbered = [leg for leg in legs if leg.mode is not Mode.WALK and not _numbers(leg)]
+    for leg in option:
+        numbers = _numbers(leg)
+        if numbers and not _shares_number(numbers, ours) and not any(
+                leg.departure < other.arrival and other.departure < leg.arrival for other in unnumbered):
+            return False
+    return True
+
+
+def _goes_beyond(ride: Leg, path: Path, same_place: Callable[[str, str], bool]) -> bool:
+    """Jede jízdenka tímtéž posledním vlakem dál, do jiného nádraží cílového
+    města? (Spoj končí ve Venezia Mestre, ÖBB prodá až do Venezia S. Lucia.)"""
+    last = path.rides[-1]
+    return (same_train(ride, last)
+            and abs(ride.departure - last.departure) <= SAME_DEPARTURE
+            and dt.timedelta(0) <= ride.arrival - last.arrival <= BEYOND
+            and same_place(ride.destination, path.name_to(path.last)))
+
+
+def ticket_note(segment: Journey) -> str:
+    """Jízdenka do vzdálenějšího nádraží téhož města (``option_pieces``)."""
+    to = segment.raw.get("ticket_to")
+    return f" (jízdenka až do {to}, vystoupíte dřív)" if to else ""
 
 
 def on_path(option: Journey, legs: list[Leg]) -> Journey:

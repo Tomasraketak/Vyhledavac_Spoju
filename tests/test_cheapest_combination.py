@@ -194,3 +194,123 @@ async def test_variant_after_first_ticket_abroad():
     variants = await _hack({key: [ticket("ÖBB", [ec], 2027), cheap_later]})._variants(query, segments)
     assert [v.price for v in variants] == [Decimal(1458)]
     assert variants[0].segments[0].provider == "FlixBus" and variants[0].arrival == at(19, 28)
+
+
+@pytest.mark.asyncio
+async def test_priced_seller_journey_gets_cheaper_pieces_from_memory():
+    """ČD prodá Praha → Amsterdam za 7111 Kč; z odpovědí, které během hledání
+    přišly, jdou tytéž vlaky koupit po částech za 5019 Kč – nabídne se to."""
+    query = SearchQuery(origin="Praha", destination="Amsterdam", departure=at(8))
+    a = Leg("Praha hl.n.", "Nürnberg Hbf", at(11, 35), at(15, 20), Mode.TRAIN, "ČD", "EX RE25",
+            stops=[stop("Praha hl.n.", 11, 35, start=True), stop("Plzeň hl.n.", 13, 10),
+                   stop("Nürnberg Hbf", 15, 20, end=True)])
+    b = Leg("Nürnberg Hbf", "Amsterdam Centraal", at(15, 40), at(23, 29), Mode.TRAIN, "DB", "ICE 620",
+            stops=[stop("Nürnberg Hbf", 15, 40, start=True), stop("Duisburg Hbf", 21, 5),
+                   stop("Amsterdam Centraal", 23, 29, end=True)])
+    cd = Journey(provider="ČD", legs=[a, b], fare_status=FareStatus.PRICED, deep_link="https://cd.example/7111",
+                 fares=[Fare(amount=Decimal(7111), currency="CZK", amount_czk=Decimal(7111))])
+    head = ticket("ČD", [Leg("Praha hl.n.", "Nürnberg Hbf", at(11, 35), at(15, 20), Mode.TRAIN, "ČD", "EX RE25")],
+                  2037)
+    tail = ticket("ÖBB", [Leg("Nürnberg Hbf", "Amsterdam Centraal", at(15, 40), at(23, 29), Mode.TRAIN, "DB",
+                              "ICE 620")], 2982)
+    hack = _hack({("praha", "norimberk", False, False): [head], ("norimberk", "amsterodam", False, False): [tail]})
+    found = await hack._cheaper_sellers(query, [cd])
+    assert [j.price for j in found] == [Decimal(5019)]
+    assert found[0].legs == cd.legs and [s.provider for s in found[0].segments] == ["ČD", "ÖBB"]
+    assert found[0].deep_link is None       # ne odkaz na celou jízdenku za 7111 Kč
+    # úspora pod 3 % – nenabízet
+    hack = _hack({("praha", "norimberk", False, False): [head],
+                  ("norimberk", "amsterodam", False, False): [ticket("ÖBB", tail.legs, 5000)]})
+    assert await hack._cheaper_sellers(query, [cd]) == []
+
+
+@pytest.mark.asyncio
+async def test_same_times_on_other_trains_is_not_the_same_trip():
+    """Arriva Třeboň → Plzeň přes Budějovice (R 660) dojede ve stejnou minutu
+    jako kus přes Prahu (IC 554). Není to tentýž spoj: cena se nepřiřadí na
+    úseky přes Prahu – nanejvýš jako jiný spoj s vlastní trasou od prodejce."""
+    r324 = Leg("Třeboň", "Praha hl.n.", at(18, 4), at(20, 10), Mode.TRAIN, "ČD", "R 324 Lužnice")
+    ic554 = Leg("Praha hl.n.", "Plzeň hl.n.", at(20, 35), at(21, 55), Mode.TRAIN, "ČD", "IC 554")
+    via_cb = ticket("Arriva", [
+        Leg("Třeboň", "Veselí n.Lužnicí", at(18, 4), at(18, 24), Mode.TRAIN, "ČD", "R 324"),
+        Leg("Veselí n.Lužnicí", "Plzeň hl.n.", at(19, 28), at(21, 55), Mode.TRAIN, "ČD", "R 660 Rožmberk")], 1458)
+    via_praha = ticket("Arriva", [Leg("Třeboň", "Praha hl.n.", at(18, 4), at(20, 10), Mode.TRAIN, "ČD", "R 324"),
+                                  Leg("Praha hl.n.", "Plzeň hl.n.", at(20, 35), at(21, 55), Mode.TRAIN, "ČD",
+                                      "IC 554")], 1900)
+    run = [r324, ic554]
+    assert ic._match([via_cb], run, "Třeboň", "Plzeň hl.n.") is None
+    assert ic._match([via_cb, via_praha], run, "Třeboň", "Plzeň hl.n.") is via_praha
+
+    query = SearchQuery(origin="Třeboň", destination="Plzeň", departure=at(8), passengers=GROUP)
+    asked = []
+
+    async def search(q, allow_browser=False, only=None):
+        asked.append(allow_browser)
+        return [] if allow_browser else [via_cb]
+
+    found = await _hack()._seller(query, run, search)
+    assert found is not None and found.raw.get("other_route")
+    assert [leg.line for leg in found.legs] == ["R 324", "R 660 Rožmberk"]
+    assert True in asked                 # tentýž spoj nikdo neprodal – zeptá se i ČD
+
+    async def search_same(q, allow_browser=False, only=None):
+        return [] if allow_browser else [via_cb, via_praha]
+
+    found = await _hack()._seller(query, run, search_same)
+    assert found.price == Decimal(1900) and not found.raw.get("other_route") and found.legs == run
+
+
+@pytest.mark.asyncio
+async def test_through_train_across_carriers_is_bought_as_one_ticket():
+    """Praha → Řím: EC 352 ČD do Plzně, náhradní autobus ČD do Schwandorfu
+    a tentýž vlak 352 dál pod alexem do Mnichova, pak FlixBus. Po dopravcích
+    by se lámalo ve Schwandorfu (ČD 396 + ÖBB 1216 Kč); ČD ale prodá celý
+    vlak Praha → München za 463 Kč."""
+    from vyhledavac import transfer
+    from vyhledavac.registry import load_plugins
+
+    load_plugins()                                    # registr prodejců (FlixBus …)
+    transfer.OFFLINE.set(True)
+    query = SearchQuery(origin="Praha", destination="Řím", departure=at(8))
+    ec = Leg("Praha hl.n.", "Plzeň hl.n.", at(15, 35), at(16, 58), Mode.TRAIN, "České dráhy, a.s.", "EC 352")
+    nad = Leg("Plzeň hl.n.", "Schwandorf", at(17, 7), at(18, 57), Mode.BUS, "České dráhy, a.s.", "Bus 060352")
+    alex = Leg("Schwandorf", "München Hbf", at(19, 13), at(21, 18), Mode.TRAIN, "alex - Die Länderbahn GmbH DLB",
+               "000352")
+    flix = Leg("München ZOB", "Roma Tiburtina", at(22, 15), at(9, 30, day=2), Mode.BUS, "FlixBus", "FlixBus N531")
+    run = [ec, nad, alex, flix]
+    assert ic._through_groups(ic._carrier_groups(run)) == [[ec, nad, alex], [flix]]
+    # celou českou část jede náhradní autobus za vlak 352 – pořád tentýž vlak
+    assert ic._through_groups(ic._carrier_groups([nad, alex, flix])) == [[nad, alex], [flix]]
+    # jiný vlak (alex 354) navazující na autobus ČD se nespojí
+    other = Leg("Schwandorf", "München Hbf", at(19, 13), at(21, 18), Mode.TRAIN, "alex", "000354")
+    assert ic._through_groups(ic._carrier_groups([ec, nad, other])) == [[ec, nad], [other]]
+    answers = [ticket("ČD", [ec, nad, alex], 463), ticket("ČD", [ec, nad], 396), ticket("ÖBB", [alex], 1216),
+               ticket("FlixBus", [flix], 1378)]
+
+    async def search(q, allow_browser=False, only=None):
+        return answers
+
+    parts = await _hack()._by_carrier(query, run, search, None, "")
+    assert [(p.provider, p.destination, p.price) for p in parts] == [("ČD", "München Hbf", 463),
+                                                                      ("FlixBus", "Roma Tiburtina", 1378)]
+
+
+@pytest.mark.asyncio
+async def test_seller_journey_gets_ticket_to_farther_station_on_same_train():
+    """ČD Praha → Roma Tiburtina 1816 Kč; ÖBB prodá tytéž vlaky až do Roma
+    Termini (noční vlak tam jede dál) za 1628 Kč – vystoupit se smí dřív."""
+    query = SearchQuery(origin="Praha", destination="Řím", departure=at(8))
+    rj = Leg("Praha hl.n.", "Wien Hbf", at(14, 37), at(18, 49), Mode.TRAIN, "ČD", "rj 255 Vindobona")
+    nj = Leg("Wien Hbf", "Roma Tiburtina", at(20, 5), at(10, 5, day=2), Mode.TRAIN, "ÖBB", "NJ 40233")
+    cd = Journey(provider="ČD", legs=[rj, nj], fare_status=FareStatus.PRICED,
+                 fares=[Fare(amount=Decimal(1816), currency="CZK", amount_czk=Decimal(1816))])
+    obb = ticket("ÖBB", [Leg("Praha hl.n.", "Wien Hbf", at(14, 37), at(18, 54), Mode.TRAIN, "ÖBB", "RJ 255"),
+                         Leg("Wien Hbf", "Roma Termini", at(20, 5), at(10, 35, day=2), Mode.TRAIN, "ÖBB",
+                             "NJ 40233")], 1628)
+    found = await _hack(base=[obb])._cheaper_sellers(query, [cd, obb])
+    assert [j.price for j in found] == [Decimal(1628)] and found[0].legs == cd.legs
+    assert "levněji jinou jízdenkou" in found[0].notes[0]
+    assert "jízdenka až do Roma Termini" in found[0].notes[0]
+    # bez jízdenky dál jen jiný prodejce téhož spoje – nic nenabízet
+    same = ticket("ÖBB", [rj, nj], 1628)
+    assert await _hack(base=[same])._cheaper_sellers(query, [cd]) == []

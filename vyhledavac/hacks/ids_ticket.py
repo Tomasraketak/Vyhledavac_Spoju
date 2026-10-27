@@ -602,9 +602,11 @@ def _chain_candidate(journey: Journey) -> bool:
 
 def _chain_result(journey: Journey, segments: list[Journey], price: Decimal) -> Journey:
     """Výsledek skladby po jízdách: tytéž vlaky, víc jízdenek."""
+    from .. import ticketplan
+
     lines = "; ".join(f"{s.origin} → {s.destination}: {s.provider} "
                       + (f"({s.fares[0].tariff}) " if s.raw.get("ids_tariff") and s.fares else "")
-                      + f"{s.price:.0f} Kč" for s in segments)
+                      + f"{s.price:.0f} Kč" + ticketplan.ticket_note(s) for s in segments)
     note = (f"✂️ Stejné vlaky a přestupy jako u {journey.provider}, jen {len(segments)} jízdenky "
             f"(lom jen ve stanicích, kde vlak staví): {lines}. Celkem {price:.0f} Kč místo "
             f"{journey.price:.0f} Kč – ušetříte {journey.price - price:.0f} Kč.")

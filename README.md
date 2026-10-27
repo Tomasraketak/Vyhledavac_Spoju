@@ -206,6 +206,7 @@ V trasování je to řádek `⇄`.
 
 Značky: `▶` spoj, `?` dotaz na prodejce, `✓` nalezená jízdenka, `✗` nic,
 `✂` zkoušený lom, `⚖` porovnání, `–` kus, který nikdo neprodává (bez dotazu),
+`⚡` jízdenky po dopravcích, `⚙` levnější skladba jízdenek (`ticketplan`),
 `!` chyba dopravce, `◐` spoj jen s částí cen. Ve webovém rozhraní je totéž
 v panelu *Diagnostika* (pod výsledky) po skončení hledání.
 
@@ -641,13 +642,25 @@ ze všech kandidátů:
   autobus linky systému, MHD; jízda se musí vejít do platnosti jízdenky
   a lom smí být jen v zastávce, kde vůz staví,
 * **odpovědi prodejců, které už přišly**, přesně na kus mezi dvěma uzly
-  (tentýž odjezd i příjezd) – i jízdenky e-shopu IDOS (ČD) na část jiné trasy
-  (Praha → Offenburg nočním vlakem 1394 Kč místo 7212 Kč u ÖBB) a částečné
-  jízdenky ÖBB (jen München → Zürich).
+  (tentýž odjezd i příjezd a **tytéž vlaky**) – i jízdenky e-shopu IDOS (ČD)
+  na část jiné trasy (Praha → Offenburg nočním vlakem 1394 Kč místo 7212 Kč
+  u ÖBB) a částečné jízdenky ÖBB (jen München → Zürich),
+* **jízdenka do jiného nádraží cílového města**, kam tentýž vlak jede dál –
+  vystoupit se smí dřív: ÖBB do Venezia S. Lucia platí i pro spoj, který
+  končí v Mestre (v rozpisu „jízdenka až do …, vystoupíte dřív“).
 
 Žádné nové dotazy na dopravce – jen ceny online tarifů IDS (VDV, IREDO, IDOL,
 DÚK, IDZK), které ještě nejsou v paměti. Jízdenka e-shopu na víc oddělených
 úseků (cena jen u prvního) se nikdy nerozdělí.
+
+Samotné časy nestačí: Arriva Třeboň → Plzeň přes Veselí a Budějovice
+(18:04–21:55, 1458 Kč) dojede do Plzně ve stejnou minutu jako spoj přes Prahu
+(R 324 + IC 554), jenže tam by jízdenka neplatila. Odpověď prodejce se proto
+přiřadí na úseky jen tehdy, když sedí i čísla vlaků – všechna v označení
+(„50 (ICE 1558)“, „RJ 1005/1028“, „000358“ = 358); úsek trasy bez čísla
+(ÖBB píše „EX RE25“, e-shop IDOS tentýž vlak „Ex 358“) nebo náhradní autobus
+ve stejnou dobu nevadí. Jinak se nabídne jako jiný spoj s vlastní trasou od
+prodejce. Bez čísel u prodejce (autobusy) rozhodují časy.
 
 Kde se to projeví:
 
@@ -657,7 +670,22 @@ Kde se to projeví:
   systémů IDS po jízdách (IDESKA do Strakonic, IDPK do Plzně) a zbytek
   u prodejce (SJT na IC z Plzně) – dřív jen jeden systém a zbytek u ČD,
 * **kus, který žádný e-shop neprodá** (regionální autobus z plánovače),
-  doplní tarif IDS – spoj má celou cenu místo „cenu zná jen část jízdenek“.
+  doplní tarif IDS – spoj má celou cenu místo „cenu zná jen část jízdenek“,
+* **spoje, které cenu od dopravce už mají** (na konci `idos_complete`):
+  tytéž vlaky po částech z odpovědí, které během hledání přišly – ČD Praha →
+  Amsterdam 7111 Kč → ČD do Norimberka + ÖBB dál 4834 Kč, ČD Ostrava →
+  Mnichov 4285 Kč → ÖBB po částech 1072 Kč; ČD do Roma Tiburtina 1816 Kč →
+  ÖBB týmiž vlaky až do Roma Termini 1628 Kč. Nabídne se jako další výsledek
+  („🧩 Tytéž vlaky jako u ČD (7111 Kč) levněji po částech“), jen když ušetří
+  aspoň 3 %, a bez odkazu na celou dražší jízdenku – kupuje se po částech.
+
+Dělení „po dopravcích“ (když celý kus nikdo neprodá) nejdřív zkusí jednou
+jízdenkou **průběžný vlak**, který za hranicí jede pod jiným dopravcem se
+stejným číslem (EC 352 ČD do Plzně, náhradní autobus, alex 352 do Mnichova;
+i když celou českou část jede náhradní autobus „Bus 060352“): ČD Praha →
+München 463 Kč místo ČD do Schwandorfu 396 Kč + ÖBB 1216 Kč – Praha → Řím
+s FlixBusem z Mnichova tak vyjde 1841 Kč místo 2990 Kč. Rozdělení po
+dopravcích se pak porovná z odpovědí, které už přišly (bez nových dotazů).
 
 Lomená jízdenka (`split_ticket`) na dlouhé cestě zkouší z každého města jen
 jednu stanici (Děčín hl. n. místo tří děčínských zastávek), stanice na hranici
@@ -665,6 +693,31 @@ i **velká města na trase** (Drážďany, Frankfurt, Kolín) a nabídne kombina
 i tehdy, když je levnější jen autobus v jiný čas – stačí, že ji žádný nalezený
 spoj nepřekoná zároveň cenou i časem. Do ciziny se e-shopu IDOS (ČD) ptá
 souběžně s ostatními prodejci i tehdy, když tentýž vlak prodá ÖBB.
+
+Test přes webové rozhraní (všichni dopravci a výchozí hacky; skupina dva
+senioři 76 a 78 let, dva dospělí a student 20 let s ISIC odjezd 27. 10. 2026
+od 8:00, ostatní trasy dospělý 30 let odjezd 3. 11. 2026 od 8:00) – před
+úpravami (ráno 26. 10.) a po nich:
+
+| Trasa | Spojů s cenou | Tytéž spoje levněji (příklady) |
+|---|---|---|
+| Třeboň → Mariánské Lázně, skupina | 20/24 → 34/37 | nejlevnější 1241 → **639 Kč**; spoje s přestupy od ČD a Arrivy 2002–2172 → 1241 Kč |
+| Praha → Paříž | 14/28 → 18/30 | noční vlak v 18:31: 9195 → **3377 Kč**, 10379 → 4561 Kč |
+| Praha → Amsterdam | 30/40 → 32/43 | 9:35: 7111 → **4834 Kč** |
+| Plzeň → Curych | 8/25 → 14/29 | 9:10: 4241 → **2508 Kč**; 9:07: 4741 → 3958 Kč; 11:07: 4465 → 3542 Kč |
+| Ostrava → Mnichov | 36/47 → 47/57 | 13:51: 4285 → **1072 Kč**; 10:05: 2892 → 1173 Kč; 12:51: 4285 → 3243 Kč |
+| Olomouc → Varšava | 27/44 → 34/51 | 10:44: 710 → 649 Kč |
+| Brno → Benátky | 16/20 → 27/31 | 10:18: 1311 → 1221 Kč; 15:18: 1814 → 1794 Kč |
+
+Co zůstává: „nejlevnější“ znamená nejlevnější z nabídek, které se během
+hledání podařilo získat – co žádný prodejce online nenabídne (osobní vlaky
+Kolejí Śląskich přes hranici, večerní Eurostar), to program nevymyslí, a DB
+z některých IP adres odmítá dotazy (program to neobchází). Ceny se mezi běhy
+mění (FlixBus, noční vlaky ÖBB, kurz eura) a Koleo občas nevrátí vlak, který
+jindy prodá – pak zbude dražší ÖBB (Katovice → Varšava 1435 Kč místo
+245–376 Kč). Různé jízdenky pro různé cestující téže skupiny (senioři jinak
+než dospělí) program nezkouší – na trase Třeboň → Mariánské Lázně by to nic
+neušetřilo, slevy seniorů a studentů jsou v IDS i SJT poměrné (50 %).
 
 ### MHD po městě
 
