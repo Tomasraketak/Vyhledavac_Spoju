@@ -152,8 +152,11 @@ class DbProvider(HttpProvider):
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
         if None not in known and not COUNTRIES & set(known):
             raise StationNotFoundError(self.name, "cesta nevede do Německa ani přes něj")
-        origin = await self.resolve(query.origin)
-        destination = await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         when = query.departure.astimezone(DEFAULT_TZ).strftime("%Y-%m-%dT%H:%M:%S")
         data = await self._call("POST", "angebote/fahrplan", body={
             "abfahrtsHalt": origin["id"], "ankunftsHalt": destination["id"],

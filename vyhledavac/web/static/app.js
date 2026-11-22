@@ -72,15 +72,25 @@
       system: e.system, zones: String(e.zones || ''),
     })) : [];
   }
-  const today = new Date();
   const pad = n => String(n).padStart(2, '0');
+  const isoDate = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const todayIso = () => isoDate(new Date());
+  const addDaysIso = n => { const d = new Date(); d.setDate(d.getDate() + n); return isoDate(d); };
+  const weekendIso = () => { const d = new Date(); const delta = (6 - d.getDay() + 7) % 7 || 7; d.setDate(d.getDate() + delta); return isoDate(d); };
+  const nowTime = () => { const d = new Date(); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+  function loadRoutes() {
+    const saved = store.get('routes', []);
+    return Array.isArray(saved) ? saved.filter(r => r && r.from && r.to).slice(0, 5) : [];
+  }
   const S = {
     meta: null,
     providersOn: null,            // Set jmen – nastaví se po načtení meta
-    hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket', 'idos_complete', 'obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass'])),
-    // Cestující: [{age, isic, skFree}] – starší verze ukládala jednoho do kořene.
+    provOpen: false,              // rozbalený seznam všech zdrojů dat
+    hacksOn: new Set(store.get('hacks', ['split_ticket', 'ids_ticket', 'idos_complete', 'obb_partial', 'hub_transfer', 'cd_europe_border', 'cd_europe_beyond', 'regional_pass', 'night_train'])),
+    // Cestující: [{age, isic, skFree, dTicket}] – starší verze ukládala jednoho do kořene.
     pax: loadPax(),
     passes: loadPasses(),
+    routes: loadRoutes(),
     pass: false,                  // rozbalený panel Cestující
     modes: [...ALL_GROUPS],
     adv: false,
@@ -102,6 +112,12 @@
     sid: null,
     es: null,
     clientError: '',
+    // Cenový kalendář (±3 dny)
+    calData: null,
+    calLoading: false,
+    calId: null,
+    calEs: null,
+    calError: '',
   };
 
   // Hack s jízdenkami IDS přibyl později – zapnout ho jednou i těm, kdo už
@@ -117,6 +133,12 @@
     store.set('euroHacksOffered3', true);
     store.set('hacks', [...S.hacksOn]);
   }
+  // Noční vlaky – synchronizace s výchozím nastavením na serveru.
+  if (!store.get('nightHackOffered', false)) {
+    S.hacksOn.add('night_train');
+    store.set('nightHackOffered', true);
+    store.set('hacks', [...S.hacksOn]);
+  }
 
   // ---- formulář ------------------------------------------------------------
   const form = $('#search-form');
@@ -126,8 +148,8 @@
     const last = store.get('last', null);
     fFrom.value = last ? last.from : 'Praha';
     fTo.value = last ? last.to : 'Brno';
-    fDate.value = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-    fTime.value = `${pad(today.getHours())}:${pad(today.getMinutes())}`;
+    fDate.value = todayIso();
+    fTime.value = nowTime();
     fRet.value = store.get('roundTrip', '');
     document.querySelectorAll('.sf-label[data-icon]').forEach(el => el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon, 13)));
     $('#swap-btn').innerHTML = icon('arrow-left-right', 18);
@@ -140,6 +162,8 @@
     const history = store.get('history', []).filter(n => n !== from && n !== to);
     store.set('history', [from, to, ...history].slice(0, 20));
     store.set('last', { from, to });
+    S.routes = [{ from, to }, ...S.routes.filter(r => !(r.from === from && r.to === to))].slice(0, 5);
+    store.set('routes', S.routes);
   }
 
   // ---- našeptávač zastávek ---------------------------------------------------
@@ -197,9 +221,12 @@
     }).join('');
     const cell = input.closest('.sf-cell') || input;
     const r = cell.getBoundingClientRect();
-    sugBox.style.left = `${r.left + window.scrollX}px`;
+    const maxW = Math.max(220, window.innerWidth - 16);
+    const width = Math.min(Math.max(r.width, 320), maxW);
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+    sugBox.style.left = `${left + window.scrollX}px`;
     sugBox.style.top = `${r.bottom + window.scrollY}px`;
-    sugBox.style.width = `${Math.max(r.width, 320)}px`;
+    sugBox.style.width = `${width}px`;
     sugBox.hidden = false;
     input.setAttribute('aria-expanded', 'true');
     if (active >= 0) input.setAttribute('aria-activedescendant', `sg-${active}`);
@@ -276,19 +303,29 @@
   window.addEventListener('resize', () => { if (!sugBox.hidden) renderSuggest(); });
 
   // ---- hledání -------------------------------------------------------------
-  async function startSearch(ev) {
-    if (ev) ev.preventDefault();
-    if (!S.providersOn) return toast('Načítám nastavení, zkuste to za okamžik.');
-    const providers = [...S.providersOn];
-    if (!providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
-    const body = {
+  function buildRequestBody() {
+    const providers = S.providersOn ? [...S.providersOn] : [];
+    const trainsOnly = S.modes.length === 1 && S.modes[0] === 'train';
+    return {
       from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value, time: fTime.value,
       passengers: S.pax.map((p, i) => ({ age: Number(p.age), isic: p.isic, skFree: p.skFree, dTicket: p.dTicket, passes: passesFor(i) })),
       providers, hacks: [...S.hacksOn], regional: S.regional,
+      trainsOnly,
       roundTrip: fRet.value || null,
     };
+  }
+
+  async function startSearch(ev) {
+    if (ev) ev.preventDefault();
+    if (!S.providersOn) return toast('Načítám nastavení, zkuste to za okamžik.');
+    const body = buildRequestBody();
+    if (!body.providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
     store.set('roundTrip', fRet.value);
     if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
+    // Pokud uživatel změnil trasu, zavřeme starý cenový kalendář pro jinou trasu.
+    if (S.calData && S.calData.query && (S.calData.query.from !== body.from || S.calData.query.to !== body.to)) {
+      closeCalendar();
+    }
     closeStream();
     S.clientError = '';
     S.searching = true;
@@ -296,11 +333,14 @@
     S.stopsOpen.clear();
     S.off.clear();
     S.data = {
-      done: false, query: { from: body.from, to: body.to, departure: `${body.date}T${body.time}` },
-      providers: providers.map(name => ({ name, status: 'running', detail: 'hledám…' })),
+      done: false,
+      query: { from: body.from, to: body.to, departure: `${body.date}T${body.time}`, roundTrip: body.roundTrip, trainsOnly: body.trainsOnly },
+      providers: body.providers.map(name => ({ name, status: 'running', detail: 'hledám…' })),
       problems: [], journeys: [],
     };
-    render();
+    remember(body.from, body.to);
+    renderQuickBar();
+    renderResults();
     let res;
     try {
       res = await fetch('/api/search', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -309,7 +349,6 @@
     }
     const json = await res.json().catch(() => ({}));
     if (!res.ok) return failClient(json.error || 'Hledání se nepodařilo spustit.');
-    remember(body.from, body.to);
     S.sid = json.id;
     const es = new EventSource(`/api/search/${json.id}/events`);
     S.es = es;
@@ -318,7 +357,7 @@
       if (data.id !== S.sid) return;
       S.data = data;
       if (data.done) { S.searching = false; closeStream(); }
-      render();
+      renderResults();
     };
     es.onerror = () => {
       if (S.es !== es) return;
@@ -331,7 +370,7 @@
     S.searching = false;
     S.clientError = message;
     if (S.data) S.data.done = true;
-    render();
+    renderResults();
   }
 
   function closeStream() {
@@ -341,6 +380,84 @@
   async function cancelSearch() {
     if (!S.sid) return;
     try { await fetch(`/api/search/${S.sid}/cancel`, { method: 'POST' }); } catch (e) { /* server stejně skončí */ }
+  }
+
+  // ---- cenový kalendář (±3 dny) -------------------------------------------
+  async function startCalendar() {
+    if (!S.providersOn) return toast('Načítám nastavení, zkuste to za okamžik.');
+    const body = buildRequestBody();
+    if (!body.from || !body.to) return toast('Vyplňte odkud a kam.');
+    if (!body.providers.length) return toast('Vyberte alespoň jeden zdroj dat.');
+    body.days = 7;
+    closeCalStream();
+    S.calError = '';
+    S.calLoading = true;
+    S.calId = null;
+    S.calData = {
+      done: false,
+      query: { from: body.from, to: body.to, date: body.date, trainsOnly: body.trainsOnly },
+      providers: [],
+      days: [],
+    };
+    remember(body.from, body.to);
+    renderQuickBar();
+    renderModes();
+    renderCalendar();
+    let res;
+    try {
+      res = await fetch('/api/calendar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    } catch (e) {
+      S.calLoading = false;
+      S.calError = 'Server vyhledávače neodpovídá.';
+      renderModes();
+      return renderCalendar();
+    }
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      S.calLoading = false;
+      S.calError = json.error || 'Cenový kalendář se nepodařilo spustit.';
+      renderModes();
+      return renderCalendar();
+    }
+    S.calId = json.id;
+    const es = new EventSource(`/api/calendar/${json.id}/events`);
+    S.calEs = es;
+    es.onmessage = msg => {
+      const data = JSON.parse(msg.data);
+      if (data.id !== S.calId) return;
+      S.calData = data;
+      if (data.error) S.calError = data.error;
+      if (data.done) { S.calLoading = false; closeCalStream(); renderModes(); }
+      renderCalendar();
+    };
+    es.onerror = () => {
+      if (S.calEs !== es) return;
+      closeCalStream();
+      if (S.calLoading) {
+        S.calLoading = false;
+        S.calError = 'Spojení se serverem se přerušilo.';
+        renderModes();
+        renderCalendar();
+      }
+    };
+  }
+
+  function closeCalStream() {
+    if (S.calEs) { S.calEs.close(); S.calEs = null; }
+  }
+
+  async function cancelCalendar() {
+    if (!S.calId) return;
+    try { await fetch(`/api/calendar/${S.calId}/cancel`, { method: 'POST' }); } catch (e) { /* server stejně skončí */ }
+  }
+
+  function closeCalendar() {
+    if (S.calLoading) cancelCalendar();
+    closeCalStream();
+    S.calLoading = false;
+    S.calId = null;
+    S.calData = null;
+    S.calError = '';
   }
 
   // ---- odvozená data spoje --------------------------------------------------
@@ -366,6 +483,18 @@
     };
   }
 
+  // Obohacení spojů ze serveru kešujeme po dobu jednoho snímku (S.data).
+  const enrichedCache = { src: null, list: [] };
+  function getEnriched() {
+    const raw = S.data ? S.data.journeys : null;
+    if (!raw || !raw.length) return [];
+    if (enrichedCache.src !== raw) {
+      enrichedCache.src = raw;
+      enrichedCache.list = raw.map(enrich);
+    }
+    return enrichedCache.list;
+  }
+
   // Se zpáteční jízdenkou se řadí podle ceny tam i zpět.
   const priceKey = j => j.roundTrip ? j.roundTrip.price : (j.price == null ? Infinity : j.price * (roundTripOn() ? 2 : 1));
   const roundTrip = j => j.roundTrip;
@@ -378,8 +507,7 @@
   };
 
   function visibleJourneys() {
-    const all = (S.data ? S.data.journeys : []).map(enrich);
-    return all
+    return getEnriched()
       .filter(j => j.groups.every(g => S.modes.includes(g)))
       .filter(j => !S.direct || j.realTransfers === 0)
       .filter(j => S.maxT === 'any' || j.realTransfers <= Number(S.maxT))
@@ -418,7 +546,22 @@
 
   function sameDepartureFilter() {
     if (!S.sameDep) return () => true;
-    return (j, _, list) => !list.some(o => o !== j && o.depM === j.depM && beats(o, j));
+    let groups = null;
+    let srcList = null;
+    return (j, _, list) => {
+      if (list !== srcList) {
+        srcList = list;
+        groups = new Map();
+        for (const item of list) {
+          let g = groups.get(item.depM);
+          if (!g) { g = []; groups.set(item.depM, g); }
+          g.push(item);
+        }
+      }
+      const group = groups.get(j.depM);
+      if (!group || group.length < 2) return true;
+      return !group.some(o => o !== j && beats(o, j));
+    };
   }
 
   // ---- peníze --------------------------------------------------------------
@@ -436,23 +579,45 @@
     return { sold_out: 'Vyprodáno', not_bookable: 'Nelze koupit online' }[j.fareStatus] || 'Cena neznámá';
   }
 
+  function bestFare(j) {
+    if (!j.fares || !j.fares.length) return null;
+    if (j.price != null) {
+      const avail = j.fares.find(f => f.czk != null && f.status === 'available' && Math.abs(f.czk - j.price) < 0.5);
+      if (avail) return avail;
+      const match = j.fares.find(f => f.czk != null && Math.abs(f.czk - j.price) < 0.5);
+      if (match) return match;
+    }
+    const priced = j.fares.filter(f => f.czk != null).sort((a, b) => a.czk - b.czk);
+    return priced[0] || j.fares[0];
+  }
+
   function originalFare(j) {
     // Cena v cizí měně: ukážeme i originál, ať je vidět, co dopravce účtuje.
-    const fare = j.fares.find(f => f.czk != null && Math.abs(f.czk - j.price) < 0.5) || j.fares[0];
+    const fare = bestFare(j);
     if (!fare || fare.currency === 'CZK' || fare.currency === S.cur) return '';
     return `${fare.amount.toFixed(2).replace('.', ',')} ${fare.currency === 'EUR' ? '€' : fare.currency}`;
   }
 
   // ---- vykreslení ----------------------------------------------------------
   function render() {
+    renderControls();
+    renderResults();
+  }
+
+  function renderControls() {
     renderHeader();
+    renderQuickBar();
     renderModes();
     renderPass();
     renderAdv();
-    renderResultsHead();
+  }
+
+  function renderResults() {
+    const list = S.data ? visibleJourneys() : [];
+    renderResultsHead(list);
+    renderCalendar();
     renderProviders();
     renderProblems();
-    const list = S.data ? visibleJourneys() : [];
     renderTabs(list);
     renderChips();
     renderList(list);
@@ -471,11 +636,37 @@
     document.querySelectorAll('#cur-seg input').forEach(i => { i.checked = i.value === S.cur; });
   }
 
+  function renderQuickBar() {
+    const box = $('#quick-bar');
+    if (!box) return;
+    const d0 = todayIso(), d1 = addDaysIso(1), d2 = addDaysIso(2), dW = weekendIso();
+    const curD = fDate.value, curT = fTime.value;
+    const qBtn = (act, key, label, active) =>
+      `<button type="button" class="quick-chip" data-act="${act}" data-key="${esc(key)}" aria-pressed="${!!active}">${label}</button>`;
+    const dateChips = [
+      qBtn('qdate', d0, 'Dnes', curD === d0),
+      qBtn('qdate', d1, 'Zítra', curD === d1),
+      qBtn('qdate', d2, 'Pozítří', curD === d2),
+      qBtn('qdate', dW, 'Víkend', curD === dW),
+    ].join('');
+    const timeChips = [
+      qBtn('qtime', 'now', 'Teď', false),
+      qBtn('qtime', '08:00', '08:00', curT === '08:00'),
+      qBtn('qtime', '14:00', '14:00', curT === '14:00'),
+    ].join('');
+    const routes = S.routes.length
+      ? `<div class="quick-group"><span class="row-label">Nedávné</span>${S.routes.map((r, i) =>
+          `<span class="recent-pill"><button type="button" class="recent-route" data-act="recent-route" data-key="${i}" title="Hledat ${esc(r.from)} → ${esc(r.to)}">${esc(r.from)} → ${esc(r.to)}</button><button type="button" class="recent-del" data-act="recent-del" data-key="${i}" aria-label="Odebrat trasu">${icon('x', 12)}</button></span>`
+        ).join('')}</div>` : '';
+    box.innerHTML = `<div class="quick-group"><span class="row-label">Rychle</span>${dateChips}</div>`
+      + `<div class="quick-group">${timeChips}</div>${routes}`;
+  }
+
   function renderModes() {
     const all = S.modes.length === ALL_GROUPS.length;
     const pill = (key, label, ic, on) => `<button type="button" class="pill" data-act="mode" data-key="${key}" aria-pressed="${on}">${ic ? icon(ic, 16) : ''}${label}</button>`;
-    // Jako v návrhu: odznak počítá jen aktivní filtry, ne nastavení cestujícího.
-    const advCount = (S.maxT !== 'any') + S.direct + (S.buffer > 0) + S.onlyPriced;
+    // Odznak počítá aktivní filtry (včetně regionálních vlaků).
+    const advCount = (S.maxT !== 'any') + S.direct + (S.buffer > 0) + S.onlyPriced + (S.regional ? 1 : 0);
     $('#modes').innerHTML = `<span class="row-label">Doprava</span>`
       + pill('all', 'Vše', null, all)
       + pill('train', 'Vlaky', 'train-front', !all && S.modes.includes('train'))
@@ -484,7 +675,8 @@
       + `<span class="vsep"></span>`
       + `<button class="btn btn-secondary adv-btn" type="button" data-act="pass" aria-expanded="${S.pass}">${icon('user', 16)}<span>${esc(passengerSummary())}</span>${icon(S.pass ? 'chevron-up' : 'chevron-down', 16)}</button>`
       + `<button class="btn btn-secondary adv-btn" type="button" data-act="adv" aria-expanded="${S.adv}">${icon('sliders-horizontal', 16)}<span>Pokročilé možnosti</span>`
-      + (advCount ? `<span class="tag tag-accent">${advCount}</span>` : '') + icon(S.adv ? 'chevron-up' : 'chevron-down', 16) + `</button>`;
+      + (advCount ? `<span class="tag tag-accent">${advCount}</span>` : '') + icon(S.adv ? 'chevron-up' : 'chevron-down', 16) + `</button>`
+      + `<button class="btn btn-secondary adv-btn" type="button" data-act="calendar" ${S.calLoading ? 'aria-busy="true"' : ''} title="Porovná nejnižší ceny v okolních dnech (±3 dny) u rychlých dopravců">${icon('bar-chart-2', 16)}<span>${S.calLoading ? 'Kalendář…' : 'Cenový kalendář (±3 dny)'}</span></button>`;
   }
 
   function seg(name, current, options) {
@@ -526,12 +718,17 @@
       const p = S.pax[0];
       const parts = [`${p.age} let`, passengerCategory(p)];
       if (p.skFree) parts.push('SK zdarma');
+      if (p.dTicket) parts.push('D-Ticket');
       return parts.join(' · ');
     }
     const counts = new Map();
     S.pax.forEach(p => { const c = passengerCategory(p); counts.set(c, (counts.get(c) || 0) + 1); });
     const n = S.pax.length;
-    return `${n} ${n < 5 ? 'cestující' : 'cestujících'} · ` + [...counts].map(([c, k]) => (k > 1 ? `${k}× ` : '') + c).join(', ');
+    const extras = [];
+    if (S.pax.some(p => p.skFree)) extras.push('SK zdarma');
+    if (S.pax.some(p => p.dTicket)) extras.push('D-Ticket');
+    return `${n} ${n < 5 ? 'cestující' : 'cestujících'} · ` + [...counts].map(([c, k]) => (k > 1 ? `${k}× ` : '') + c).join(', ')
+      + (extras.length ? ` · ${extras.join(', ')}` : '');
   }
 
   function paxSwitch(act, i, on, label) {
@@ -608,19 +805,97 @@
       <span class="adv-hint">Zóny, na které máte časovou jízdenku (kupón). Jízdenky IDS pak počítají jen s doplatkem za zóny mimo ni – uvnitř předplatného je cesta zdarma. Více zón oddělte čárkou, <strong>*</strong> = celá síť. Kód zóny vidíte v našeptávači u zastávky (např. „IDS JMK · zóny 100, 101“).</span></div>`;
   }
 
-  function renderResultsHead() {
+  function renderResultsHead(list) {
     const head = $('#results-head');
     if (!S.data) {
-      head.innerHTML = `<h2>Kam to bude?</h2><div class="meta">Zadejte trasu a čas – hledám u všech vybraných dopravců najednou a výsledky ukazuji, jak přicházejí.</div>`;
+      head.innerHTML = `<h2>Kam to bude?</h2><div class="meta">Zadejte trasu a čas – hledám u všech vybraných dopravců najednou a výsledky ukazuji, jak přicházejí. Tip: klávesou <strong>Ctrl+Enter</strong> spustíte hledání kdykoliv.</div>`;
       return;
     }
     const q = S.data.query;
     const d = new Date(dayOf(q.departure) + 'T12:00');
     const dateT = isNaN(d) ? '' : `${DAYS[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
-    const n = visibleJourneys().length, total = S.data.journeys.length;
+    const n = list.length, total = S.data.journeys.length;
     const hidden = total - n;
     head.innerHTML = `<h2>${esc(q.from)} → ${esc(q.to)}</h2>
-      <div class="meta">${dateT} · odjezd od ${hhmm(q.departure)} · ${n} ${pl(n, 'spojení', 'spojení', 'spojení')}${hidden > 0 ? ` (${hidden} skryto filtry)` : ''}${S.searching ? ' · hledám dál…' : ''}${S.sid ? ` · <button type="button" class="link-btn" data-act="diag-download" title="Textový soubor se vším o tomto hledání – pošlete ho místo snímků obrazovky">${icon('download', 13)} diagnostika (.txt)</button>` : ''}</div>`;
+      <div class="meta">${dateT} · odjezd od ${hhmm(q.departure)} · ${n} ${pl(n, 'spojení', 'spojení', 'spojení')}${hidden > 0 ? ` (${hidden} skryto filtry)` : ''}${S.searching ? ' · hledám dál…' : ''}`
+      + ` · <button type="button" class="link-btn" data-act="calendar" title="Srovnat nejnižší ceny v okolních dnech (±3 dny)">${icon('bar-chart-2', 13)} okolní dny (±3)</button>`
+      + `${S.sid ? ` · <button type="button" class="link-btn" data-act="diag-download" title="Textový soubor se vším o tomto hledání – pošlete ho místo snímků obrazovky">${icon('download', 13)} diagnostika (.txt)</button>` : ''}</div>`;
+  }
+
+  const WD_SHORT = ['po', 'út', 'st', 'čt', 'pá', 'so', 'ne'];
+
+  function renderCalendar() {
+    const box = $('#calendar');
+    if (!box) return;
+    if (!S.calData && !S.calLoading && !S.calError) { box.innerHTML = ''; return; }
+    const data = S.calData || { query: { from: fFrom.value.trim(), to: fTo.value.trim(), date: fDate.value }, providers: [], days: [] };
+    const q = data.query || {};
+    const days = data.days || [];
+    const priced = days.filter(d => d.price != null);
+    const minP = priced.length ? Math.min(...priced.map(d => d.price)) : null;
+    const maxP = priced.length ? Math.max(...priced.map(d => d.price)) : null;
+    const selectedDate = fDate.value || q.date;
+    const selDay = days.find(d => d.date === selectedDate);
+    const selPrice = selDay && selDay.price != null ? selDay.price : null;
+    const doneCount = days.filter(d => d.status !== 'pending' && d.status !== 'running').length;
+    const provInfo = data.providers && data.providers.length
+      ? `Rychlé zdroje s cenami (${data.providers.length}): ${data.providers.slice(0, 6).join(', ')}${data.providers.length > 6 ? '…' : ''}`
+      : 'Rychlé zdroje s cenami';
+
+    const bars = days.map(d => {
+      const dtObj = new Date(d.date + 'T12:00');
+      const wd = WD_SHORT[d.weekday] || '';
+      const dtLabel = isNaN(dtObj) ? d.date : `${dtObj.getDate()}. ${dtObj.getMonth() + 1}.`;
+      const weekend = d.weekday >= 5;
+      const isSelected = d.date === selectedDate;
+      const isBest = minP != null && d.price != null && Math.abs(d.price - minP) < 0.5;
+      const busy = d.status === 'pending' || d.status === 'running';
+      let barPct = 0;
+      if (d.price != null && maxP != null) {
+        barPct = maxP > minP ? Math.round(24 + ((d.price - minP) / (maxP - minP)) * 76) : 58;
+      }
+      const sub = busy
+        ? (d.status === 'running' ? 'hledám…' : 'čeká…')
+        : (d.price != null ? `${d.provider}${d.departure ? ' · ' + hhmm(d.departure) : ''}` : 'bez cen');
+      const cls = ['cal-day', weekend ? 'weekend' : '', isSelected ? 'selected' : '', isBest ? 'best' : ''].filter(Boolean).join(' ');
+      return `<button type="button" class="${cls}" data-act="cal-pick" data-key="${esc(d.date)}" title="Hledat spojení na ${esc(wd)} ${esc(dtLabel)}">
+        <div class="cal-top"><span class="cal-wd">${esc(wd)}</span><span class="cal-dt">${esc(dtLabel)}</span></div>
+        <div class="cal-bar-wrap">${busy ? '<div class="cal-bar loading"></div>' : (d.price != null ? `<div class="cal-bar" style="height:${barPct}%"></div>` : '')}</div>
+        <div>
+          <div class="cal-price ${d.price == null ? 'empty' : ''}">${busy ? '…' : (d.price != null ? esc(money(d.price)) : '—')}</div>
+          ${isBest && priced.length > 1 ? `<div class="cal-badge">${icon('star', 11)}Nejlevnější</div>` : ''}
+          <div class="cal-sub">${esc(sub)}</div>
+        </div>
+      </button>`;
+    }).join('');
+
+    let foot = '';
+    if (minP != null) {
+      const bestDay = priced.find(d => Math.abs(d.price - minP) < 0.5);
+      const bObj = new Date(bestDay.date + 'T12:00');
+      const bLabel = `${WD_SHORT[bestDay.weekday] || ''} ${bObj.getDate()}. ${bObj.getMonth() + 1}.`;
+      const saving = selPrice != null && selPrice - minP >= 1 ? ` · ušetříte <strong>${esc(money(selPrice - minP))}</strong> oproti zvolenému dni` : '';
+      foot = `<div class="cal-foot"><span>Nejlevnější den: <strong>${esc(bLabel)} od ${esc(money(minP))}</strong> (${esc(bestDay.provider)})${saving}</span><span class="muted">Kliknutím na den načtete všechny spoje.</span></div>`;
+    } else if (!S.calLoading && !S.calError && days.length) {
+      foot = `<div class="cal-foot"><span class="muted">Rychlé zdroje pro tuto trasu nevrátily ceny. Zkuste plné hledání (včetně ČD / IDS / hacků).</span></div>`;
+    }
+
+    box.innerHTML = `<section class="cal-box" aria-label="Cenový kalendář">
+      <div class="cal-head">
+        <div class="cal-title">
+          <h3>${icon('bar-chart-2', 18)}Cenový kalendář: ${esc(q.from || '')} → ${esc(q.to || '')}</h3>
+          <div class="cal-meta">${esc(provInfo)}${S.calLoading ? ` · hotovo ${doneCount}/${days.length || 7}…` : ''}</div>
+        </div>
+        <div class="cal-actions">
+          ${S.calLoading ? `<button type="button" class="btn btn-secondary" data-act="cal-cancel">Zrušit</button>` : `<button type="button" class="btn btn-ghost" data-act="calendar" title="Obnovit cenový kalendář">${icon('rotate-ccw', 14)}Obnovit</button>`}
+          <button type="button" class="btn btn-ghost" data-act="cal-close" aria-label="Zavřít cenový kalendář">${icon('x', 16)}</button>
+        </div>
+      </div>
+      ${S.calError ? `<div class="cal-err">${esc(S.calError)}</div>` : ''}
+      ${S.calLoading ? '<div class="loader"><div></div></div>' : ''}
+      ${bars ? `<div class="cal-bars">${bars}</div>` : ''}
+      ${foot}
+    </section>`;
   }
 
   function providerStatus(name) {
@@ -646,16 +921,53 @@
       const symbol = st && (st.status === 'error' || st.status === 'blocked') ? icon('triangle-alert', 12) : `<span class="dot ${status === 'running' ? 'running' : ''}" style="background:${dotColor(status)}"></span>`;
       return `<button type="button" class="prov" data-act="provider" data-key="${esc(p.name)}" aria-pressed="${on}" title="${esc(p.label)}">${symbol}<strong>${esc(p.name)}</strong>${esc(detail)}${notes.length ? `<span class="note">· ${notes.join(' · ')}</span>` : ''}</button>`;
     };
-    // Dopravci po oblastech; klik na název oblasti zapne/vypne celou skupinu.
-    const regions = S.meta.regions || [{ key: '', label: '' }];
-    const groups = regions.map(r => {
-      const list = S.meta.providers.filter(p => (p.region || '') === r.key);
-      if (!list.length) return '';
-      const onCount = list.filter(p => S.providersOn.has(p.name)).length;
-      const state = onCount === list.length ? 'true' : onCount ? 'mixed' : 'false';
-      return `<div class="prov-group" role="group" aria-label="${esc(r.label)}"><button type="button" class="prov-region" data-act="prov-region" data-key="${esc(r.key)}" aria-pressed="${state}" title="${state === 'true' ? 'Vypnout' : 'Zapnout'} všechny dopravce: ${esc(r.label)}">${esc(r.label)}<span class="count">${onCount}/${list.length}</span></button><div class="prov-chips">${list.map(chip).join('')}</div></div>`;
-    }).join('');
-    $('#providers').innerHTML = `<div class="prov-head"><span class="row-label">Zdroje dat</span><span class="prov-links"><button class="btn btn-ghost" type="button" data-act="prov-fast">rychlé</button><button class="btn btn-ghost" type="button" data-act="prov-all">vše</button></span></div>${groups}`;
+
+    const total = S.meta.providers.length;
+    const enabled = S.providersOn.size;
+    let summary = `${enabled}/${total} zapnuto`;
+    let liveStrip = '';
+    if (S.data && S.data.providers) {
+      const sts = S.data.providers;
+      const running = sts.filter(s => s.status === 'running').length;
+      const ok = sts.filter(s => s.status === 'ok').length;
+      const failed = sts.filter(s => s.status === 'error' || s.status === 'blocked').length;
+      const parts = [`${enabled}/${total} zapnuto`];
+      if (ok) parts.push(`${ok} s výsledky`);
+      if (running) parts.push(`${running} běží…`);
+      if (failed) parts.push(`${failed} ${pl(failed, 'chyba', 'chyby', 'chyb')}`);
+      summary = parts.join(' · ');
+      if (!S.provOpen) {
+        const byName = new Map(S.meta.providers.map(p => [p.name, p]));
+        const interesting = sts
+          .filter(s => s.status === 'running' || s.status === 'ok' || s.status === 'error' || s.status === 'blocked')
+          .map(s => byName.get(s.name))
+          .filter(Boolean);
+        if (interesting.length) {
+          liveStrip = `<div class="prov-live">${interesting.map(chip).join('')}</div>`;
+        }
+      }
+    }
+
+    let groups = '';
+    if (S.provOpen) {
+      // Dopravci po oblastech; klik na název oblasti zapne/vypne celou skupinu.
+      const regions = S.meta.regions || [{ key: '', label: '' }];
+      groups = regions.map(r => {
+        const list = S.meta.providers.filter(p => (p.region || '') === r.key);
+        if (!list.length) return '';
+        const onCount = list.filter(p => S.providersOn.has(p.name)).length;
+        const state = onCount === list.length ? 'true' : onCount ? 'mixed' : 'false';
+        return `<div class="prov-group" role="group" aria-label="${esc(r.label)}"><button type="button" class="prov-region" data-act="prov-region" data-key="${esc(r.key)}" aria-pressed="${state}" title="${state === 'true' ? 'Vypnout' : 'Zapnout'} všechny dopravce: ${esc(r.label)}">${esc(r.label)}<span class="count">${onCount}/${list.length}</span></button><div class="prov-chips">${list.map(chip).join('')}</div></div>`;
+      }).join('');
+    }
+    $('#providers').innerHTML = `<div class="prov-head">
+      <div class="prov-head-left">
+        <span class="row-label">Zdroje dat</span>
+        <span class="prov-summary">${esc(summary)}</span>
+        <button type="button" class="prov-toggle" data-act="prov-toggle" aria-expanded="${S.provOpen}">${S.provOpen ? 'Skrýt zdroje' : 'Upravit zdroje'}${icon(S.provOpen ? 'chevron-up' : 'chevron-down', 13)}</button>
+      </div>
+      ${S.provOpen ? '<span class="prov-links"><button class="btn btn-ghost" type="button" data-act="prov-fast">rychlé</button><button class="btn btn-ghost" type="button" data-act="prov-all">vše</button></span>' : ''}
+    </div>${liveStrip}${groups}`;
   }
 
   // Diagnostika: jaká verze serveru běží, které zdroje zná a jak dopadlo hledání.
@@ -701,7 +1013,7 @@
     const total = S.data ? S.data.journeys.length : 0;
     const lines = [
       `Zobrazeno ${visibleJourneys().length} z ${total} spojení, řazení ${S.sort}, měna ${S.cur}`,
-      `Filtry: druhy ${[...S.modes].join(', ') || '–'}, přestupy ${S.maxT}, jen přímé ${S.direct ? 'ano' : 'ne'}, rezerva +${S.buffer} min, jen s cenou ${S.onlyPriced ? 'ano' : 'ne'}, skrýt dražší i pomalejší ${S.pareto ? 'ano' : 'ne'}, skrýt horší se stejným odjezdem ${S.sameDep ? 'ano' : 'ne'}`,
+      `Filtry: druhy ${[...S.modes].join(', ') || '–'}, přestupy ${S.maxT}, jen přímé ${S.direct ? 'ano' : 'ne'}, rezerva +${S.buffer} min, jen s cenou ${S.onlyPriced ? 'ano' : 'ne'}, regionální ${S.regional ? 'ano' : 'ne'}, skrýt dražší i pomalejší ${S.pareto ? 'ano' : 'ne'}, skrýt horší se stejným odjezdem ${S.sameDep ? 'ano' : 'ne'}`,
       `Skrytí dopravci: ${[...S.off].join(', ') || '–'}`,
       `Zapnuté zdroje v prohlížeči: ${S.providersOn ? [...S.providersOn].join(', ') : '–'}`,
       `Prohlížeč: ${navigator.userAgent}`,
@@ -729,11 +1041,29 @@
 
   function renderProblems() {
     const box = $('#problems');
-    const problems = [...(S.data ? S.data.problems : [])];
-    if (S.clientError) problems.unshift({ provider: 'Aplikace', message: S.clientError, kind: 'error' });
-    if (!problems.length) { box.innerHTML = ''; return; }
+    const raw = [...(S.data ? S.data.problems : [])];
+    if (S.clientError) raw.unshift({ provider: 'Aplikace', message: S.clientError, kind: 'error' });
+    if (!raw.length) { box.innerHTML = ''; return; }
+    const hasResults = S.data && S.data.journeys.length > 0;
+    const notServed = raw.filter(p => p.kind === 'not_served');
+    const others = raw.filter(p => p.kind !== 'not_served');
+    // Pokud výsledky máme, „nejezdí tam“ u desítek zahraničních dopravců nemá
+    // zaplavovat box s chybami – sloučíme je na jeden tichý řádek, nebo skryjeme.
+    let items;
+    if (hasResults && notServed.length > 0) {
+      if (!others.length) { box.innerHTML = ''; return; }
+      items = [...others];
+      if (notServed.length === 1) {
+        items.push(notServed[0]);
+      } else {
+        const names = [...new Set(notServed.map(p => p.provider))].join(', ');
+        items.push({ provider: `Mimo trasu (${notServed.length})`, message: `${names} tuto trasu neobsluhují.`, kind: 'not_served' });
+      }
+    } else {
+      items = raw;
+    }
     const ic = { error: 'triangle-alert', blocked: 'ban', soft: 'info', not_served: 'circle-slash' };
-    box.innerHTML = `<div class="problems"><h3>Co se nepovedlo</h3>${problems.map(p => `
+    box.innerHTML = `<div class="problems"><h3>Co se nepovedlo</h3>${items.map(p => `
       <div class="problem ${esc(p.kind)}"><span class="p-icon">${icon(ic[p.kind] || 'info', 14)}</span>
         <div><strong>${esc(p.provider)}</strong>${esc(p.message)}</div>
         ${p.canDisable && S.providersOn && S.providersOn.has(p.provider) ? `<button class="btn btn-ghost" type="button" data-act="disable" data-key="${esc(p.provider)}">vypnout</button>` : '<span></span>'}
@@ -743,12 +1073,19 @@
   function renderTabs(list) {
     if (!S.data) { $('#tabs').innerHTML = ''; $('#tabs').hidden = true; return; }
     $('#tabs').hidden = false;
-    const best = k => list.length ? [...list].sort(SORTERS[k])[0] : null;
-    const bf = best('fastest'), bt = best('fewest'), bc = best('cheapest'), be = best('earliest');
+    let bf = null, bt = null, bc = null, be = null;
+    for (const j of list) {
+      if (!bf || SORTERS.fastest(j, bf) < 0) bf = j;
+      if (!bt || SORTERS.fewest(j, bt) < 0) bt = j;
+      if (!bc || SORTERS.cheapest(j, bc) < 0) bc = j;
+      if (!be || SORTERS.earliest(j, be) < 0) be = j;
+    }
+    const rt = roundTripOn();
+    const cheapVal = bc && isFinite(priceKey(bc)) ? money(priceKey(bc)) : '—';
     const tabs = [
       ['fastest', 'Nejrychlejší', bf ? dur(bf.minutes) : '—'],
       ['fewest', 'Nejméně přestupů', bt ? (bt.realTransfers ? pl(bt.realTransfers, '1 přestup', `${bt.realTransfers} přestupy`, `${bt.realTransfers} přestupů`) : 'Přímé') : '—'],
-      ['cheapest', 'Nejlevnější', bc && bc.price != null ? money(bc.price) : '—'],
+      ['cheapest', rt ? 'Nejlevnější (tam i zpět)' : 'Nejlevnější', cheapVal],
       ['earliest', 'Nejdřívější odjezd', be ? hhmm(be.dep) : '—'],
     ];
     $('#tabs').innerHTML = tabs.map(([k, label, val]) =>
@@ -757,9 +1094,13 @@
 
   function renderChips() {
     const box = $('#chips');
-    if (!S.data || !S.data.journeys.length) { box.innerHTML = ''; return; }
+    if (!S.data) { box.innerHTML = ''; return; }
+    const needsResearch = S.data.query && S.data.query.trainsOnly && !(S.modes.length === 1 && S.modes[0] === 'train');
+    const hint = needsResearch
+      ? `<div class="mode-hint">${icon('info', 15)}<span>Tohle hledání proběhlo jen pro vlaky. Pro zahrnutí autobusů nebo MHD spusťte hledání znovu.</span><button type="button" class="btn btn-secondary" data-act="research">Hledat znovu</button></div>` : '';
+    if (!S.data.journeys.length) { box.innerHTML = hint; return; }
     const carriers = new Map();
-    S.data.journeys.map(enrich).forEach(j => j.vehicles.forEach(v => {
+    getEnriched().forEach(j => j.vehicles.forEach(v => {
       const name = v.carrier || j.provider;
       if (!carriers.has(name)) carriers.set(name, modeOf(v).icon);
     }));
@@ -771,8 +1112,9 @@
     if (S.maxT !== 'any') active.push(['maxT', `Max. ${S.maxT} ${pl(Number(S.maxT), 'přestup', 'přestupy', 'přestupů')}`]);
     if (S.buffer) active.push(['buffer', `Přestup ≥ ${S.buffer} min`]);
     if (S.onlyPriced) active.push(['onlyPriced', 'Jen se známou cenou']);
+    if (S.regional) active.push(['regional', 'Jen regionální vlaky']);
     const any = active.length || S.off.size;
-    box.innerHTML = `<span class="row-label">Dopravci</span>${chips}`
+    box.innerHTML = `${hint}<span class="row-label">Dopravci</span>${chips}`
       + active.map(([k, label]) => `<button type="button" class="tag tag-accent chip-clear" data-act="clear" data-key="${k}">${esc(label)}${icon('x', 13)}</button>`).join('')
       + (any ? `<button class="btn btn-ghost" type="button" data-act="reset" style="font-size:13px">Zrušit filtry</button>` : '')
       + `<span class="vsep"></span><div class="legend"><span><i style="background:var(--color-text)"></i>Vlak</span><span><i style="background:var(--mode-bus)"></i>Autobus</span><span><i style="background:var(--mode-city)"></i>MHD</span><span><i class="walk"></i>Pěšky / přesun</span></div>`;
@@ -799,13 +1141,44 @@
   // „Veselí n.Lužnicí“ zůstane, „Brno, ÚAN Zvonařka (stan. 5)“ -> „Brno, ÚAN Zvonařka“.
   function shortStation(name) { return String(name || '').replace(/\s*\([^)]*\)\s*$/, ''); }
 
-  function journeyCard(j) {
+  function computePicks(list) {
+    if (list.length < 2) return { cheapest: null, fastest: null, value: null };
+    let cheapest = null, fastest = null;
+    for (const j of list) {
+      if (isFinite(priceKey(j)) && (!cheapest || priceKey(j) < priceKey(cheapest) || (priceKey(j) === priceKey(cheapest) && j.minutes < cheapest.minutes))) {
+        cheapest = j;
+      }
+      if (!fastest || j.minutes < fastest.minutes || (j.minutes === fastest.minutes && priceKey(j) < priceKey(fastest))) {
+        fastest = j;
+      }
+    }
+    let valueId = null;
+    const priced = list.filter(j => isFinite(priceKey(j)));
+    if (priced.length >= 2 && cheapest && fastest && cheapest.id !== fastest.id) {
+      const minP = Math.min(...priced.map(priceKey)), maxP = Math.max(...priced.map(priceKey));
+      const minD = Math.min(...priced.map(j => j.minutes)), maxD = Math.max(...priced.map(j => j.minutes));
+      const spanP = (maxP - minP) || 1, spanD = (maxD - minD) || 1;
+      let best = null, bestScore = Infinity;
+      for (const j of priced) {
+        const sc = (priceKey(j) - minP) / spanP + (j.minutes - minD) / spanD;
+        if (sc < bestScore) { bestScore = sc; best = j; }
+      }
+      if (best && best.id !== cheapest.id && best.id !== fastest.id) valueId = best.id;
+    }
+    return { cheapest: cheapest ? cheapest.id : null, fastest: fastest ? fastest.id : null, value: valueId };
+  }
+
+  function journeyCard(j, picks) {
     const isOpen = S.open === j.id;
     const first = j.vehicles[0] || j.legs[0];
     const days = Math.round((new Date(dayOf(j.arr)) - new Date(dayOf(j.dep))) / 86400000);
     // Jeden řádek: čím se jede a kde se přestupuje. Podrobnosti (časy,
     // zastávky) jsou v rozbaleném detailu – tady by se jen opakovaly.
     const strip = routeStrip(j);
+    const pickTags = [];
+    if (picks && picks.cheapest === j.id) pickTags.push(`<span class="pick-tag best">${icon('star', 11)}Nejlevnější</span>`);
+    if (picks && picks.fastest === j.id) pickTags.push(`<span class="pick-tag fast">Nejrychlejší</span>`);
+    if (picks && picks.value === j.id) pickTags.push(`<span class="pick-tag best">Nejlepší poměr</span>`);
     const reservation = j.legs.some(l => l.reservation) ? `<span class="tag tag-neutral">povinná místenka</span>` : '';
     const platform = first && first.stops[0] && first.stops[0].platform ? `<span class="muted">${esc(first.from)}: nástupiště ${esc(first.stops[0].platform)}</span>` : '';
     const seats = (j.fares.find(f => f.seats != null) || {}).seats;
@@ -823,7 +1196,7 @@
           <div class="jr-dur"><strong>${dur(j.minutes)}</strong><span class="muted">${j.realTransfers ? pl(j.realTransfers, '1 přestup', `${j.realTransfers} přestupy`, `${j.realTransfers} přestupů`) : 'Přímé'}</span></div>
           <div class="jr-stations">${esc(j.legs[0].from)} → ${esc(j.legs[j.legs.length - 1].to)}</div>
         </div>
-        <div class="jr-mid">${strip}${reservation || platform ? `<div class="jr-info">${reservation}${platform}</div>` : ''}</div>
+        <div class="jr-mid">${pickTags.length ? `<div class="jr-picks">${pickTags.join('')}</div>` : ''}${strip}${reservation || platform ? `<div class="jr-info">${reservation}${platform}</div>` : ''}</div>
         <div class="jr-price">
           <div><div class="amount ${j.price == null ? 'unknown' : ''}">${esc(priceText(j))}</div>
             ${roundTrip(j) ? `<div class="rt">${icon('arrow-left-right', 12)}tam i zpět <strong>${money(j.roundTrip.price)}</strong>${j.roundTrip.saving ? ` <span class="rt-save">−${money(j.roundTrip.saving)}</span>` : ''}</div>` : ''}
@@ -885,7 +1258,7 @@
       }
     });
 
-    const fare = j.fares[0];
+    const fare = bestFare(j);
     const rows = [
       ['Doba jízdy', dur(j.minutes)],
       ['Přestupy', j.realTransfers ? String(j.realTransfers) : 'Přímé'],
@@ -901,6 +1274,19 @@
     const startInfo = (rides[0] || j.legs[0]).fromInfo, endInfo = (rides[rides.length - 1] || j.legs[j.legs.length - 1]).toInfo;
     const zoneOf = p => p && p.zones && p.zones.length ? `${p.ids} ${p.zones.join(', ')}` : '';
     if (zoneOf(startInfo) || zoneOf(endInfo)) rows.push(['Tarifní zóny', `${zoneOf(startInfo) || '?'} → ${zoneOf(endInfo) || '?'}`]);
+
+    // Další dostupné tarify / třídy (např. RegioJet Low Cost / Standard / Business, ÖBB 1. třída).
+    const distinctFares = (j.fares || [])
+      .filter(f => f.czk != null)
+      .sort((a, b) => a.czk - b.czk)
+      .filter((f, idx, arr) => idx === 0 || Math.abs(f.czk - arr[idx - 1].czk) > 0.5 || f.label !== arr[idx - 1].label || f.tariff !== arr[idx - 1].tariff);
+    const faresHtml = distinctFares.length > 1
+      ? `<div class="fares-list"><div class="sec-title" style="margin:0">Tarify a třídy</div>${distinctFares.map((f, idx) => {
+          const name = [f.label && f.label !== 'od' ? f.label : '', f.tariff].filter(Boolean).join(' · ') || `Tarif ${idx + 1}`;
+          const seatsTxt = f.seats != null && f.seats <= 6 ? ` (${f.seats} m.)` : '';
+          return `<div class="fare-row"><span>${esc(name)}${esc(seatsTxt)}</span><strong>${esc(money(f.czk))}</strong></div>`;
+        }).join('')}</div>` : '';
+
     const segments = j.segments.length ? `<div class="segments"><div class="sec-title" style="margin:0">Jízdenky ke koupi</div>${j.segments.map((s, i) =>
       `<div>${i + 1}. ${esc(s.from)} → ${esc(s.to)} · ${esc(s.provider)}: <strong>${esc(s.priceLabel)}</strong>${s.link ? ` · <a href="${esc(s.link)}" target="_blank" rel="noopener">koupit</a>` : ''}</div>`).join('')}</div>` : '';
     // cena tam i zpět je v souhrnu – poznámka „↔ …“ by ji jen opakovala
@@ -909,15 +1295,84 @@
       <div class="itin"><div class="sec-title">Itinerář</div>${steps.join('')}</div>
       <aside class="summary"><div class="sec-title" style="margin:0">Souhrn</div>
         <div class="rows">${rows.map(([k, v]) => `<div class="row"><span>${k}</span><strong>${esc(v)}</strong></div>`).join('')}</div>
-        ${notes}${segments}
+        ${faresHtml}${notes}${segments}
         ${j.price == null && j.fareStatus === 'unknown' ? '<p>Cenu tento zdroj neuvádí – ověřte ji u dopravce.</p>' : ''}
         ${j.link ? `<button class="btn btn-primary buy" type="button" data-act="buy" data-key="${esc(j.id)}"><span>${j.price != null ? 'Koupit u ' : 'Otevřít u '}${esc(j.provider)}</span>${icon('arrow-up-right', 18)}</button>` : ''}
+        <div class="summary-tools">
+          <button class="btn btn-secondary" type="button" data-act="copy-itin" data-key="${esc(j.id)}">${icon('copy', 14)}<span>Kopírovat</span></button>
+          <button class="btn btn-secondary" type="button" data-act="export-ics" data-key="${esc(j.id)}">${icon('calendar-plus', 14)}<span>Kalendář (.ics)</span></button>
+        </div>
       </aside>
     </div>`;
   }
 
+  function formatItineraryText(j) {
+    const first = j.legs[0], last = j.legs[j.legs.length - 1];
+    const d = new Date(dayOf(j.dep) + 'T12:00');
+    const dateStr = isNaN(d) ? dayOf(j.dep) : `${DAYS[d.getDay()]} ${d.getDate()}. ${d.getMonth() + 1}. ${d.getFullYear()}`;
+    const lines = [
+      `${first.from} → ${last.to} (${dateStr})`,
+      `Čas: ${hhmm(j.dep)}–${hhmm(j.arr)} (${dur(j.minutes)}, ${j.realTransfers ? pl(j.realTransfers, '1 přestup', `${j.realTransfers} přestupy`, `${j.realTransfers} přestupů`) : 'přímé'})`,
+      `Cena: ${priceText(j)} · ${j.provider}`,
+    ];
+    if (j.roundTrip) lines.push(`Tam i zpět: ${money(j.roundTrip.price)} (${j.roundTrip.how.join('; ')})`);
+    lines.push('');
+    j.legs.forEach((leg, i) => {
+      if (leg.mode === 'walk') {
+        lines.push(`  • Přesun pěšky (${dur(minutes(leg.arr) - minutes(leg.dep))}): ${leg.from} → ${leg.to}`);
+      } else {
+        lines.push(`  • ${hhmm(leg.dep)} ${leg.from} → ${hhmm(leg.arr)} ${leg.to} [${legLabel(leg)}, ${leg.carrier || j.provider}]`);
+      }
+      const next = j.legs[i + 1];
+      if (next && leg.mode !== 'walk' && next.mode !== 'walk') {
+        const gap = Math.round(minutes(next.dep) - minutes(leg.arr));
+        if (gap > 0) lines.push(`    ↳ přestup ${gap} min (${next.from})`);
+      }
+    });
+    if (j.notes && j.notes.length) {
+      lines.push('');
+      j.notes.forEach(n => lines.push(`Poznámka: ${n}`));
+    }
+    if (j.link) lines.push('', `Koupit / detail: ${j.link}`);
+    return lines.join('\n');
+  }
+
+  function downloadIcs(j) {
+    const icsUtc = iso => new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const icsEsc = s => String(s || '').replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/;/g, '\\;').replace(/,/g, '\\,');
+    const first = j.legs[0], last = j.legs[j.legs.length - 1];
+    const uid = `vs-${j.id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24)}-${Date.now()}@vyhledavac`;
+    const summary = `${first.from} → ${last.to} (${j.provider}${j.price != null ? ', ' + priceText(j) : ''})`;
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Vyhledavac Spoju//CS',
+      'CALSCALE:GREGORIAN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${icsUtc(new Date().toISOString())}`,
+      `DTSTART:${icsUtc(j.dep)}`,
+      `DTEND:${icsUtc(j.arr)}`,
+      `SUMMARY:${icsEsc(summary)}`,
+      `LOCATION:${icsEsc(first.from)}`,
+      `DESCRIPTION:${icsEsc(formatItineraryText(j))}`,
+    ];
+    if (j.link) lines.push(`URL:${j.link}`);
+    lines.push('END:VEVENT', 'END:VCALENDAR', '');
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `spoj-${dayOf(j.dep)}-${hhmm(j.dep).replace(':', '')}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function renderList(list) {
-    $('#list').innerHTML = list.map(journeyCard).join('');
+    const picks = computePicks(list);
+    $('#list').innerHTML = list.map(j => journeyCard(j, picks)).join('');
     $('#list').style.opacity = S.searching && !list.length ? '.4' : '1';
   }
 
@@ -966,7 +1421,7 @@
   }
 
   function findJourney(id) {
-    return S.data && S.data.journeys.find(j => j.id === id);
+    return getEnriched().find(j => j.id === id) || (S.data && S.data.journeys.find(j => j.id === id));
   }
 
   const ACTIONS = {
@@ -977,6 +1432,35 @@
     },
     adv() { S.adv = !S.adv; if (S.adv) S.pass = false; },
     pass() { S.pass = !S.pass; if (S.pass) S.adv = false; },
+    qdate(key) { fDate.value = key; },
+    qtime(key) { fTime.value = key === 'now' ? nowTime() : key; },
+    'recent-route'(key) {
+      const r = S.routes[Number(key)];
+      if (!r) return;
+      fFrom.value = r.from;
+      fTo.value = r.to;
+      startSearch();
+      return false;
+    },
+    'recent-del'(key) {
+      S.routes.splice(Number(key), 1);
+      store.set('routes', S.routes);
+    },
+    calendar() { startCalendar(); return false; },
+    'cal-cancel'() { cancelCalendar(); return false; },
+    'cal-close'() { closeCalendar(); renderModes(); renderCalendar(); return false; },
+    'cal-pick'(key) {
+      fDate.value = key;
+      const day = S.calData && S.calData.days && S.calData.days.find(d => d.date === key);
+      if (key !== todayIso() && day && day.departure && hhmm(day.departure) < fTime.value) {
+        fTime.value = '05:00';
+      }
+      renderQuickBar();
+      renderCalendar();
+      startSearch();
+      return false;
+    },
+    research() { startSearch(); return false; },
     switch(key) {
       if (key.startsWith('hack:')) {
         const name = key.slice(5);
@@ -989,6 +1473,7 @@
       if (key === 'modes') S.modes = [...ALL_GROUPS];
       else if (key === 'maxT') S.maxT = 'any';
       else if (key === 'buffer') S.buffer = 0;
+      else if (key === 'regional') { S.regional = false; if (S.data) toast('Regionální filtr vypnut – projeví se při dalším hledání.'); }
       else S[key] = false;
     },
     reset() { S.modes = [...ALL_GROUPS]; S.maxT = 'any'; S.direct = false; S.buffer = 0; S.onlyPriced = false; S.off.clear(); },
@@ -1008,6 +1493,7 @@
     'pax-isic'(key) { const p = S.pax[Number(key)]; if (p) p.isic = !p.isic; },
     'pax-sk'(key) { const p = S.pax[Number(key)]; if (p) p.skFree = !p.skFree; },
     'pax-dt'(key) { const p = S.pax[Number(key)]; if (p) p.dTicket = !p.dTicket; },
+    'prov-toggle'() { S.provOpen = !S.provOpen; },
     provider(key) { S.providersOn.has(key) ? S.providersOn.delete(key) : S.providersOn.add(key); },
     'prov-fast'() { S.providersOn = new Set(S.meta.providers.filter(p => !p.browser).map(p => p.name)); },
     'prov-region'(key) {
@@ -1018,16 +1504,34 @@
     'prov-all'() { S.providersOn = new Set(S.meta.providers.map(p => p.name)); },
     disable(key) { S.providersOn.delete(key); toast(`${key} je vypnutý pro další hledání.`); },
     toggle(key) { S.open = S.open === key ? null : key; },
-    'diag-download'() { downloadDiag(); },
+    'diag-download'() { downloadDiag(); return false; },
     'diag-copy'() {
       navigator.clipboard.writeText(diagText()).then(() => toast('Diagnostika je ve schránce.'), () => toast('Kopírování se nepovedlo – označte text ručně.'));
+      return false;
+    },
+    'copy-itin'(key) {
+      const j = findJourney(key);
+      if (!j) return false;
+      navigator.clipboard.writeText(formatItineraryText(j)).then(
+        () => toast('Itinerář zkopírován do schránky.', 'copy'),
+        () => toast('Kopírování se nepovedlo.')
+      );
+      return false;
+    },
+    'export-ics'(key) {
+      const j = findJourney(key);
+      if (!j) return false;
+      downloadIcs(j);
+      toast('Soubor .ics stažen – stačí ho otevřít v kalendáři.', 'calendar-plus');
+      return false;
     },
     stops(key) { S.stopsOpen.has(key) ? S.stopsOpen.delete(key) : S.stopsOpen.add(key); },
     buy(key) {
       const j = findJourney(key);
-      if (!j || !j.link) return;
+      if (!j || !j.link) return false;
       window.open(j.link, '_blank', 'noopener');
       toast(`Otevírám web dopravce ${j.provider}…`, 'arrow-up-right');
+      return false;
     },
   };
 
@@ -1037,15 +1541,25 @@
     const act = ACTIONS[el.dataset.act];
     if (!act) return;
     ev.stopPropagation();
-    act(el.dataset.key);
+    const res = act(el.dataset.key);
     persistOptions();
-    render();
+    if (res !== false) render();
   });
   document.addEventListener('keydown', ev => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      closeSuggest();
+      startSearch();
+      return;
+    }
+    if (ev.key === 'Escape') {
+      if (!sugBox.hidden) { closeSuggest(); return; }
+      if (S.pass || S.adv) { S.pass = false; S.adv = false; renderControls(); return; }
+    }
     if ((ev.key === 'Enter' || ev.key === ' ') && ev.target.matches('.jr-head')) {
       ev.preventDefault();
       ACTIONS.toggle(ev.target.dataset.key);
-      render();
+      renderResults();
     }
   });
   document.addEventListener('change', ev => {
@@ -1070,6 +1584,8 @@
   });
 
   form.addEventListener('submit', startSearch);
+  fDate.addEventListener('change', () => { renderQuickBar(); if (S.calData) renderCalendar(); });
+  fTime.addEventListener('change', renderQuickBar);
   $('#cancel-btn').addEventListener('click', cancelSearch);
   $('#swap-btn').addEventListener('click', () => { const a = fFrom.value; fFrom.value = fTo.value; fTo.value = a; });
   $('#theme-btn').addEventListener('click', () => {
@@ -1077,7 +1593,7 @@
     const dark = root.dataset.theme === 'dark' || (!root.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
     root.dataset.theme = dark ? 'light' : 'dark';
     try { localStorage.setItem('vs.theme', root.dataset.theme); } catch (e) { /* jen pohodlí */ }
-    render();
+    renderHeader();
   });
 
   // Server se sám ukončí, když se prohlížeč delší dobu neozve.
@@ -1087,8 +1603,8 @@
     fetch('/api/ping').then(r => r.json()).then(r => {
       const mine = S.meta && S.meta.version && S.meta.version.fingerprint;
       if (!mine || !r.version || r.version === mine) return;
-      if (!S.searching) location.reload();
-      else if (!S.staleServer) { S.staleServer = true; toast('Program byl aktualizován – po hledání obnovte stránku (F5).'); render(); }
+      if (!S.searching && !S.calLoading) location.reload();
+      else if (!S.staleServer) { S.staleServer = true; toast('Program byl aktualizován – po hledání obnovte stránku (F5).'); renderDiag(); }
     }).catch(() => {});
   }, 20000);
   $('#diag').addEventListener('toggle', renderDiag);

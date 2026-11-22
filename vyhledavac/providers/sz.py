@@ -119,7 +119,11 @@ class SzProvider(HttpProvider):
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Slovinsku")
         if any(c not in (None, "SI") for c in known):
             raise StationNotFoundError(self.name, "e-shop SŽ prodává jen jízdenky po Slovinsku")
-        origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         if origin["abroad"] and destination["abroad"]:
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí ve Slovinsku")
         start = query.departure.astimezone(DEFAULT_TZ)

@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
             "  python -m vyhledavac Praha Brno\n"
             "  python -m vyhledavac Praha Vídeň --date 01.10.2026 --isic --sort price\n"
             "  python -m vyhledavac Praha Vídeň --hacks split_ticket --max-price 800\n"
+            "  python -m vyhledavac Praha Vídeň --date 01.10.2026 --flex\n"
         ),
     )
     parser.add_argument("origin", nargs="?", help="odkud")
@@ -76,6 +77,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--zpet", choices=["day", "24h"], default=None,
                         help="cena i za cestu zpět: day = tentýž den, 24h = do 24 hodin "
                              "(dvě jednosměrné jízdenky, nebo celodenní jízdenka IDS)")
+    parser.add_argument("--flex", nargs="?", type=int, const=7, default=None, metavar="DNY",
+                        help="cenový kalendář: porovnat nejnižší ceny v okolí data "
+                             "(výchozí 7 dní, tj. ±3 dny; max. 14)")
     parser.add_argument("--trace", action="store_true",
                         help="vypisovat úvahy: kde se zkouší lomy jízdenek, u kterých dopravců, co vyšlo")
     return parser
@@ -269,6 +273,80 @@ def _print_price_summary(result: SearchResult) -> None:
               f"(pokrytí {coverage:.0%}) – podle ceny je neporovnáváte.")
 
 
+_WEEKDAYS_SHORT = ("po", "út", "st", "čt", "pá", "so", "ne")
+
+
+def render_calendar(days: Sequence[Any], query: SearchQuery, as_json: bool) -> None:
+    """Vykreslí srovnání nejnižších cen napříč okolními dny."""
+    if as_json:
+        import json
+
+        payload = {
+            "origin": query.origin,
+            "destination": query.destination,
+            "date": query.date.isoformat(),
+            "days": [d.to_dict() for d in days],
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
+
+    print(f"CENOVÝ KALENDÁŘ: {query.origin} → {query.destination} ({len(days)} dní)")
+    priced = [d for d in days if d.min_price is not None]
+    min_price = min((d.min_price for d in priced), default=None)
+    max_price = max((d.min_price for d in priced), default=None)
+    selected = next((d for d in days if d.date == query.date), None)
+    selected_price = selected.min_price if selected is not None else None
+
+    bar_width = 16
+    header = f"  {'DEN':<14} {'NEJNIŽŠÍ':>10}  {'GRAF':<{bar_width}}  SPOJ"
+    print(header)
+    print("─" * len(header))
+
+    for d in days:
+        wd = _WEEKDAYS_SHORT[d.date.weekday()]
+        is_selected = d.date == query.date
+        is_best = min_price is not None and d.min_price == min_price
+        mark = "▸" if is_selected else ("★" if is_best else " ")
+        date_str = f"{wd} {d.date:%d.%m.%Y}"
+        if d.min_price is not None:
+            price_str = f"{d.min_price:.0f} Kč"
+            if max_price and max_price > 0:
+                filled = max(2, round(float(d.min_price / max_price) * bar_width))
+            else:
+                filled = bar_width
+            bar = "█" * filled + "░" * (bar_width - filled)
+            detail_parts = []
+            if d.departure is not None:
+                detail_parts.append(f"{d.departure:%H:%M}")
+            if d.duration_minutes is not None:
+                h, m = divmod(d.duration_minutes, 60)
+                detail_parts.append(f"{h}h{m:02d}m")
+            if d.provider:
+                detail_parts.append(d.provider)
+            tags = []
+            if is_best:
+                tags.append("nejlevnější")
+            if selected_price is not None and d.min_price < selected_price:
+                tags.append(f"−{selected_price - d.min_price:.0f} Kč")
+            suffix = f"  [{', '.join(tags)}]" if tags else ""
+            detail = " · ".join(detail_parts) + suffix
+        else:
+            price_str = "—"
+            bar = "·" * bar_width
+            detail = d.error or "žádné ceny"
+        print(f"{mark} {date_str:<14} {price_str:>10}  {bar}  {detail}")
+
+    if priced and min_price is not None:
+        best_day = min(priced, key=lambda d: (d.min_price, d.date))
+        wd = _WEEKDAYS_SHORT[best_day.date.weekday()]
+        msg = f"\nNejnižší cena: {wd} {best_day.date:%d.%m.%Y} od {best_day.min_price:.0f} Kč ({best_day.provider})"
+        if selected_price is not None and best_day.min_price < selected_price:
+            msg += f" — ušetříte {selected_price - best_day.min_price:.0f} Kč oproti zvolenému dni."
+        print(msg)
+    else:
+        print("\nV žádném ze zvolených dnů se nepodařilo najít spoj se známou cenou.")
+
+
 async def run(args: argparse.Namespace) -> int:
     query = SearchQuery(
         origin=args.origin,
@@ -281,6 +359,13 @@ async def run(args: argparse.Namespace) -> int:
         round_trip=args.zpet,
         regional_only=args.regional,
     )
+
+    if getattr(args, "flex", None) is not None:
+        from .calendar_scan import scan_calendar
+
+        days = await scan_calendar(query, args.providers, days=args.flex)
+        render_calendar(days, query, args.json)
+        return 0 if any(d.min_price is not None for d in days) else 1
 
     engine = SearchEngine.build(
         args.providers,

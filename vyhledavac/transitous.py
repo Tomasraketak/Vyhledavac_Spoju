@@ -197,9 +197,11 @@ def _query_text(name: str) -> str:
 async def search(client: Any, cache: Any, namespace: str, origin: str, destination: str,
                  when: dt.datetime, until: dt.datetime, pages: int = 3) -> list[IdosConnection]:
     """Spojení z Transitous od ``when`` do ``until`` (``client`` = náš HttpClient)."""
+    import asyncio
+
     headers = {"User-Agent": USER_AGENT}
-    ends = []
-    for name in (origin, destination):
+
+    async def resolve_end(name: str) -> str:
         key = f"transitous-place4:{normalize(name)}"
         place = cache.get(namespace, key)
         if not place:
@@ -211,7 +213,9 @@ async def search(client: Any, cache: Any, namespace: str, origin: str, destinati
 
                 raise StationNotFoundError(namespace, f"místo {name!r} Transitous nezná")
             cache.set(namespace, key, place, ttl=30 * 24 * 3600)
-        ends.append(place)
+        return place
+
+    ends = list(await asyncio.gather(resolve_end(origin), resolve_end(destination)))
     connections: list[IdosConnection] = []
     params: dict[str, Any] = {"fromPlace": ends[0], "toPlace": ends[1], "numItineraries": 8,
                               "transitModes": GROUND_MODES,

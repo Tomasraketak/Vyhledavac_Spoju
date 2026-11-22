@@ -17,9 +17,11 @@ Výsledky se pamatují (stejná dvojice stanic ve stejnou hodinu).
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import datetime as dt
 import logging
+import weakref
 from typing import Any
 
 from . import stations, transitous
@@ -34,9 +36,22 @@ RESERVE = dt.timedelta(minutes=3)
 NEAR_KM = 25.0
 
 _memo: dict[tuple[str, str, int], dt.timedelta] = {}
-_client = None
+#: HttpClient navázaný na běžící asyncio smyčku – při dalším ``asyncio.run``
+#: nezůstane viset na zavřené smyčce.
+_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, Any] = weakref.WeakKeyDictionary()
 #: Bez síťových dotazů (oceňování z paměti) – přestup jen z už zjištěných hodnot.
 OFFLINE: contextvars.ContextVar[bool] = contextvars.ContextVar("transfer_offline", default=False)
+
+
+def _get_client():
+    from .http import HttpClient
+
+    loop = asyncio.get_running_loop()
+    client = _clients.get(loop)
+    if client is None:
+        client = HttpClient("Přestupy", timeout=20)
+        _clients[loop] = client
+    return client
 
 
 def same_station(a: str, b: str) -> bool:
@@ -95,22 +110,14 @@ async def transfer_time(a: str, b: str, when: dt.datetime) -> dt.timedelta:
 
 
 async def _transitous(a: str, b: str, when: dt.datetime) -> dt.timedelta:
-    global _client
     try:
-        from .http import HttpClient
-
-        if _client is None:
-            _client = HttpClient("Přestupy", timeout=20)
+        client = _get_client()
         headers = {"User-Agent": transitous.USER_AGENT}
-        ends = []
-        for name in (a, b):
-            found = await _client.get_json(f"{transitous.API}/v1/geocode", params={"text": name, "language": "en"},
-                                           headers=headers)
-            ends.append(_pick(name, found or []))
-        if None in ends:
+        here, there = await asyncio.gather(locate(a, stop=True), locate(b, stop=True))
+        if here is None or there is None:
             raise LookupError("stanici nenašel")
-        data = await _client.get_json(f"{transitous.API}/v5/plan", headers=headers, params={
-            "fromPlace": ends[0], "toPlace": ends[1], "numItineraries": 2,
+        data = await client.get_json(f"{transitous.API}/v5/plan", headers=headers, params={
+            "fromPlace": f"{here[0]},{here[1]}", "toPlace": f"{there[0]},{there[1]}", "numItineraries": 2,
             "time": when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}) or {}
         arrivals = [transitous._time(it.get("endTime")) for it in data.get("itineraries") or []]
         arrivals = [t for t in arrivals if t is not None]
@@ -140,7 +147,7 @@ async def _walk(a: str, b: str) -> dt.timedelta | None:
     """Přestup pěšky podle vzdálenosti, když jsou obě zastávky blízko (``None`` = neznámo/daleko)."""
     from .providers.planner import _km
 
-    here, there = await locate(a, stop=True), await locate(b, stop=True)
+    here, there = await asyncio.gather(locate(a, stop=True), locate(b, stop=True))
     if here is None or there is None:
         return None
     km = _km(*here, *there)
@@ -163,15 +170,11 @@ async def locate(name: str, stop: bool = False) -> tuple[float, float] | None:
     key = normalize(name)
     if key in _located:
         return _located[key]
-    global _client
     found = None
     try:
-        from .http import HttpClient
-
-        if _client is None:
-            _client = HttpClient("Přestupy", timeout=20)
-        results = await _client.get_json(f"{transitous.API}/v1/geocode", params={"text": name, "language": "en"},
-                                         headers={"User-Agent": transitous.USER_AGENT})
+        client = _get_client()
+        results = await client.get_json(f"{transitous.API}/v1/geocode", params={"text": name, "language": "en"},
+                                        headers={"User-Agent": transitous.USER_AGENT})
         picked = _pick(name, results or [])
         if picked:
             lat, lon = picked.split(",")

@@ -79,6 +79,7 @@ class ObbProvider(HttpProvider):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._hafas: HafasClient | None = None
+        self._direct_shop: OebbShop | None = None
         self._browser_shop: OebbShop | None = None
         # Když shop jednou zablokuje přímé dotazy, v téže relaci už to
         # nezkoušíme znovu – rovnou jdeme přes prohlížeč.
@@ -161,20 +162,23 @@ class ObbProvider(HttpProvider):
         return journeys
 
     async def _shop_offers(self, query: SearchQuery) -> list[ShopOffer]:
-        """Ceny ze shopu: nejdřív přímo, při blokaci přes prohlížeč."""
+        """Ceny ze shopu: nejdřív přímo (relace a token se sdílí), při blokaci přes prohlížeč."""
         pages = int(self.options.get("price_pages", 2))
         if not self._http_blocked:
-            shop = OebbShop(self.name, self._direct_transport())
+            if self._direct_shop is None:
+                self._direct_shop = OebbShop(self.name, self._direct_transport(), cache=self.cache)
             try:
-                return await shop.search(query.origin, query.destination, query.departure,
-                                         pages=pages, regional=query.regional_only)
+                return await self._direct_shop.search(query.origin, query.destination, query.departure,
+                                                      pages=pages, regional=query.regional_only)
             except BlockedError:
                 self._http_blocked = True
+                shop = self._direct_shop
+                self._direct_shop = None
+                if shop is not None:
+                    await shop.close()
                 log.info("ÖBB: shop blokuje přímé dotazy, zkouším prohlížeč")
                 if not self._browser_allowed():
                     raise
-            finally:
-                await shop.close()
 
         if not self._browser_allowed():
             raise BlockedError(self.name, "shop ÖBB blokuje přímé dotazy")
@@ -183,7 +187,7 @@ class ObbProvider(HttpProvider):
                 self.name,
                 headless=self.options.get("headless", True),
                 engine=self.options.get("engine", "chromium"),
-            ))
+            ), cache=self.cache)
         return await self._browser_shop.search(query.origin, query.destination,
                                                query.departure, pages=pages,
                                                regional=query.regional_only)
@@ -198,9 +202,11 @@ class ObbProvider(HttpProvider):
         return bool(self.options.get("browser_fallback", True)) and playwright_available()
 
     async def aclose(self) -> None:
-        if self._browser_shop is not None:
-            await self._browser_shop.close()
-            self._browser_shop = None
+        for attr in ("_direct_shop", "_browser_shop"):
+            shop = getattr(self, attr)
+            if shop is not None:
+                setattr(self, attr, None)
+                await shop.close()
         await super().aclose()
 
 

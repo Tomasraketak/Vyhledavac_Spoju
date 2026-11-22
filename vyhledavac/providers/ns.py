@@ -106,7 +106,11 @@ class NsProvider(HttpProvider):
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
         if None not in known and "NL" not in known:
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Nizozemsku")
-        origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         if "NL" not in (origin["country"], destination["country"]):
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Nizozemsku")
         when = query.departure.astimezone(DEFAULT_TZ).isoformat(timespec="seconds")

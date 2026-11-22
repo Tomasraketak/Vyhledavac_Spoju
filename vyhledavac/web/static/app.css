@@ -260,6 +260,71 @@ svg.i { display: block; flex: none; }
 
 .toast { position: fixed; left: 32px; bottom: 32px; background: var(--color-text); color: var(--color-bg); padding: 14px 18px; font-size: 14px; font-weight: 600; box-shadow: var(--shadow-lg); display: flex; align-items: center; gap: 10px; z-index: 10; max-width: calc(100vw - 64px); }
 
+/* ---- rychlé volby data a poslední trasy ------------------------------- */
+.quick-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: -6px; }
+.quick-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.quick-chip { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border: 1px solid var(--color-divider); background: transparent; color: var(--color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.quick-chip:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.quick-chip[aria-pressed="true"] { background: var(--color-text); color: var(--color-bg); border-color: var(--color-text); }
+.recent-pill { display: inline-flex; align-items: stretch; border: 1px solid var(--color-divider); background: var(--color-surface); }
+.recent-route { display: inline-flex; align-items: center; gap: 5px; padding: 4px 8px 4px 10px; border: 0; background: transparent; color: var(--color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.recent-route:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
+.recent-del { display: inline-flex; align-items: center; justify-content: center; padding: 0 6px; border: 0; border-left: 1px solid var(--color-divider); background: transparent; color: var(--color-neutral-600); cursor: pointer; }
+.recent-del:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-text) 5%, transparent); }
+
+/* ---- cenový kalendář (±3 dny) ----------------------------------------- */
+.cal-box { border: 2px solid var(--color-divider); background: var(--color-surface); padding: 18px 20px; display: flex; flex-direction: column; gap: 14px; }
+.cal-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.cal-title { display: flex; flex-direction: column; gap: 2px; }
+.cal-title h3 { margin: 0; font-size: 17px; display: inline-flex; align-items: center; gap: 8px; }
+.cal-meta { font-size: 12px; color: var(--color-neutral-700); }
+.cal-actions { display: flex; align-items: center; gap: 6px; }
+.cal-actions .btn { font-size: 12px; padding: 4px 10px; }
+.cal-bars { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 2px; background: var(--color-divider); border: 2px solid var(--color-divider); }
+.cal-day { border: 0; background: var(--color-bg); color: var(--color-text); font: inherit; padding: 12px 10px; min-height: 152px; display: flex; flex-direction: column; justify-content: space-between; gap: 6px; text-align: left; cursor: pointer; }
+.cal-day:hover { background: var(--color-surface); }
+.cal-day.selected { box-shadow: inset 0 4px 0 var(--color-text); }
+.cal-day.best { background: var(--color-accent-100); box-shadow: inset 0 4px 0 var(--color-accent); }
+.cal-day.best:hover { background: var(--color-accent-200); }
+.cal-top { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; }
+.cal-wd { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--color-neutral-700); }
+.cal-day.weekend .cal-wd { color: var(--color-accent-700); }
+.cal-dt { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-bar-wrap { height: 52px; display: flex; align-items: flex-end; margin: 4px 0; }
+.cal-bar { width: 100%; background: var(--color-neutral-400); min-height: 6px; transition: height .2s ease; }
+.cal-day.selected .cal-bar { background: var(--color-text); }
+.cal-day.best .cal-bar { background: var(--color-accent); }
+.cal-bar.loading { height: 22% !important; opacity: .35; animation: vsPulse 1s ease-in-out infinite; }
+.cal-price { font-size: 17px; font-weight: 800; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.cal-price.empty { color: var(--color-neutral-500); font-size: 14px; font-weight: 600; }
+.cal-sub { font-size: 11px; color: var(--color-neutral-700); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--color-accent-700); }
+.cal-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; font-size: 13px; color: var(--color-neutral-800); }
+.cal-foot strong { color: var(--color-text); }
+.cal-err { font-size: 13px; color: var(--color-accent-700); }
+
+/* ---- sbalitelné zdroje dat -------------------------------------------- */
+.prov-head { flex-wrap: wrap; justify-content: space-between; }
+.prov-head-left { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.prov-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--color-divider); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.prov-toggle:hover { background: var(--color-bg); }
+.prov-summary { font-size: 12px; color: var(--color-neutral-700); }
+.prov-live { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---- doporučení na kartě, tarify a export ----------------------------- */
+.jr-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.pick-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; background: var(--color-neutral-200); color: var(--color-text); }
+.pick-tag.best { background: var(--color-accent-100); color: var(--color-accent-700); border: 1px solid var(--color-accent-300); }
+.pick-tag.fast { background: var(--color-text); color: var(--color-bg); }
+.fares-list { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--color-divider); padding-top: 10px; }
+.fare-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
+.fare-row span { color: var(--color-neutral-700); }
+.fare-row strong { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.summary-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.summary-tools .btn { flex: 1 1 auto; font-size: 13px; min-height: 36px; padding: 0 10px; gap: 6px; justify-content: center; }
+.mode-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; border: 1px solid var(--color-divider); background: var(--color-surface); font-size: 13px; }
+.mode-hint .btn { font-size: 12px; padding: 4px 10px; }
+
 /* ---- úzké obrazovky ---------------------------------------------------- */
 @media (max-width: 720px) {
   .wrap { padding-left: 16px; padding-right: 16px; }
@@ -275,6 +340,9 @@ svg.i { display: block; flex: none; }
   .itin, .summary { padding: 16px; }
   .vsep { display: none; }
   .toast { left: 16px; right: 16px; bottom: 16px; max-width: none; }
+  .cal-box { padding: 14px; }
+  .cal-bars { grid-template-columns: repeat(2, 1fr); }
+  .cal-day { min-height: 126px; }
 }
 
 /* Diagnostika */

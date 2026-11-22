@@ -231,9 +231,13 @@ class IdsIdosProvider(HttpProvider):
 
         if city.trip(query.origin, query.destination) is not None:
             # po městě: přesná zastávka z našeptávače („Ostrava-Poruba“ IDOS jako místo nezná)
-            origin, destination = await self._czech_stop(query.origin), await self._czech_stop(query.destination)
+            origin, destination = await asyncio.gather(
+                self._czech_stop(query.origin), self._czech_stop(query.destination)
+            )
         else:
-            origin, destination = await self._idos_name(query.origin), await self._idos_name(query.destination)
+            origin, destination = await asyncio.gather(
+                self._idos_name(query.origin), self._idos_name(query.destination)
+            )
         (origin, fc), (destination, tc) = _split_code(origin), _split_code(destination)
         for _ in range(PAGES):
             if len(connections) >= PRICE_SCOPE_COUNT:

@@ -141,21 +141,26 @@ class SearchEngine:
         from . import city
 
         city_trip = city.trip(query.origin, query.destination)
+        skipped_reasons: dict[str, str] = {}
         if city_trip is not None:
             # cesta MHD po jednom městě: dálkoví dopravci by vrátili „Praha → Praha“ nesmysly
             self._skipped = {p.name for p in self.providers if p.name not in CITY_SOURCES}
             reason = f"cesta po městě ({city_trip.city}) – ptáme se jen zdrojů MHD"
+            skipped_reasons = {name: reason for name in self._skipped}
         else:
             self._skipped = self._domestic_skips(query)
             reason = "cesta je jen po Česku – tento zdroj se ptá jen na zahraničí"
-        for name in sorted(self._skipped):
-            skipped = ProviderResult(provider=name, skipped=True, error=reason)
+            skipped_reasons = {name: reason for name in self._skipped}
+            for name, why in self._route_skips(query).items():
+                skipped_reasons.setdefault(name, why)
+        for name in sorted(skipped_reasons):
+            skipped = ProviderResult(provider=name, skipped=True, error=skipped_reasons[name])
             if on_partial is not None:
                 try:
                     on_partial(skipped)
                 except Exception:
                     log.exception("callback on_partial selhal")
-        active = [p for p in self.providers if p.name not in self._skipped]
+        active = [p for p in self.providers if p.name not in skipped_reasons]
         direct = await self._run_providers(query, on_partial=on_partial,
                                            on_progress=on_progress, providers=active)
         result.extend(direct)
@@ -200,6 +205,48 @@ class SearchEngine:
         from . import stations          # databáze zastávek se načítá líně
 
         return international if stations.is_domestic(query.origin, query.destination) else set()
+
+    def _route_skips(self, query: SearchQuery) -> dict[str, str]:
+        """Dopravci, kteří prokazatelně neobsluhují přímou trasu ``origin → destination``.
+
+        Na rozdíl od ``_skipped`` se týká jen přímého hledání – travel hacky se
+        těchto dopravců dál mohou zeptat na dílčí úseky (např. SŽ po Slovinsku
+        u cesty Praha → Lublaň).
+        """
+        from . import geo, stations
+
+        out: dict[str, str] = {}
+        origin_c, dest_c = geo.country_of(query.origin), geo.country_of(query.destination)
+        leaves_cz = geo.leaves_czechia(query.origin, query.destination)
+        origin_cs = (stations.countries_for(query.origin) or {origin_c}) if origin_c else set()
+        dest_cs = (stations.countries_for(query.destination) or {dest_c}) if dest_c else set()
+        both_known = bool(origin_cs and dest_cs)
+        both_cs = origin_cs | dest_cs
+
+        for p in self.providers:
+            if p.name in self._skipped:
+                continue
+            if p.name == "MHD":
+                out[p.name] = "jen MHD po jednom městě"
+                continue
+            if leaves_cz and p.name in ("Bileto", "Arriva", "OneTicket"):
+                out[p.name] = "jen cesty po Česku"
+                continue
+            if not both_known:
+                continue
+            if p.name == "ZSSK":
+                if "SK" not in both_cs:
+                    out[p.name] = "mimo oblast dopravce"
+                continue
+            served = set(getattr(p, "countries", ()) or ())
+            if not getattr(p, "international_only", False) or not served:
+                continue
+            home = set(getattr(p, "home", ()) or ())
+            if home and not (both_cs & home):
+                out[p.name] = "mimo oblast dopravce"
+            elif not (origin_cs & served) or not (dest_cs & served):
+                out[p.name] = "mimo oblast dopravce"
+        return out
 
     async def _run_providers(
         self,
@@ -323,7 +370,8 @@ class SearchEngine:
         jízdence Evropa) – šetří dotazy a riziko zablokování.
         """
         key = (query.origin.lower(), query.destination.lower(),
-               query.departure.isoformat(), allow_browser, tuple(sorted(only or ())))
+               query.departure.isoformat(), query.passengers, query.modes,
+               query.regional_only, allow_browser, tuple(sorted(only or ())))
         if key in self._leg_cache:
             return self._leg_cache[key]
 

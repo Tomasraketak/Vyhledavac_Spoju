@@ -88,7 +88,11 @@ class TrenitaliaProvider(HttpProvider):
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
         if None not in known and "IT" not in known:
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Itálii")
-        origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         italian = [str(p["id"]).startswith(ITALY) for p in (origin, destination)]
         if not any(italian):
             raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Itálii")

@@ -56,12 +56,40 @@ _CYRILLIC = {
 _LETTERS.update(str.maketrans({**_CYRILLIC, **{k.upper(): v.capitalize() for k, v in _CYRILLIC.items()}}))
 
 
+_CYRILLIC_IA = re.compile(r"([иИ])([яЯ])\b")
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
+_CARRIER_DATA = re.compile(r"\s*\((?:data from|daten von)[^)]*\)", re.I)
+
+
+def _build_fast_latin() -> dict[int, str]:
+    """Předpočítaná tabulka pro znaky U+0080..U+02FF (čeština i celá latinka).
+
+    Pod U+0300 neexistují kombinující diakritické znaky ani cyrilice, takže
+    jediný ``str.translate`` v C dá přesně totéž co NFD + odfiltrování ``Mn``.
+    """
+    table: dict[int, str] = {}
+    for cp in range(0x0080, 0x0300):
+        ch = chr(cp)
+        decomposed = unicodedata.normalize("NFD", ch.translate(_LETTERS))
+        stripped = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+        if stripped != ch:
+            table[cp] = stripped
+    return table
+
+
+_FAST_LATIN = _build_fast_latin()
+
+
 @lru_cache(maxsize=8192)
 def strip_accents(text: str) -> str:
     """Odstraní diakritiku, cyrilici přepíše. 'Vídeň' -> 'Viden', 'София' -> 'Sofia'."""
     if not text:
         return ""
-    text = re.sub(r"([иИ])([яЯ])\b", lambda m: "ia" if m.group(1) == "и" else "IA", text)   # София → Sofia
+    if text.isascii():
+        return text
+    if max(text) < "\u0300":
+        return text.translate(_FAST_LATIN)
+    text = _CYRILLIC_IA.sub(lambda m: "ia" if m.group(1) == "и" else "IA", text)   # София → Sofia
     decomposed = unicodedata.normalize("NFD", text.translate(_LETTERS))
     return "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
 
@@ -72,8 +100,7 @@ def normalize(text: str) -> str:
     if not text:
         return ""
     cleaned = strip_accents(text).lower()
-    cleaned = re.sub(r"[^a-z0-9]+", " ", cleaned)
-    return re.sub(r"\s+", " ", cleaned).strip()
+    return _NON_ALNUM.sub(" ", cleaned).strip()
 
 
 @lru_cache(maxsize=8192)
@@ -194,13 +221,12 @@ _CARRIERS: list[tuple[tuple[str, ...], str]] = [
 ]
 
 
+@lru_cache(maxsize=1024)
 def carrier_name(name: str) -> str:
     """Sjednocené jméno dopravce („České dráhy, a.s.“ → „ČD“); neznámé beze změny."""
     if not name:
         return name
-    import re
-
-    name = re.sub(r"\s*\((?:data from|daten von)[^)]*\)", "", name, flags=re.I).strip() or name
+    name = _CARRIER_DATA.sub("", name).strip() or name
     words = " " + normalize(name.replace("-", " ")) + " "
     for keys, canonical in _CARRIERS:
         if any(f" {k} " in words for k in keys):

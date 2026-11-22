@@ -27,6 +27,7 @@ import datetime as dt
 import re
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import lru_cache
 
 from .normalize import normalize
 
@@ -128,24 +129,50 @@ _MARKS = {"SL": "SI", "UK": "GB", "CS": "CZ", "SLO": "SI", "AUT": "AT", "DEU": "
           "SZ": "SI", "HZ": "HR"}       # SZ/HZ = značka drah (Loka(SZ))
 
 
+_MARKED_RE = re.compile(r"\(([A-Z]{2,3})\)\s*$")
+_TRAIN_CAT_RE = re.compile(r"[A-Za-zäöüÄÖÜ]+")
+
+#: Index slov pro ``country_of``: první slovo fráze -> [(slova fráze, pořadí země, kód)].
+_COUNTRY_BY_FIRST: dict[str, list[tuple[tuple[str, ...], int, str]]] = {}
+for _rank, (_code, _words) in enumerate(_COUNTRY_WORDS.items()):
+    for _w in _words:
+        _parts = tuple(_w.split())
+        if _parts:
+            _COUNTRY_BY_FIRST.setdefault(_parts[0], []).append((_parts, _rank, _code))
+
+
 def marked_country(name: str) -> str | None:
     """Země výslovně uvedená u jména stanice („Rybnik(PL)“, „Jesenice(SL)“)."""
-    m = re.search(r"\(([A-Z]{2,3})\)\s*$", name or "")
+    m = _MARKED_RE.search(name or "")
     if not m:
         return None
     code = _MARKS.get(m.group(1), m.group(1))
     return code if len(code) == 2 else None
 
 
+@lru_cache(maxsize=4096)
 def country_of(name: str) -> str | None:
     """Kód země stanice ("CZ", "AT", "SK" …); ``None`` = nevíme."""
     marked = marked_country(name)
     if marked:
         return marked
-    n = " " + normalize(name) + " "
-    for code, words in _COUNTRY_WORDS.items():
-        if any(f" {w} " in n for w in words):
-            return code
+    words = tuple(normalize(name).split())
+    best_rank: int | None = None
+    best_code: str | None = None
+    n_words = len(words)
+    for i, w in enumerate(words):
+        candidates = _COUNTRY_BY_FIRST.get(w)
+        if not candidates:
+            continue
+        for phrase, rank, code in candidates:
+            if best_rank is not None and rank >= best_rank:
+                continue
+            plen = len(phrase)
+            if plen == 1 or (i + plen <= n_words and words[i:i + plen] == phrase):
+                best_rank = rank
+                best_code = code
+    if best_code is not None:
+        return best_code
     if state_of(name):
         return "AT"
     from . import stations
@@ -166,6 +193,7 @@ _ZONES = {"RO": "Europe/Bucharest", "BG": "Europe/Sofia", "GR": "Europe/Athens",
           "GB": "Europe/London", "IE": "Europe/Dublin", "PT": "Europe/Lisbon"}
 
 
+@lru_cache(maxsize=4096)
 def zone_of(name: str) -> dt.tzinfo:
     """Časové pásmo stanice (výchozí středoevropské)."""
     from .models import DEFAULT_TZ
@@ -351,18 +379,35 @@ _STATE_NAMES = {"W": "Vídeň", "N": "Dolní Rakousko", "B": "Burgenland", "O": 
 _STATE_INDEX: list[tuple[str, str]] = sorted(
     ((word, code) for code, words in AT_STATES.items() for word in words),
     key=lambda item: -len(item[0]))
+_STATE_BY_FIRST: dict[str, list[tuple[tuple[str, ...], int, str]]] = {}
+for _srank, (_sword, _scode) in enumerate(_STATE_INDEX):
+    _sparts = tuple(_sword.split())
+    if _sparts:
+        _STATE_BY_FIRST.setdefault(_sparts[0], []).append((_sparts, _srank, _scode))
 
 
+@lru_cache(maxsize=4096)
 def state_of(name: str) -> str | None:
     """Rakouská spolková země stanice ("W", "N", "O" …); ``None`` = nevíme.
     Rozhoduje nejdelší klíčové slovo, takže „Flughafen Wien“ je N, ne W."""
     if marked_country(name) not in (None, "AT"):
         return None
-    n = " " + normalize(name) + " "
-    for word, code in _STATE_INDEX:
-        if f" {word} " in n:
-            return code
-    return None
+    words = tuple(normalize(name).split())
+    best_rank: int | None = None
+    best_code: str | None = None
+    n_words = len(words)
+    for i, w in enumerate(words):
+        candidates = _STATE_BY_FIRST.get(w)
+        if not candidates:
+            continue
+        for phrase, rank, code in candidates:
+            if best_rank is not None and rank >= best_rank:
+                continue
+            plen = len(phrase)
+            if plen == 1 or (i + plen <= n_words and words[i:i + plen] == phrase):
+                best_rank = rank
+                best_code = code
+    return best_code
 
 
 def state_name(code: str) -> str:
@@ -384,6 +429,7 @@ def _easter(year: int) -> dt.date:
     return dt.date(year, month, day + 1)
 
 
+@lru_cache(maxsize=64)
 def holidays(year: int, country: str) -> frozenset[dt.date]:
     """Státní svátky v Rakousku ("AT") a Bavorsku ("DE")."""
     easter = _easter(year)
@@ -411,12 +457,13 @@ REGIONAL_TRAINS = frozenset({
 LONG_DISTANCE_TRAINS = frozenset({
     "ICE", "IC", "EC", "ECE", "RJ", "RJX", "NJ", "EN", "D", "TGV", "FLX", "WB", "ES", "EST",
     "IRX", "ICN", "EX", "RX", "SC", "LE", "RGJ", "NIGHTJET", "WESTBAHN"})
-_REGIONAL_COUNTRIES = ("DE", "AT")
+_REGIONAL_COUNTRIES = frozenset({"DE", "AT"})
 
 
 def train_category(line: str) -> str:
     """Druh vlaku z označení linky: „REX 7“ → „REX“, „ICE123“ → „ICE“."""
-    return (re.match(r"[A-Za-zäöüÄÖÜ]+", line or "") or [""])[0].upper()
+    m = _TRAIN_CAT_RE.match(line or "")
+    return m.group(0).upper() if m else ""
 
 
 def is_regional_leg(leg) -> bool:

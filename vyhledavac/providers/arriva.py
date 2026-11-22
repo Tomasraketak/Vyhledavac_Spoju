@@ -89,19 +89,27 @@ class ArrivaProvider(HttpProvider):
     referer = SHOP
     min_interval = 0.2
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._token_lock = asyncio.Lock()
+
     # ---- token a místa -------------------------------------------------------
     async def _token(self) -> str:
         cached = self.cache.get(self.name, "token")
         if cached:
             return str(cached)
-        response = await self.client.request("GET", TRIGGER, referer=SHOP, expect_json=False)
-        token = response.cookies.get("ArrticCookie")
-        if not token and self.client._client is not None:
-            token = self.client._client.cookies.get("ArrticCookie")
-        if not token:
-            raise TransientProviderError(self.name, "e-shop nevydal přístupový token")
-        self.cache.set(self.name, "token", token, ttl=TOKEN_TTL)
-        return token
+        async with self._token_lock:
+            cached = self.cache.get(self.name, "token")
+            if cached:
+                return str(cached)
+            response = await self.client.request("GET", TRIGGER, referer=SHOP, expect_json=False)
+            token = response.cookies.get("ArrticCookie")
+            if not token and self.client._client is not None:
+                token = self.client._client.cookies.get("ArrticCookie")
+            if not token:
+                raise TransientProviderError(self.name, "e-shop nevydal přístupový token")
+            self.cache.set(self.name, "token", token, ttl=TOKEN_TTL)
+            return token
 
     async def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {await self._token()}", "Origin": SHOP.rstrip("/")}

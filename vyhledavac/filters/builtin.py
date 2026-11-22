@@ -199,9 +199,12 @@ class Deduplicate(Filter):
             winner, loser = _cheaper(current, journey)
             # Podrobnější trasa vyhrává nad chudší, i když přišla od dražšího.
             if _stop_count(loser) > _stop_count(winner):
-                winner.legs = loser.legs
+                notes = list(winner.notes)
                 if loser.provider != winner.provider:
-                    winner.notes.append(f"trasa podle {loser.provider}")
+                    note = f"trasa podle {loser.provider}"
+                    if note not in notes:
+                        notes.append(note)
+                winner = replace(winner, legs=list(loser.legs), notes=notes)
             best[key] = winner
         # Spoj bez ceny, ke kterému hack našel jízdenky (tentýž odjezd i příjezd):
         # stačí ten s cenou – jinak se ve výpisu tentýž spoj ukáže dvakrát.
@@ -338,27 +341,33 @@ class PriceBackfill(Filter):
 
     def apply(self, journeys: list[Journey], query: SearchQuery) -> list[Journey]:
         tolerance = dt.timedelta(minutes=float(self.options.get("tolerance_minutes", 5)))
-        donors = [j for j in journeys if j.price is not None and not j.is_hack]
+        donors = [(j, _train_numbers(j)) for j in journeys if j.price is not None and not j.is_hack]
+        donors = [(j, nums) for j, nums in donors if nums]
         if not donors:
             return journeys
 
+        out: list[Journey] = []
         for journey in journeys:
             if journey.price is not None or journey.is_hack:
+                out.append(journey)
                 continue
             donor = _matching_donor(journey, donors, tolerance)
-            if donor is None:
+            if donor is None or donor.cheapest_fare is None:
+                out.append(journey)
                 continue
             fare = donor.cheapest_fare
-            if fare is None:
-                continue
-            journey.fares = [replace(fare, label=f"prodává {donor.provider}")]
-            journey.fare_status = FareStatus.PRICED
-            journey.notes.append(
-                f"💰 Cenu prodává {donor.provider} – jízdenku kupte tam."
-            )
-            if donor.deep_link and not journey.deep_link:
-                journey.deep_link = donor.deep_link
-        return journeys
+            note = f"💰 Cenu prodává {donor.provider} – jízdenku kupte tam."
+            notes = list(journey.notes)
+            if note not in notes:
+                notes.append(note)
+            out.append(replace(
+                journey,
+                fares=[replace(fare, label=f"prodává {donor.provider}")],
+                fare_status=FareStatus.PRICED,
+                notes=notes,
+                deep_link=journey.deep_link or donor.deep_link,
+            ))
+        return out
 
 
 @FILTERS.register()
@@ -374,9 +383,12 @@ class Limit(Filter):
 
 
 # ---- pomocné funkce ---------------------------------------------------------
+_TRAIN_NUM_RE = re.compile(r"\d{2,5}")
+
+
 def _real_transfers(journey: Journey) -> int:
     """Přestupy bez pěších přesunů (ty nejsou přestup na jiný spoj)."""
-    return max(0, len([leg for leg in journey.legs if leg.mode is not Mode.WALK]) - 1)
+    return max(0, sum(1 for leg in journey.legs if leg.mode is not Mode.WALK) - 1)
 
 
 def _stop_count(journey: Journey) -> int:
@@ -399,12 +411,13 @@ def _train_numbers(journey: Journey) -> set[str]:
     for leg in journey.legs:
         if leg.mode is Mode.WALK:
             continue
-        numbers |= set(re.findall(r"\d{2,5}", leg.line or ""))
+        if leg.line:
+            numbers.update(_TRAIN_NUM_RE.findall(leg.line))
     return numbers
 
 
 def _matching_donor(
-    journey: Journey, donors: list[Journey], tolerance: dt.timedelta
+    journey: Journey, donors: list[tuple[Journey, set[str]]], tolerance: dt.timedelta
 ) -> Journey | None:
     """Najde nejlevnějšího dopravce prodávajícího tentýž vlak."""
     wanted = _train_numbers(journey)
@@ -412,8 +425,8 @@ def _matching_donor(
         return None
 
     best: Journey | None = None
-    for donor in donors:
-        if not (wanted & _train_numbers(donor)):
+    for donor, donor_nums in donors:
+        if not (wanted & donor_nums):
             continue
         # Samotné číslo nestačí: "RJ" znamená u ÖBB Railjet a u RegioJetu
         # RegioJet, takže by se daly spárovat dva různé vlaky se stejným

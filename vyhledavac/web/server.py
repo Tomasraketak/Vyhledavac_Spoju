@@ -35,7 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .. import stations
+from .. import calendar_scan, stations
 from ..browser import playwright_available
 from ..engine import SearchEngine
 from ..hacks.ids_ticket import PASS_EXAMPLES, SYSTEMS as IDS_SYSTEMS
@@ -45,6 +45,7 @@ from ..models import (
     DEFAULT_TZ,
     DiscountCard,
     Journey,
+    Mode,
     Passenger,
     ProviderResult,
     SearchQuery,
@@ -68,6 +69,8 @@ DEFAULT_HACKS = ("split_ticket", "ids_ticket", "idos_complete", "obb_partial", "
                  "cd_europe_beyond", "regional_pass", "night_train")
 #: Po kolika sekundách bez jediného dotazu z prohlížeče se server ukončí.
 IDLE_SHUTDOWN = 120.0
+#: Strop velikosti JSON těla HTTP požadavku (ochrana proti poškozené hlavičce).
+MAX_BODY_BYTES = 1_048_576
 
 #: Filtry na straně serveru. Řazení, druhy dopravy, přestupy, dopravce,
 #: "jen se známou cenou" a "skrýt dražší i pomalejší" řeší prohlížeč sám –
@@ -81,6 +84,32 @@ SERVER_FILTERS: list[Any] = [
     "regional_only",                   # jen když hledání chce regionální vlaky
     ("limit", {"count": 120}),
 ]
+
+_CACHED_PIPELINES: tuple[FilterPipeline, FilterPipeline] | None = None
+
+
+def _pipelines() -> tuple[FilterPipeline, FilterPipeline]:
+    """Předpřipravené filtry pro průběžné snímky – nemusí se skládat při každé události."""
+    global _CACHED_PIPELINES
+    if _CACHED_PIPELINES is None:
+        load_plugins()
+        _CACHED_PIPELINES = (
+            FilterPipeline.from_spec(SERVER_FILTERS),
+            FilterPipeline.from_spec(["pareto"]),
+        )
+    return _CACHED_PIPELINES
+
+
+def _skip_detail(reason: str | None) -> str:
+    """Krátký popisek přeskočeného dopravce pro čip v panelu zdrojů."""
+    text = (reason or "").lower()
+    if "mhd" in text or "městě" in text:
+        return "jen MHD"
+    if "po česku" in text and "zahraničí" not in text:
+        return "jen Česko"
+    if "mimo oblast" in text:
+        return "mimo oblast"
+    return "jen zahraničí"
 
 
 # ---------------------------------------------------------------------------
@@ -136,60 +165,75 @@ class SearchSession:
 
     # ---- události z enginu (asyncio vlákno) ----------------------------------
     def on_progress(self, result: ProviderResult) -> None:
-        self.live[result.provider] = list(result.journeys)
-        priced = sum(1 for j in result.journeys if j.price is not None)
-        self.status[result.provider] = {
-            "name": result.provider, "status": "running", "count": len(result.journeys),
-            "detail": f"{len(result.journeys)} spojů · ceny {priced}/{len(result.journeys)}…",
-        }
-        self.publish()
+        with self.cond:
+            if self.done:
+                return
+            self.live[result.provider] = list(result.journeys)
+            priced = sum(1 for j in result.journeys if j.price is not None)
+            self.status[result.provider] = {
+                "name": result.provider, "status": "running", "count": len(result.journeys),
+                "detail": f"{len(result.journeys)} spojů · ceny {priced}/{len(result.journeys)}…",
+            }
+            self.publish()
 
     def on_partial(self, result: ProviderResult) -> None:
-        name = result.provider
-        entry: dict[str, Any] = {"name": name, "elapsed": round(result.elapsed, 1)}
-        if result.skipped:
-            entry.update(status="empty", detail="jen zahraničí")
-            self.live.pop(name, None)
-        elif result.not_served:
-            entry.update(status="empty", detail="nejezdí tam")
-            self._problem(name, result.error or "do této destinace nejezdí", "not_served")
-            self.live.pop(name, None)
-        elif result.error:
-            entry.update(status="blocked" if result.blocked else "error",
-                         detail="blokováno" if result.blocked else "chyba")
-            self._problem(name, explain(result.error, result.blocked),
-                          "blocked" if result.blocked else "error", raw=result.error)
-            self.live.pop(name, None)
-        else:
-            self.live[name] = list(result.journeys)
-            if result.journeys:
-                extra = " · s výhradou" if result.notes else ""
-                entry.update(status="ok", count=len(result.journeys),
-                             detail=f"{len(result.journeys)} spojů · {result.elapsed:.0f} s{extra}")
+        with self.cond:
+            if self.done:
+                return
+            name = result.provider
+            entry: dict[str, Any] = {"name": name, "elapsed": round(result.elapsed, 1)}
+            if result.skipped:
+                entry.update(status="empty", detail=_skip_detail(result.error))
+                self.live.pop(name, None)
+            elif result.not_served:
+                entry.update(status="empty", detail="nejezdí tam")
+                self._problem(name, result.error or "do této destinace nejezdí", "not_served")
+                self.live.pop(name, None)
+            elif result.error:
+                entry.update(status="blocked" if result.blocked else "error",
+                             detail="blokováno" if result.blocked else "chyba")
+                self._problem(name, explain(result.error, result.blocked),
+                              "blocked" if result.blocked else "error", raw=result.error)
+                self.live.pop(name, None)
             else:
-                entry.update(status="empty", detail="nic nenašel")
-            for note in result.notes:
-                self._problem(name, note, "soft")
-        self.status[name] = entry
-        self.publish()
+                self.live[name] = list(result.journeys)
+                if result.journeys:
+                    extra = " · s výhradou" if result.notes else ""
+                    entry.update(status="ok", count=len(result.journeys),
+                                 detail=f"{len(result.journeys)} spojů · {result.elapsed:.0f} s{extra}")
+                else:
+                    entry.update(status="empty", detail="nic nenašel")
+                for note in result.notes:
+                    self._problem(name, note, "soft")
+            self.status[name] = entry
+            self.publish()
 
     def on_done(self, result: SearchResult) -> None:
-        self.final = result
-        self.finish()
+        with self.cond:
+            if self.done:
+                return
+            self.final = result
+            self.finish()
 
     def on_fatal(self, message: str) -> None:
-        self._problem("Vyhledávání", message, "error")
-        self.finish()
+        with self.cond:
+            if self.done:
+                return
+            self._problem("Vyhledávání", message, "error")
+            self.finish()
 
     def finish(self, cancelled: bool = False) -> None:
-        for entry in self.status.values():
-            if entry["status"] == "running":
-                if cancelled:
-                    entry.update(status="off", detail="zrušeno")
-                elif entry.get("count"):
-                    entry.update(status="ok", detail=f"{entry['count']} spojů")
-        self.done = True
-        self.publish(cancelled=cancelled)
+        with self.cond:
+            if self.done:
+                return
+            for entry in self.status.values():
+                if entry["status"] == "running":
+                    if cancelled:
+                        entry.update(status="off", detail="zrušeno")
+                    elif entry.get("count"):
+                        entry.update(status="ok", detail=f"{entry['count']} spojů")
+            self.done = True
+            self.publish(cancelled=cancelled)
 
     def _problem(self, provider: str, message: str, kind: str, raw: str = "") -> None:
         if any(p["provider"] == provider and p["message"] == message for p in self.problems):
@@ -203,37 +247,114 @@ class SearchSession:
         if self.final is not None:
             return list(self.final.journeys)
         pool = [j for name in self.providers for j in self.live.get(name, [])]
+        if not pool:
+            return []
+        server_pipe, _ = _pipelines()
         pool = sort_journeys(pool, by="departure")
-        pool = FilterPipeline.from_spec(SERVER_FILTERS).apply(pool, self.query)
+        pool = server_pipe.apply(pool, self.query)
         return sort_journeys(pool, by="departure")
 
     def publish(self, cancelled: bool = False) -> None:
-        journeys = self.journeys()
-        keep = {id(j) for j in FilterPipeline.from_spec(["pareto"]).apply(list(journeys), self.query)}
-        seen: dict[str, int] = {}
-        items = []
-        for journey in journeys:
-            key = journey_key(journey)
-            seen[key] = seen.get(key, 0) + 1
-            if seen[key] > 1:
-                key = f"{key}#{seen[key]}"
-            items.append(journey_to_dict(journey, key, dominated=id(journey) not in keep))
-        query = self.query
-        payload = {
-            "id": self.id,
-            "done": self.done,
-            "cancelled": cancelled,
-            "query": {"from": query.origin, "to": query.destination,
-                      "departure": query.departure.isoformat(timespec="minutes"),
-                      "roundTrip": query.round_trip},
-            "providers": [self.status[name] for name in self.providers],
-            "problems": self.problems,
-            "journeys": items,
-            "trace": self.trace[-TRACE_LINES:],
-        }
-        text = json.dumps(payload, ensure_ascii=False)
         with self.cond:
+            journeys = self.journeys()
+            if journeys:
+                _, pareto_pipe = _pipelines()
+                keep = {id(j) for j in pareto_pipe.apply(list(journeys), self.query)}
+            else:
+                keep = set()
+            seen: dict[str, int] = {}
+            items = []
+            for journey in journeys:
+                key = journey_key(journey)
+                seen[key] = seen.get(key, 0) + 1
+                if seen[key] > 1:
+                    key = f"{key}#{seen[key]}"
+                items.append(journey_to_dict(journey, key, dominated=id(journey) not in keep))
+            query = self.query
+            payload = {
+                "id": self.id,
+                "done": self.done,
+                "cancelled": cancelled,
+                "query": {"from": query.origin, "to": query.destination,
+                          "departure": query.departure.isoformat(timespec="minutes"),
+                          "roundTrip": query.round_trip,
+                          "trainsOnly": query.trains_only},
+                "providers": [self.status[name] for name in self.providers],
+                "problems": list(self.problems),
+                "journeys": items,
+                "trace": self.trace[-TRACE_LINES:],
+            }
+            text = json.dumps(payload, ensure_ascii=False)
             self.snapshot = text
+            self.version += 1
+            self.cond.notify_all()
+
+
+# ---------------------------------------------------------------------------
+#  Cenový kalendář (±3 dny)
+# ---------------------------------------------------------------------------
+class CalendarSession:
+    """Stav jednoho skenu cenového kalendáře – posílá výsledky průběžně přes SSE."""
+
+    def __init__(self, query: SearchQuery, providers: list[str], days: int) -> None:
+        self.id = uuid.uuid4().hex[:12]
+        self.query = query
+        self.providers = providers
+        self.days_count = days
+        self.cond = threading.Condition()
+        self.version = 0
+        self.snapshot = "{}"
+        self.done = False
+        self.future = None
+        self.error: str | None = None
+        dates = calendar_scan.date_window(query.date, days)
+        self.days: dict[dt.date, calendar_scan.DayPrice] = {
+            d: calendar_scan.DayPrice(date=d, status="pending") for d in dates
+        }
+        self.publish()
+
+    def on_day(self, day_price: calendar_scan.DayPrice) -> None:
+        with self.cond:
+            if self.done:
+                return
+            self.days[day_price.date] = day_price
+            self.publish()
+
+    def on_fatal(self, message: str) -> None:
+        with self.cond:
+            if self.done:
+                return
+            self.error = message
+            self.finish()
+
+    def finish(self, cancelled: bool = False) -> None:
+        with self.cond:
+            if self.done:
+                return
+            for d, entry in self.days.items():
+                if entry.status in ("pending", "running"):
+                    entry.status = "empty" if cancelled else entry.status
+            self.done = True
+            self.publish(cancelled=cancelled)
+
+    def publish(self, cancelled: bool = False) -> None:
+        with self.cond:
+            ordered = [self.days[d].to_dict() for d in sorted(self.days)]
+            payload = {
+                "id": self.id,
+                "done": self.done,
+                "cancelled": cancelled,
+                "query": {
+                    "from": self.query.origin,
+                    "to": self.query.destination,
+                    "date": self.query.date.isoformat(),
+                    "trainsOnly": self.query.trains_only,
+                },
+                "providers": self.providers,
+                "days": ordered,
+                "error": self.error,
+            }
+            self.snapshot = json.dumps(payload, ensure_ascii=False)
             self.version += 1
             self.cond.notify_all()
 
@@ -246,6 +367,7 @@ class WebApp:
         load_plugins()
         self.runner = AsyncRunner()
         self.sessions: dict[str, SearchSession] = {}
+        self.calendars: dict[str, CalendarSession] = {}
         self.lock = threading.Lock()
         self.last_seen = time.monotonic()
         self.converter = get_converter()
@@ -308,8 +430,32 @@ class WebApp:
         session.future = self.runner.submit(self._run(session))
         return session
 
+    def start_calendar(self, body: dict[str, Any]) -> CalendarSession:
+        query = parse_query(body)
+        requested = [str(p) for p in body.get("providers") or []]
+        fast = calendar_scan.select_fast_providers(requested or PROVIDERS.names())
+        if not fast:
+            raise ValueError("Pro cenový kalendář zapněte alespoň jeden rychlý zdroj s cenami (např. RegioJet, FlixBus, ÖBB).")
+        try:
+            days = max(3, min(calendar_scan.MAX_DAYS, int(body.get("days") or calendar_scan.DEFAULT_DAYS)))
+        except (TypeError, ValueError):
+            days = calendar_scan.DEFAULT_DAYS
+        with self.lock:
+            for old in list(self.calendars.values()):
+                if not old.done:
+                    self.cancel(old)
+            session = CalendarSession(query, fast, days)
+            self.calendars[session.id] = session
+            for stale in list(self.calendars)[:-4]:
+                self.calendars.pop(stale, None)
+        session.future = self.runner.submit(self._run_calendar(session))
+        return session
+
     async def _run(self, session: SearchSession) -> None:
-        engine = SearchEngine.build(session.providers, filter_spec=SERVER_FILTERS,
+        filters = list(SERVER_FILTERS)
+        if session.query.trains_only:
+            filters.insert(1, ("only_modes", {"modes": [Mode.TRAIN.value]}))
+        engine = SearchEngine.build(session.providers, filter_spec=filters,
                                     hack_names=session.hacks)
         try:
             with collect_trace(session.trace):
@@ -323,7 +469,20 @@ class WebApp:
         finally:
             await engine.aclose()
 
-    def cancel(self, session: SearchSession) -> None:
+    async def _run_calendar(self, session: CalendarSession) -> None:
+        try:
+            await calendar_scan.scan_calendar(
+                session.query,
+                session.providers,
+                days=session.days_count,
+                on_day=session.on_day,
+            )
+            session.finish()
+        except Exception as exc:  # noqa: BLE001
+            log.exception("cenový kalendář selhal")
+            session.on_fatal(str(exc))
+
+    def cancel(self, session: Any) -> None:
         if session.done:
             return
         if session.future is not None:
@@ -363,7 +522,10 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
         raise ValueError("Vyplňte odkud a kam.")
     try:
         day = dt.date.fromisoformat(str(body.get("date") or dt.date.today().isoformat()))
-        hour, minute = (int(x) for x in str(body.get("time") or "00:00").split(":")[:2])
+        parts = str(body.get("time") or "00:00").split(":")
+        if len(parts) < 2:
+            raise ValueError("chybí minuty")
+        hour, minute = int(parts[0]), int(parts[1])
         when = dt.datetime(day.year, day.month, day.day, hour, minute, tzinfo=DEFAULT_TZ)
     except ValueError as exc:
         raise ValueError("Neplatné datum nebo čas.") from exc
@@ -374,8 +536,10 @@ def parse_query(body: dict[str, Any]) -> SearchQuery:
         raise ValueError(f"Nejvýš {MAX_PASSENGERS} cestujících.")
     passengers = tuple(_passenger(item if isinstance(item, dict) else {}) for item in raw)
     back = str(body.get("roundTrip") or "")
+    modes = frozenset({Mode.TRAIN}) if body.get("trainsOnly") else None
     return SearchQuery(origin=origin, destination=destination, departure=when,
-                       passengers=passengers, round_trip=back if back in ("day", "24h") else None,
+                       passengers=passengers, modes=modes,
+                       round_trip=back if back in ("day", "24h") else None,
                        regional_only=bool(body.get("regional")))
 
 
@@ -442,17 +606,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length") or 0)
-        if not length:
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return {}
+        if length <= 0 or length > MAX_BODY_BYTES:
             return {}
         try:
             data = json.loads(self.rfile.read(length).decode("utf-8"))
-        except ValueError:
+        except (ValueError, UnicodeDecodeError):
             return {}
         return data if isinstance(data, dict) else {}
 
     def _session(self, sid: str) -> SearchSession | None:
         return self.app.sessions.get(sid)
+
+    def _calendar(self, cid: str) -> CalendarSession | None:
+        return getattr(self.app, "calendars", {}).get(cid)
 
     # ---- GET -----------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802 - jméno dané http.server
@@ -483,6 +653,11 @@ class Handler(BaseHTTPRequestHandler):
             if session is None:
                 return self._json({"error": "neznámé hledání"}, 404)
             return self._stream(session)
+        if path.startswith("/api/calendar/") and path.endswith("/events"):
+            cal = self._calendar(path.split("/")[3])
+            if cal is None:
+                return self._json({"error": "neznámý cenový kalendář"}, 404)
+            return self._stream(cal)
         return self._static(path)
 
     def _static(self, path: str) -> None:
@@ -501,8 +676,8 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _stream(self, session: SearchSession) -> None:
-        """Server-Sent Events: po každé změně celý stav hledání."""
+    def _stream(self, session: Any) -> None:
+        """Server-Sent Events: po každé změně celý stav hledání / kalendáře."""
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -542,6 +717,17 @@ class Handler(BaseHTTPRequestHandler):
             session = self._session(path.split("/")[3])
             if session is not None:
                 self.app.cancel(session)
+            return self._json({"ok": True})
+        if path == "/api/calendar":
+            try:
+                cal = self.app.start_calendar(self._body())
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, 400)
+            return self._json({"id": cal.id})
+        if path.startswith("/api/calendar/") and path.endswith("/cancel"):
+            cal = self._calendar(path.split("/")[3])
+            if cal is not None:
+                self.app.cancel(cal)
             return self._json({"ok": True})
         if path == "/api/shutdown" and self.headers.get("X-Vyhledavac") == "restart":
             # Spouštěč nové verze žádá starý server, ať uvolní port.
@@ -597,11 +783,19 @@ def _stop_old(port: int) -> bool:
 def _watchdog(app: WebApp, server: ThreadingHTTPServer, idle: float) -> None:
     while True:
         time.sleep(5)
-        busy = any(not s.done for s in app.sessions.values())
+        with app.lock:
+            busy = (any(not s.done for s in app.sessions.values())
+                    or any(not c.done for c in getattr(app, "calendars", {}).values()))
         if not busy and time.monotonic() - app.last_seen > idle:
             log.info("prohlížeč se %.0f s neozval, končím", idle)
             server.shutdown()
             return
+
+
+def _warm_stations() -> None:
+    db = stations.database()
+    if db is not None:
+        db._prefix_index()
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -632,8 +826,8 @@ def main(argv: list[str] | None = None) -> None:
         if not _stop_old(args.port):
             log.warning("starý server se neukončil, nová verze poběží na jiném portu")
 
-    # Databázi zastávek načíst hned – první písmeno v našeptávači pak nečeká.
-    threading.Thread(target=stations.database, daemon=True).start()
+    # Databázi zastávek i index našeptávače načíst hned – první písmeno pak nečeká.
+    threading.Thread(target=_warm_stations, daemon=True).start()
     app = WebApp()
     server = make_server(app, args.port)
     app.shutdown = server.shutdown

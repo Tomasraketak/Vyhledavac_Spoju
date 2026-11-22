@@ -71,6 +71,23 @@ def _journey(journey: Journey, n: int | None = None) -> list[str]:
 def report(session: Any, version: dict[str, Any], ui: str = "", log_file: str = "") -> str:
     """Celý diagnostický text jednoho hledání (``session`` = ``SearchSession``)."""
     q: SearchQuery = session.query
+    cond = getattr(session, "cond", None)
+    if cond is not None:
+        with cond:
+            done = bool(session.done)
+            status = {k: dict(v) for k, v in session.status.items()}
+            problems = [dict(p) for p in session.problems]
+            live = {k: list(v) for k, v in session.live.items()}
+            trace_lines = list(session.trace)
+            journeys = session.journeys()
+    else:
+        done = bool(session.done)
+        status = {k: dict(v) for k, v in session.status.items()}
+        problems = [dict(p) for p in session.problems]
+        live = {k: list(v) for k, v in session.live.items()}
+        trace_lines = list(session.trace)
+        journeys = session.journeys()
+
     out: list[str] = [
         "VYHLEDÁVAČ SPOJŮ – diagnostika hledání",
         f"Vytvořeno: {dt.datetime.now():%d.%m.%Y %H:%M:%S}",
@@ -88,30 +105,29 @@ def report(session: Any, version: dict[str, Any], ui: str = "", log_file: str = 
         f"Zpáteční: {q.round_trip or 'ne'}",
         f"Dopravci: {', '.join(session.providers)}",
         f"Hacky: {', '.join(session.hacks) or '–'}",
-        f"Stav: {'hotovo' if session.done else 'ještě běží'}",
+        f"Stav: {'hotovo' if done else 'ještě běží'}",
     ]
     if ui:
         out += ["", "== Webové rozhraní ==", ui]
 
     out += ["", "== Dopravci =="]
     for name in session.providers:
-        st = session.status.get(name, {})
+        st = status.get(name, {})
         elapsed = f" ({st['elapsed']} s)" if st.get("elapsed") is not None else ""
         out.append(f"{name}: {st.get('status', '?')} – {st.get('detail', '')}{elapsed}")
 
-    if session.problems:
+    if problems:
         out += ["", "== Chyby a upozornění =="]
-        for p in session.problems:
+        for p in problems:
             out.append(f"[{p['kind']}] {p['provider']}: {p['message']}" + (f"\n    {p['raw']}" if p.get("raw") else ""))
 
-    journeys = session.journeys()
     out += ["", f"== Výsledné spoje ({len(journeys)}) =="]
     for n, journey in enumerate(journeys, 1):
         out += _journey(journey, n)
 
     out += ["", "== Co vrátili dopravci (před sloučením a filtry) =="]
     for name in session.providers:
-        found = session.live.get(name) or []
+        found = live.get(name) or []
         if not found:
             continue
         out.append(f"-- {name}: {len(found)} spojů")
@@ -121,9 +137,9 @@ def report(session: Any, version: dict[str, Any], ui: str = "", log_file: str = 
             out.append(f"   {_t(journey.departure)} {first.origin} → {_t(journey.arrival)} {last.destination} | "
                        f"{' + '.join(leg.line or leg.mode.value for leg in rides)} | {journey.price_label}")
 
-    if session.trace:
-        out += ["", f"== Jak program přemýšlel ({len(session.trace)} řádků) =="]
-        out += session.trace
+    if trace_lines:
+        out += ["", f"== Jak program přemýšlel ({len(trace_lines)} řádků) =="]
+        out += trace_lines
 
     if log_file:
         try:

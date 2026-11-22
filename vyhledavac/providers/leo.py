@@ -17,6 +17,7 @@ student 18–25 ``student``, senior 65+ ``senior``, jinak ``adult``.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 import re
@@ -79,6 +80,10 @@ class LeoExpressProvider(HttpProvider):
     referer = WEB
     min_interval = 0.3
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._stations_lock = asyncio.Lock()
+
     async def _graph(self, query: str, variables: dict[str, Any]) -> Any:
         data = await self.client.post_json(GRAPH, {"query": query, "variables": variables},
                                            referer=WEB, headers={"Origin": "https://www.leoexpress.com",
@@ -89,11 +94,15 @@ class LeoExpressProvider(HttpProvider):
         cached = self.cache.get(self.name, "stations")
         if cached:
             return cached
-        data = await self._graph(STATIONS_QUERY, {"locale": "cs"})
-        items = [s for s in data.get("stations") or [] if s.get("id")]
-        if items:
-            self.cache.set(self.name, "stations", items, ttl=STATIONS_TTL)
-        return items
+        async with self._stations_lock:
+            cached = self.cache.get(self.name, "stations")
+            if cached:
+                return cached
+            data = await self._graph(STATIONS_QUERY, {"locale": "cs"})
+            items = [s for s in data.get("stations") or [] if s.get("id")]
+            if items:
+                self.cache.set(self.name, "stations", items, ttl=STATIONS_TTL)
+            return items
 
     async def resolve(self, place: str) -> tuple[str, str]:
         """Kód místa pro hledání: město („PRAHA“) nebo ID stanice."""
@@ -103,7 +112,9 @@ class LeoExpressProvider(HttpProvider):
         return code
 
     async def search(self, query: SearchQuery) -> list[Journey]:
-        (from_code, _), (to_code, _) = await self.resolve(query.origin), await self.resolve(query.destination)
+        (from_code, _), (to_code, _) = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         when = query.departure.astimezone(DEFAULT_TZ)
         data = await self._graph(SEARCH_QUERY, {
             "from": from_code, "to": to_code, "date": when.strftime("%d.%m.%Y"),

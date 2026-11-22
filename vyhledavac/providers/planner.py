@@ -147,7 +147,11 @@ class PlannerProvider(HttpProvider):
     async def search(self, query: SearchQuery) -> list[Journey]:
         if not geo.leaves_czechia(query.origin, query.destination):
             raise StationNotFoundError(self.name, "cesty po Česku plánuje IDOS")
-        origins, destinations = await self.places(query.origin), await self.places(query.destination)
+        import asyncio
+
+        origins, destinations = await asyncio.gather(
+            self.places(query.origin), self.places(query.destination)
+        )
         tries = [(origins[0], destinations[0])]
         if (origins[-1], destinations[-1]) != tries[0]:
             tries.append((origins[-1], destinations[-1]))

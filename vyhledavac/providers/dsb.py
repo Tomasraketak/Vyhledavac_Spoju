@@ -192,7 +192,11 @@ class DsbProvider(HttpProvider):
     # ---- hledání ----------------------------------------------------------------------
     async def search(self, query: SearchQuery) -> list[Journey]:
         check_route(query.origin, query.destination)
-        origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         countries = {stop_country(origin), stop_country(destination)}
         if not countries & {"DK", "SE"} or not countries <= set(DSB_COUNTRIES):
             raise StationNotFoundError(self.name, "DSB – jen cesty z Dánska / Švédska a do sousedních zemí")

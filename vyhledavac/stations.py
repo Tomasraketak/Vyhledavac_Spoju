@@ -42,7 +42,7 @@ _FOREIGN_SCORE = 150_000
 CITY_DIVISOR = 10
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Place:
     name: str
     kind: str                     # c = obec, t = vlak, b = autobus
@@ -77,15 +77,46 @@ class Place:
 class StationDB:
     def __init__(self, places: list[Place]):
         self.places = places
-        self.exact: dict[str, list[Place]] = {}
-        #: první slovo klíče -> (slova klíče, místo); pro zkratky „n.“ = „nad“
-        self.by_first: dict[str, list[tuple[list[str], Place]]] = {}
+        exact: dict[str, list[Place]] = {}
+        #: první slovo víceslovného klíče -> (slova klíče, místo); pro zkratky „n.“ = „nad“
+        by_first: dict[str, list[tuple[list[str], Place]]] = {}
         for place in places:
             for key in place.keys:
-                self.exact.setdefault(key, []).append(place)
-                parts = key.split()
-                if parts:
-                    self.by_first.setdefault(parts[0], []).append((parts, place))
+                bucket = exact.get(key)
+                if bucket is None:
+                    exact[key] = [place]
+                else:
+                    bucket.append(place)
+                if " " in key:
+                    parts = key.split()
+                    first = parts[0]
+                    fb = by_first.get(first)
+                    if fb is None:
+                        by_first[first] = [(parts, place)]
+                    else:
+                        fb.append((parts, place))
+        self.exact = exact
+        self.by_first = by_first
+        #: Líně budovaný index 2znakových začátků slov pro rychlý našeptávač.
+        self._word2: dict[str, list[Place]] | None = None
+
+    def _prefix_index(self) -> dict[str, list[Place]]:
+        if self._word2 is None:
+            index: dict[str, list[Place]] = {}
+            for place in self.places:      # pořadí podle důležitosti se zachová
+                seen: set[str] = set()
+                for key in place.keys:
+                    for word in key.split():
+                        if len(word) >= 2:
+                            seen.add(word[:2])
+                for pref in seen:
+                    bucket = index.get(pref)
+                    if bucket is None:
+                        index[pref] = [place]
+                    else:
+                        bucket.append(place)
+            self._word2 = index
+        return self._word2
 
     # ---- načtení ---------------------------------------------------------------
     @classmethod
@@ -97,16 +128,18 @@ class StationDB:
         for row in data["places"]:
             name, kind, obec, okres_i, kraj_i, ids_i, zones, score = row[:8]
             alt = row[8] if len(row) > 8 else ""
-            keys = (normalize(name), *(a for a in alt.split("|") if a))
+            keys = (normalize(name), *(a for a in alt.split("|") if a)) if alt else (normalize(name),)
+            sys_raw = row[9] if len(row) > 9 else ""
             systems: dict[str, tuple[str, ...]] = {}
-            for part in (row[9] if len(row) > 9 else "").split(";"):
-                if ":" in part:
-                    sys_i, sys_zones = part.split(":", 1)
-                    systems[ids[int(sys_i)][0]] = tuple(z for z in sys_zones.split(",") if z)
+            if sys_raw:
+                for part in sys_raw.split(";"):
+                    if ":" in part:
+                        sys_i, sys_zones = part.split(":", 1)
+                        systems[ids[int(sys_i)][0]] = tuple(z for z in sys_zones.split(",") if z)
             places.append(Place(
                 name=name, kind=kind, obec=obec, okres=okresy[okres_i][0] if okres_i >= 0 else "",
                 kraj=kraje[kraj_i], ids=ids[ids_i][0], ids_name=ids[ids_i][1],
-                zones=tuple(z for z in zones.split(",") if z), score=score, keys=keys,
+                zones=tuple(z for z in zones.split(",") if z) if zones else (), score=score, keys=keys,
                 systems=systems,
             ))
         if cities:
@@ -146,15 +179,27 @@ class StationDB:
         if not q:
             return []
         words = q.split()
+        # Každé slovo dotazu delší než 1 znak musí začínat nějaké slovo klíče:
+        # vezmeme nejmenší vědro z indexu 2znakových začátků (pořadí důležitosti
+        # zůstane zachované). Jednopísmenné dotazy trefí limit hned na začátku.
+        long_words = [w for w in words if len(w) >= 2]
+        if long_words:
+            index = self._prefix_index()
+            buckets = [index.get(w[:2], ()) for w in long_words]
+            pool: list[Place] | tuple[Place, ...] = min(buckets, key=len)
+        else:
+            pool = self.places
+
+        w0 = words[0]
         starts: list[Place] = []
         others: list[Place] = []
-        for place in self.places:           # seřazeno podle důležitosti
+        for place in pool:                  # seřazeno podle důležitosti
             best = 2
             for key in place.keys:
                 if key.startswith(q):
                     best = 0
                     break
-                if best > 1 and words[0] in key and _all_words(words, key):
+                if best > 1 and w0 in key and _all_words(words, key):
                     best = 1
             if best == 0:
                 starts.append(place)
@@ -181,14 +226,14 @@ class StationDB:
                 if hits:
                     return max(hits, key=lambda p: (p.kind != "b", p.score))
         words = [_alias(w) for w in normalize(name).split()]
-        for variant in (words, _folded(words)):
+        folded = _folded(words)
+        variants = (words,) if folded == words else (words, folded)
+        for variant in variants:
             for end in range(len(variant), 0, -1):
                 hits = self.exact.get(" ".join(variant[:end])) or self._abbreviated(variant[:end])
                 if hits:
                     # stejné jméno: rozhodne důležitost (Vídeň u Žďáru < Vídeň v Rakousku)
                     return max(hits, key=lambda p: (p.kind != "b", p.score))
-            if _folded(words) == words:
-                break
         return None
 
     def _abbreviated(self, words: list[str]) -> list[Place]:
@@ -306,11 +351,13 @@ def suggest(query: str, limit: int = 10) -> list[dict[str, Any]]:
     return [p.to_dict() for p in db.suggest(query, limit)] if db else []
 
 
+@lru_cache(maxsize=4096)
 def place(name: str) -> Place | None:
     db = database()
     return db.info(name) if db and name else None
 
 
+@lru_cache(maxsize=4096)
 def rail_place(name: str) -> Place | None:
     """Jako ``place``, ale u shody jména dá přednost železniční stanici před obcí.
 
@@ -324,13 +371,14 @@ def rail_place(name: str) -> Place | None:
     return max(trains, key=lambda p: p.score) if trains else db.info(name)
 
 
+@lru_cache(maxsize=4096)
 def provider_name(name: str) -> str:
     """Jméno, kterému rozumí zahraniční dopravce: české exonymum zahraničního
     města přeloží na místní jméno („Lublaň“ → „Ljubljana“), jinak beze změny."""
     db = database()
     if db is None or not name:
         return name
-    best = db.info(name)
+    best = place(name)
     if best is None or best.kind != "c" or not best.code:
         return name
     if best.local and normalize(best.name) == normalize(name):
@@ -355,18 +403,25 @@ def far_from(name: str, lat: float | None, lon: float | None, km: float = NEAR_K
     return geo.km((found.lat, found.lon), (lat, lon)) > km
 
 
-def countries_for(name: str) -> set[str]:
-    """Všechny země, kde leží místo toho jména („Jesenice“: Česko i Slovinsko)."""
+@lru_cache(maxsize=4096)
+def _countries_for_cached(name: str) -> frozenset[str]:
     db = database()
     if db is None or not name:
-        return set()
+        return frozenset()
     words = [_alias(w) for w in normalize(name).split()]
-    for variant in (words, _folded(words)):
+    folded = _folded(words)
+    variants = (words,) if folded == words else (words, folded)
+    for variant in variants:
         for end in range(len(variant), 0, -1):
             hits = db.exact.get(" ".join(variant[:end])) or db._abbreviated(variant[:end])
             if hits:
-                return {p.code or "CZ" for p in hits}
-    return set()
+                return frozenset(p.code or "CZ" for p in hits)
+    return frozenset()
+
+
+def countries_for(name: str) -> set[str]:
+    """Všechny země, kde leží místo toho jména („Jesenice“: Česko i Slovinsko)."""
+    return set(_countries_for_cached(name))
 
 
 @lru_cache(maxsize=None)

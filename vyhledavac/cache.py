@@ -31,6 +31,10 @@ CREATE INDEX IF NOT EXISTS idx_entries_expires ON entries(expires);
 """
 
 
+#: Horní hranice paměťové vrstvy – u dlouhodobého webového serveru zabrání růstu RAM.
+_MAX_MEMORY_ITEMS = 8000
+
+
 class Cache:
     """Thread-safe key/value cache s TTL, oddělená do jmenných prostorů."""
 
@@ -48,11 +52,30 @@ class Cache:
             # check_same_thread=False + zámek: sdílíme jedno spojení mezi vlákny.
             self._conn = sqlite3.connect(self.path, check_same_thread=False, timeout=5.0)
             self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
             self._conn.executescript(_SCHEMA)
+            self._conn.execute(
+                "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= ?",
+                (time.time(),),
+            )
             self._conn.commit()
         except Exception:
             # Cache nikdy nesmí shodit vyhledávání – spadneme na paměťovou.
             self._conn = None
+
+    def _remember(self, ck: tuple[str, str], value: Any, expires: float | None) -> None:
+        if len(self._memory) >= _MAX_MEMORY_ITEMS and ck not in self._memory:
+            now = time.time()
+            expired = [k for k, (_, exp) in self._memory.items() if exp is not None and exp <= now]
+            for k in expired:
+                self._memory.pop(k, None)
+            if len(self._memory) >= _MAX_MEMORY_ITEMS:
+                # Vyhodíme nejstarší pětinu (dict drží pořadí vložení).
+                drop = list(self._memory)[: _MAX_MEMORY_ITEMS // 5]
+                for k in drop:
+                    self._memory.pop(k, None)
+        self._memory[ck] = (value, expires)
 
     # ---- veřejné API --------------------------------------------------------
     def get(self, namespace: str, key: str, default: Any = None) -> Any:
@@ -84,13 +107,13 @@ class Cache:
                 value = json.loads(raw)
             except ValueError:
                 return default
-            self._memory[ck] = (value, expires)
+            self._remember(ck, value, expires)
             return value
 
     def set(self, namespace: str, key: str, value: Any, ttl: float | None = None) -> None:
         expires = time.time() + ttl if ttl else None
         with self._lock:
-            self._memory[(namespace, key)] = (value, expires)
+            self._remember((namespace, key), value, expires)
             if self._conn is None:
                 return
             try:
@@ -118,13 +141,17 @@ class Cache:
 
     def purge_expired(self) -> int:
         """Smaže prošlé záznamy. Vrací počet smazaných řádků."""
-        if self._conn is None:
-            return 0
+        now = time.time()
         with self._lock:
+            mem_expired = [k for k, (_, exp) in self._memory.items() if exp is not None and exp <= now]
+            for k in mem_expired:
+                self._memory.pop(k, None)
+            if self._conn is None:
+                return len(mem_expired)
             try:
                 cur = self._conn.execute(
                     "DELETE FROM entries WHERE expires IS NOT NULL AND expires <= ?",
-                    (time.time(),),
+                    (now,),
                 )
                 self._conn.commit()
                 return cur.rowcount
@@ -132,14 +159,22 @@ class Cache:
                 return 0
 
     def iter_namespace(self, namespace: str) -> Iterator[tuple[str, Any]]:
+        now = time.time()
         if self._conn is None:
+            with self._lock:
+                items = [
+                    (key, value)
+                    for (ns, key), (value, expires) in self._memory.items()
+                    if ns == namespace and (expires is None or expires > now)
+                ]
+            yield from items
             return
         with self._lock:
             try:
                 rows = self._conn.execute(
                     "SELECT key, value FROM entries WHERE namespace=?"
                     " AND (expires IS NULL OR expires > ?)",
-                    (namespace, time.time()),
+                    (namespace, now),
                 ).fetchall()
             except Exception:
                 return

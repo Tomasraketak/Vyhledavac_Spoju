@@ -23,6 +23,7 @@ import logging
 from decimal import Decimal
 from typing import Any
 
+from .. import geo
 from ..errors import StationNotFoundError, TransientProviderError
 from ..models import DEFAULT_TZ, FareStatus, Journey, Leg, Mode, Passenger, SearchQuery, Stop
 from ..normalize import best_match, normalize
@@ -52,6 +53,10 @@ class PkpProvider(HttpProvider):
     #: Koleo vrací normální jízdné jednoho dospělého – skupinu dopočítá ``Provider.run``.
     price_basis = "adult"
 
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._stations_lock = asyncio.Lock()
+
     def passenger_weight(self, passenger: Passenger) -> Decimal:
         """Děti do 4 let jezdí v Polsku zdarma; jiné slevy (ustawowe) jen s polským
         průkazem – počítá se normální jízdné."""
@@ -60,14 +65,39 @@ class PkpProvider(HttpProvider):
     async def _get(self, url: str, params: dict[str, Any] | None = None) -> Any:
         return await self.client.get_json(url, params=params, referer=self.referer, headers=HEADERS)
 
+    async def _ensure_station_maps(self) -> tuple[dict[int, str], dict[int, str]]:
+        """Jedním stažením ``/stations`` naplní mapu zemí i jmen stanic."""
+        countries_c = self.cache.get(self.name, "countries")
+        names_c = self.cache.get(self.name, "names")
+        if countries_c and names_c:
+            return ({int(k): v for k, v in countries_c.items()},
+                    {int(k): v for k, v in names_c.items()})
+        async with self._stations_lock:
+            countries_c = self.cache.get(self.name, "countries")
+            names_c = self.cache.get(self.name, "names")
+            if countries_c and names_c:
+                return ({int(k): v for k, v in countries_c.items()},
+                        {int(k): v for k, v in names_c.items()})
+            data = await self._get(f"{API}/stations")
+            countries: dict[int, str] = {}
+            names: dict[int, str] = {}
+            for s in data or []:
+                sid = s.get("id")
+                if not sid:
+                    continue
+                iid = int(sid)
+                countries[iid] = str(s.get("country") or "")
+                names[iid] = str(s.get("name") or "")
+            self.cache.set(self.name, "countries", {str(k): v for k, v in countries.items()}, ttl=STATIONS_TTL)
+            self.cache.set(self.name, "names", {str(k): v for k, v in names.items()}, ttl=STATIONS_TTL)
+            return countries, names
+
     async def countries_by_id(self) -> dict[int, str]:
         cached = self.cache.get(self.name, "countries")
         if cached:
             return {int(k): v for k, v in cached.items()}
-        data = await self._get(f"{API}/stations")
-        out = {int(s["id"]): str(s.get("country") or "") for s in data or [] if s.get("id")}
-        self.cache.set(self.name, "countries", {str(k): v for k, v in out.items()}, ttl=STATIONS_TTL)
-        return out
+        countries, _ = await self._ensure_station_maps()
+        return countries
 
     async def resolve(self, place: str) -> dict[str, Any]:
         key = f"place:{normalize(place)}"
@@ -89,6 +119,9 @@ class PkpProvider(HttpProvider):
         return chosen
 
     async def search(self, query: SearchQuery) -> list[Journey]:
+        known = [geo.country_of(query.origin), geo.country_of(query.destination)]
+        if None not in known and "PL" not in known:
+            raise StationNotFoundError(self.name, "cesta nezačíná ani nekončí v Polsku")
         origin, destination = await asyncio.gather(self.resolve(query.origin),
                                                    self.resolve(query.destination))
         countries = await self.countries_by_id()
@@ -114,10 +147,8 @@ class PkpProvider(HttpProvider):
         cached = self.cache.get(self.name, "names")
         if cached:
             return {int(k): v for k, v in cached.items()}
-        data = await self._get(f"{API}/stations")
-        out = {int(s["id"]): str(s.get("name") or "") for s in data or [] if s.get("id")}
-        self.cache.set(self.name, "names", {str(k): v for k, v in out.items()}, ttl=STATIONS_TTL)
-        return out
+        _, names = await self._ensure_station_maps()
+        return names
 
     async def _brands(self) -> dict[int, str]:
         cached = self.cache.get(self.name, "brands")

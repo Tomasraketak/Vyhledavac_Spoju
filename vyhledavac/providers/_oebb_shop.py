@@ -352,10 +352,12 @@ def apply_offer(offer: ShopOffer, raw: dict[str, Any]) -> None:
 class OebbShop:
     """Ptá se shopu ÖBB na spoje a ceny. Transport lze vyměnit."""
 
-    def __init__(self, provider: str, transport: Transport, *, host: str = SHOP_HOST) -> None:
+    def __init__(self, provider: str, transport: Transport, *, host: str = SHOP_HOST,
+                 cache: Any = None) -> None:
         self.provider = provider
         self.transport = transport
         self.host = host
+        self.cache = cache
         self._auth: dict[str, str] | None = None
         self._auth_at = 0.0
         self._auth_lock = asyncio.Lock()
@@ -402,13 +404,19 @@ class OebbShop:
         raise real or last or TransientProviderError(self.provider, "shop nevydal anonymní token")
 
     async def station(self, name: str) -> dict[str, Any]:
+        from ..normalize import best_match, normalize
+
+        key = f"oebb-shop:station:{normalize(name)}"
+        if self.cache is not None:
+            cached = self.cache.get(self.provider, key)
+            if cached:
+                return cached
         data = await self.transport.get(f"{self.host}/api/hafas/v1/stations",
                                         [("name", name)], await self._headers())
         stations = [s for s in (data or []) if isinstance(s, dict) and s.get("number")]
         if not stations:
             raise StationNotFoundError(self.provider, f"shop ÖBB nezná stanici {name!r}")
         from .. import stations as places
-        from ..normalize import best_match
 
         stations = [s for s in stations if not places.far_from(name, *_shop_coords(s))]
         idx = best_match(name, [str(s.get("name") or s.get("meta") or "") for s in stations],
@@ -423,14 +431,17 @@ class OebbShop:
             if not stations or (asked and got and asked != got):
                 raise StationNotFoundError(self.provider, f"shop ÖBB nezná stanici {name!r}")
             idx = 0
-        return stations[idx]
+        chosen = stations[idx]
+        if self.cache is not None:
+            self.cache.set(self.provider, key, chosen, ttl=30 * 24 * 3600)
+        return chosen
 
     async def search(self, origin: str, destination: str, when: dt.datetime,
                      *, pages: int = 2, regional: bool = False) -> list[ShopOffer]:
         """Spoje od ``when`` i s cenami. ``pages`` × cca 5 spojů; ``regional`` = jen
         regionální vlaky (filtr „Nur Nahverkehr“ shopu)."""
         headers = await self._headers()
-        start, end = await self.station(origin), await self.station(destination)
+        start, end = await asyncio.gather(self.station(origin), self.station(destination))
         when_utc = when.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
         actions = await self.transport.post(

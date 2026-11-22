@@ -88,8 +88,12 @@ class CityTransitProvider(HttpProvider):
         if place is None or place.lat is None:
             raise StationNotFoundError(self.name, f"střed města {trip.city} neznám")
         center = (place.lat, place.lon)
-        origin = await self._place(query.origin, trip.origin_stop, center)
-        destination = await self._place(query.destination, trip.destination_stop, center)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self._place(query.origin, trip.origin_stop, center),
+            self._place(query.destination, trip.destination_stop, center),
+        )
         params = {"fromPlace": origin, "toPlace": destination, "numItineraries": ITINERARIES,
                   "time": query.departure.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
         if query.trains_only:

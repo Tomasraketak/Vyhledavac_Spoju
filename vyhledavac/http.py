@@ -204,6 +204,8 @@ class HttpClient:
 
     async def start(self) -> None:
         if self._client is None:
+            # httpx.AsyncClient je synchronní konstruktor – stačí zkontrolovat před i bez zámku,
+            # ale při souběžném startu se žádný starý klient nezahodí.
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout, connect=10.0),
                 follow_redirects=True,
@@ -211,7 +213,7 @@ class HttpClient:
                 proxy=self._proxy,
                 verify=self._verify,
                 # http2 vyžaduje balíček h2; bez něj httpx spadne při startu.
-                limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+                limits=httpx.Limits(max_connections=16, max_keepalive_connections=8),
             )
 
     async def close(self) -> None:
@@ -220,13 +222,16 @@ class HttpClient:
             self._client = None
 
     def rotate_identity(self) -> None:
-        """Vybere nový profil prohlížeče a zahodí cookies.
+        """Vybere jiný profil prohlížeče a zahodí cookies.
 
         Volá se po blokaci – pokračovat se stejným otiskem nemá smysl.
         """
-        self.profile = dict(random.choice(BROWSER_PROFILES))
+        others = [p for p in BROWSER_PROFILES if p["user_agent"] != self.profile.get("user_agent")]
+        self.profile = dict(random.choice(others or BROWSER_PROFILES))
         if self._client is not None:
             self._client.cookies.clear()
+            for stale in ("sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform"):
+                self._client.headers.pop(stale, None)
             self._client.headers.update(build_headers(self.profile, language=self.language))
 
     async def request(
@@ -245,18 +250,22 @@ class HttpClient:
         await self.start()
         assert self._client is not None
 
-        merged = dict(build_headers(self.profile, language=self.language,
-                                    json_api=expect_json, referer=referer))
-        if headers:
-            merged.update(headers)
-
         last_exc: Exception | None = None
+        slept_for_retry = False
         for attempt in range(self.retry.attempts):
-            if attempt:
+            if attempt and not slept_for_retry:
                 delay = self.retry.delay_for(attempt - 1)
                 log.debug("%s: pokus %d/%d za %.1fs", self.provider,
                           attempt + 1, self.retry.attempts, delay)
                 await asyncio.sleep(delay)
+            slept_for_retry = False
+
+            # Hlavičky skládáme pro každý pokus znovu, aby se po rotate_identity()
+            # opravdu použil nový profil (UA + sec-ch-ua).
+            merged = dict(build_headers(self.profile, language=self.language,
+                                        json_api=expect_json, referer=referer))
+            if headers:
+                merged.update(headers)
 
             await self.limiter.wait()
             try:
@@ -274,8 +283,11 @@ class HttpClient:
             if response.status_code == 429:
                 retry_after = _parse_retry_after(response.headers.get("Retry-After"))
                 last_exc = RateLimitedError(self.provider, "rate limit (429)", retry_after)
-                await asyncio.sleep(retry_after or self.retry.delay_for(attempt))
                 self.rotate_identity()
+                if attempt + 1 < self.retry.attempts:
+                    wait = min(retry_after, self.retry.max_delay) if retry_after is not None else self.retry.delay_for(attempt)
+                    await asyncio.sleep(wait)
+                    slept_for_retry = True
                 continue
 
             body_preview = ""
@@ -340,4 +352,14 @@ def _parse_retry_after(value: str | None) -> float | None:
     try:
         return max(0.0, float(value))
     except ValueError:
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        import datetime as dt
+
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=dt.timezone.utc)
+        return max(0.0, (when - dt.datetime.now(dt.timezone.utc)).total_seconds())
+    except (TypeError, ValueError):
         return None

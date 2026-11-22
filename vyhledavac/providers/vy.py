@@ -155,7 +155,11 @@ class VyProvider(HttpProvider):
         known = [geo.country_of(query.origin), geo.country_of(query.destination)]
         if any(c not in (None, *SCANDINAVIA) for c in known):
             raise StationNotFoundError(self.name, "Vy – jen cesty po Norsku, Švédsku a Dánsku")
-        origin, destination = await self.resolve(query.origin), await self.resolve(query.destination)
+        import asyncio
+
+        origin, destination = await asyncio.gather(
+            self.resolve(query.origin), self.resolve(query.destination)
+        )
         countries = [place_country(origin), place_country(destination)]
         if any(c not in (None, *SCANDINAVIA) for c in countries):
             raise StationNotFoundError(self.name, "Vy – jen cesty po Norsku, Švédsku a Dánsku")

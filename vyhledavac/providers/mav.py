@@ -71,6 +71,7 @@ class MavProvider(HttpProvider):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._session_id = str(uuid.uuid4())
+        self._stations_lock = asyncio.Lock()
 
     async def _post(self, endpoint: str, body: dict[str, Any]) -> Any:
         return await self.client.post_json(f"{API}/{endpoint}", body, referer=WEB, headers={
@@ -82,14 +83,18 @@ class MavProvider(HttpProvider):
         cached = self.cache.get(self.name, "stations")
         if cached:
             return cached
-        data = await self._post("GetStationList", {})
-        items = [[str(s.get("name") or ""), str(s.get("code") or ""), str(s.get("coutryIso") or ""),
-                  "1" if s.get("isAlias") else "0"]
-                 for s in (data or {}).get("stations") or []
-                 if s.get("canUseForOfferRequest") and s.get("code") and s.get("name")]
-        if items:
-            self.cache.set(self.name, "stations", items, ttl=STATIONS_TTL)
-        return items
+        async with self._stations_lock:
+            cached = self.cache.get(self.name, "stations")
+            if cached:
+                return cached
+            data = await self._post("GetStationList", {})
+            items = [[str(s.get("name") or ""), str(s.get("code") or ""), str(s.get("coutryIso") or ""),
+                      "1" if s.get("isAlias") else "0"]
+                     for s in (data or {}).get("stations") or []
+                     if s.get("canUseForOfferRequest") and s.get("code") and s.get("name")]
+            if items:
+                self.cache.set(self.name, "stations", items, ttl=STATIONS_TTL)
+            return items
 
     async def customer_types(self, kind: str) -> list[dict[str, Any]]:
         cached = self.cache.get(self.name, f"types:{kind}")
