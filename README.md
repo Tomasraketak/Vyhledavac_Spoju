@@ -9,6 +9,23 @@ Verze 2 je přepsaná od základu: původní scrapery se nahradily tam, kde to
 
 ---
 
+## Ikonka na plochu (Windows) – aktualizace a spuštění jedním klikem
+
+Otevřete **Příkazový řádek (`cmd`)** (třeba přes *Win + R* → `cmd`) a vložte tento jeden příkaz:
+
+```bat
+powershell -NoProfile -Command "$u = Join-Path $env:USERPROFILE 'Vyhledavac_Spoju'; if (Test-Path 'Vyhledavac.bat') { $d = (Get-Location).Path } elseif (Test-Path 'Vyhledavac_Spoju\Vyhledavac.bat') { $d = (Resolve-Path 'Vyhledavac_Spoju').Path } elseif (Test-Path (Join-Path $u 'Vyhledavac.bat')) { $d = $u } else { git clone https://github.com/Tomasraketak/Vyhledavac_Spoju.git $u; $d = $u }; if ((Test-Path (Join-Path $d '.git')) -and (Get-Command git -ErrorAction SilentlyContinue)) { git -C $d pull --ff-only --quiet }; if (-not (Test-Path (Join-Path $d 'Vyhledavac.bat'))) { throw 'Vyhledavac.bat nenalezen.' }; $s = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'Vyhledavac spoju.lnk')); $s.TargetPath = Join-Path $d 'Vyhledavac.bat'; $s.WorkingDirectory = $d; $s.Description = 'Aktualizuje a spusti Vyhledavac spoju'; $ico = Join-Path $d 'Vyhledavac.ico'; if (Test-Path $ico) { $s.IconLocation = $ico } else { $s.IconLocation = 'shell32.dll,13' }; $s.Save(); Write-Host ('Zastupce vytvoren: ' + $s.FullName)"
+```
+
+Co příkaz udělá:
+- najde vaši složku `Vyhledavac_Spoju` (v aktuální složce nebo v `%USERPROFILE%\Vyhledavac_Spoju`; pokud ji ještě nemáte, rovnou ji stáhne přes `git clone`),
+- vytvoří na ploše zástupce **Vyhledavac spoju** s ikonkou `Vyhledavac.ico` (funguje i při ploše přesměrované do OneDrive),
+- **každé rozkliknutí ikonky** spustí `Vyhledavac.bat`, který nejdřív stáhne nejnovější verzi z GitHubu (`git pull`), případně doinstaluje nové knihovny, ukončí starší běžící verzi a rovnou otevře vyhledávač v prohlížeči.
+
+*(Pokud máte projekt uložený v jiné vlastní složce, spusťte příkaz přímo z ní. K chodu stačí [Python 3.10+](https://www.python.org/downloads/) a pro automatické aktualizace [Git](https://git-scm.com/downloads/win).)*
+
+---
+
 ## Proč přepis
 
 Původní kód padal na třech věcech:
