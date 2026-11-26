@@ -1,18 +1,20 @@
 @echo off
 rem ---------------------------------------------------------------------------
-rem  Vyhledávač spojů - spuštění na Windows jedním kliknutím.
+rem  Vyhledavac spoju - spusteni na Windows jednim kliknutim.
 rem
-rem  Bez parametrů otevře webové rozhraní v prohlížeči. S parametry se chová jako
-rem  příkazová řádka, takže jde volat i takto:
+rem  Bez parametru otevre webove rozhrani v prohlizeci. S parametry se chova jako
+rem  prikazova radka, takze jde volat i takto:
 rem      Vyhledavac.bat Praha Brno --sort price
 rem
-rem  Při prvním spuštění si vedle sebe vytvoří virtuální prostředí (.venv)
-rem  a doinstaluje knihovny. Při každém spuštění stáhne nejnovější verzi
-rem  (git pull) a doinstaluje, co přibylo – aktualizace = dvojklik.
+rem  Pri prvnim spusteni si vedle sebe vytvori virtualni prostredi (.venv)
+rem  a doinstaluje knihovny. Pri kazdem spusteni stahne nejnovejsi verzi
+rem  (git pull) a doinstaluje, co pribylo - aktualizace = dvojklik.
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions
-chcp 65001 >nul 2>&1
-title Vyhledávač spojů
+rem Soubor je schvalne jen v ASCII (bez hacku a carek) a bez "chcp 65001":
+rem cmd.exe v kodove strance UTF-8 spatne cte bloky v zavorkach s ceskymi
+rem znaky a okno se zavre driv, nez se program spusti.
+title Vyhledavac spoju
 cd /d "%~dp0"
 
 set "PYTHONUTF8=1"
@@ -21,14 +23,14 @@ set "PYW=%VENV%\Scripts\pythonw.exe"
 set "PYC=%VENV%\Scripts\python.exe"
 set "HOTOVO=%VENV%\.instalace-hotova"
 
-rem Aktualizace: je-li program stažený přes git, stáhne nejnovější verzi.
-rem Bez internetu nebo s vlastními úpravami se nic nestane - spustí se,
+rem Aktualizace: je-li program stazeny pres git, stahne nejnovejsi verzi.
+rem Bez internetu nebo s vlastnimi upravami se nic nestane - spusti se,
 rem co je na disku. Vypnout: soubor "bez-aktualizace.txt" vedle tohoto souboru.
-rem Celý blok se načte najednou: git pull může přepsat i tento soubor, proto
-rem se pak spustí jeho nová verze (už bez další aktualizace) a tahle skončí.
+rem Cely blok se nacte najednou: git pull muze prepsat i tento soubor, proto
+rem se pak spusti jeho nova verze (uz bez dalsi aktualizace) a tahle skonci.
 if not defined VYH_AKTUALIZOVANO if exist "%~dp0.git" if not exist "%~dp0bez-aktualizace.txt" (
     where git >nul 2>&1 && (
-        echo   Hledám novou verzi programu ...
+        echo   Hledam novou verzi programu ...
         git -C "%~dp0." pull --ff-only --quiet >nul 2>&1
         set "VYH_AKTUALIZOVANO=1"
         call "%~f0" %*
@@ -38,7 +40,7 @@ if not defined VYH_AKTUALIZOVANO if exist "%~dp0.git" if not exist "%~dp0bez-akt
 
 if not exist "%PYC%" goto instalace
 if not exist "%HOTOVO%" goto instalace
-rem Po aktualizaci (git pull) se mohl změnit seznam knihoven - doinstalovat.
+rem Po aktualizaci (git pull) se mohl zmenit seznam knihoven - doinstalovat.
 fc /b "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul 2>&1
 if errorlevel 1 goto aktualizace
 goto spustit
@@ -46,7 +48,7 @@ goto spustit
 
 :aktualizace
 echo.
-echo   Program byl aktualizován - doinstalovávám nové knihovny ...
+echo   Program byl aktualizovan - doinstalovavam nove knihovny ...
 "%PYC%" -m pip install --quiet --disable-pip-version-check --upgrade -r "%~dp0requirements.txt"
 if errorlevel 1 goto chybaPip
 copy /y "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul
@@ -54,22 +56,22 @@ goto spustit
 
 
 rem ===========================================================================
-rem  První spuštění
+rem  Prvni spusteni
 rem ===========================================================================
 :instalace
 echo.
-echo   Vyhledávač spojů
+echo   Vyhledavac spoju
 echo   ================
 echo.
-echo   První spuštění - připravuji prostředí. Chvíli to potrvá,
-echo   příště se program spustí rovnou.
+echo   Prvni spusteni - pripravuji prostredi. Chvili to potrva,
+echo   priste se program spusti rovnou.
 echo.
 
 call :najdiPython
 if errorlevel 1 goto chybiPython
 
 if not exist "%PYC%" (
-    echo   [1/3] Vytvářím virtuální prostředí ve složce .venv ...
+    echo   [1/3] Vytvarim virtualni prostredi ve slozce .venv ...
     %PYTHON% -m venv "%VENV%"
     if errorlevel 1 goto chybaVenv
 )
@@ -81,20 +83,20 @@ echo   [2/3] Instaluji knihovny ...
 if errorlevel 1 goto chybaPip
 
 echo.
-echo   [3/3] Volitelně: prohlížeč pro České dráhy.
+echo   [3/3] Volitelne: prohlizec pro Ceske drahy.
 echo.
-echo         Bez něj funguje RegioJet, FlixBus a ÖBB - tedy většina spojů
-echo         i cen. České dráhy a ZSSK potřebují navíc Playwright
-echo         s Chromiem, což je zhruba 150 MB ke stažení.
+echo         Bez nej funguje RegioJet, FlixBus a OBB - tedy vetsina spoju
+echo         i cen. Ceske drahy a ZSSK potrebuji navic Playwright
+echo         s Chromiem, coz je zhruba 150 MB ke stazeni.
 echo.
 set "CDANO="
-set /p "CDANO=        Stáhnout teď? [a/N]: "
+set /p "CDANO=        Stahnout ted? [a/N]: "
 if /i "%CDANO%"=="a" goto playwright
 if /i "%CDANO%"=="ano" goto playwright
 if /i "%CDANO%"=="y" goto playwright
 echo.
-echo         Přeskakuji. Doinstalovat jde kdykoli: smažte soubor
-echo         .venv\.instalace-hotova a spusťte tento program znovu.
+echo         Preskakuji. Doinstalovat jde kdykoli: smazte soubor
+echo         .venv\.instalace-hotova a spustte tento program znovu.
 goto hotovo
 
 :playwright
@@ -109,23 +111,23 @@ if errorlevel 1 goto chybaPlaywright
 echo hotovo> "%HOTOVO%"
 copy /y "%~dp0requirements.txt" "%VENV%\requirements.txt" >nul
 echo.
-echo   Hotovo, spouštím.
+echo   Hotovo, spoustim.
 
 
 rem ===========================================================================
-rem  Spuštění
+rem  Spusteni
 rem ===========================================================================
 :spustit
 if not "%~1"=="" goto radka
 
-rem Rychlá kontrola, než okno konzole zmizí - ať případná chyba není němá.
+rem Rychla kontrola, nez okno konzole zmizi - at pripadna chyba neni nema.
 "%PYC%" -c "import httpx, vyhledavac.web.server" 2>&1
 if errorlevel 1 goto chybaImport
 
-rem Webové rozhraní: malý server na tomto počítači + okno prohlížeče.
-rem pythonw.exe neotevírá černé okno konzole; server se sám ukončí,
-rem když stránku v prohlížeči zavřete. Původní okno (tkinter) dál jde
-rem spustit příkazem:  .venv\Scripts\python.exe -m vyhledavac.gui
+rem Webove rozhrani: maly server na tomto pocitaci + okno prohlizece.
+rem pythonw.exe neotevira cerne okno konzole; server se sam ukonci,
+rem kdyz stranku v prohlizeci zavrete. Puvodni okno (tkinter) dal jde
+rem spustit prikazem:  .venv\Scripts\python.exe -m vyhledavac.gui
 if exist "%PYW%" (
     start "" "%PYW%" -m vyhledavac.web
     goto konec
@@ -144,17 +146,17 @@ goto konec
 
 
 rem ===========================================================================
-rem  Hledání Pythonu - nastaví PYTHON, nebo vrátí errorlevel 1
+rem  Hledani Pythonu - nastavi PYTHON, nebo vrati errorlevel 1
 rem ===========================================================================
 :najdiPython
-rem Windows Python Launcher je nejspolehlivější, umí si sám vybrat verzi.
+rem Windows Python Launcher je nejspolehlivejsi, umi si sam vybrat verzi.
 py -3 -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON=py -3"
     exit /b 0
 )
-rem Bez launcheru zkusíme python z PATH. Pozor: zástupce z Microsoft Store
-rem se tváří jako python.exe, ale jen otevře obchod - proto ten testovací import.
+rem Bez launcheru zkusime python z PATH. Pozor: zastupce z Microsoft Store
+rem se tvari jako python.exe, ale jen otevre obchod - proto ten testovaci import.
 python -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
 if not errorlevel 1 (
     set "PYTHON=python"
@@ -164,62 +166,62 @@ exit /b 1
 
 
 rem ===========================================================================
-rem  Chybové hlášky - ať uživatel ví, co s tím
+rem  Chybove hlasky - at uzivatel vi, co s tim
 rem ===========================================================================
 :chybiPython
 echo.
-echo   CHYBA: Nenašel jsem Python 3.10 nebo novější.
+echo   CHYBA: Nenasel jsem Python 3.10 nebo novejsi.
 echo.
-echo   Stáhněte ho z https://www.python.org/downloads/
-echo   Při instalaci zaškrtněte "Add python.exe to PATH" a nechte
-echo   zapnuté "tcl/tk and IDLE" - hodí se pro starší okenní rozhraní.
+echo   Stahnete ho z https://www.python.org/downloads/
+echo   Pri instalaci zaskrtnete "Add python.exe to PATH" a nechte
+echo   zapnute "tcl/tk and IDLE" - hodi se pro starsi okenni rozhrani.
 echo.
-echo   Verzi z Microsoft Store program nepoužije, ta bývá osekaná.
+echo   Verzi z Microsoft Store program nepouzije, ta byva osekana.
 echo.
 pause
 exit /b 1
 
 :chybaVenv
 echo.
-echo   CHYBA: Nepodařilo se vytvořit virtuální prostředí ve složce .venv
+echo   CHYBA: Nepodarilo se vytvorit virtualni prostredi ve slozce .venv
 echo.
-echo   Zkuste složku .venv smazat a spustit znovu. Leží-li program
-echo   v OneDrive nebo v Program Files, přesuňte ho jinam - tam
-echo   Windows často zakazují zápis.
+echo   Zkuste slozku .venv smazat a spustit znovu. Lezi-li program
+echo   v OneDrive nebo v Program Files, presunte ho jinam - tam
+echo   Windows casto zakazuji zapis.
 echo.
 pause
 exit /b 1
 
 :chybaPip
 echo.
-echo   CHYBA: Nepodařilo se stáhnout knihovny.
-echo   Nejčastěji za to může chybějící připojení k internetu
-echo   nebo firemní proxy. Zkuste to prosím znovu.
+echo   CHYBA: Nepodarilo se stahnout knihovny.
+echo   Nejcasteji za to muze chybejici pripojeni k internetu
+echo   nebo firemni proxy. Zkuste to prosim znovu.
 echo.
 pause
 exit /b 1
 
 :chybaPlaywright
 echo.
-echo   Playwright se nenainstaloval. Nevadí - program poběží dál,
-echo   jen bez Českých drah a ZSSK. Zkusit znovu jde tak, že smažete
-echo   soubor .venv\.instalace-hotova a spustíte tento program.
+echo   Playwright se nenainstaloval. Nevadi - program pobezi dal,
+echo   jen bez Ceskych drah a ZSSK. Zkusit znovu jde tak, ze smazete
+echo   soubor .venv\.instalace-hotova a spustite tento program.
 echo.
 pause
 goto hotovo
 
 :chybaImport
 echo.
-echo   CHYBA: Prostředí je poškozené - výpis je výše.
-echo   Smažte celou složku .venv a spusťte tento program znovu,
-echo   nainstaluje se načisto.
+echo   CHYBA: Prostredi je poskozene - vypis je vyse.
+echo   Smazte celou slozku .venv a spustte tento program znovu,
+echo   nainstaluje se nacisto.
 echo.
 pause
 exit /b 1
 
 :chybaBehu
 echo.
-echo   Program skončil chybou. Výpis je výše.
+echo   Program skoncil chybou. Vypis je vyse.
 echo.
 pause
 exit /b 1
