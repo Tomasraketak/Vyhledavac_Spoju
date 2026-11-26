@@ -142,3 +142,37 @@ def test_price_backfill_needs_a_train_number():
                           dep=at(8), arr=at(12))
     out = FilterPipeline.from_spec(["price_backfill"]).apply([schedule, seller], q())
     assert next(j for j in out if j.provider == "ÖBB").price is None
+
+
+def test_pareto_same_price_same_arrival_keeps_latest_departure():
+    """Dvě cesty za 124 Kč s příjezdem 12:07 – dřívější odjezd nemá smysl."""
+    early = make_journey(dep=at(7, 18), arr=at(12, 7), price=124)
+    late = make_journey(dep=at(9, 18), arr=at(12, 7), price=124)
+    out = FilterPipeline.from_spec(["pareto"]).apply([early, late], q())
+    assert out == [late]
+
+
+def test_pareto_identical_journeys_survive_together():
+    a = make_journey(provider="A", dep=at(8), arr=at(10), price=200)
+    b = make_journey(provider="B", dep=at(8), arr=at(10), price=200)
+    assert len(FilterPipeline.from_spec(["pareto"]).apply([a, b], q())) == 2
+
+
+def test_pareto_slightly_earlier_faster_cheaper_wins():
+    """06:18–08:02 za 206 Kč vytlačí 06:36–09:10 za 754 Kč."""
+    good = make_journey(dep=at(6, 18), arr=at(8, 2), price=206)
+    bad = make_journey(dep=at(6, 36), arr=at(9, 10), price=754)
+    out = FilterPipeline.from_spec(["pareto"]).apply([good, bad], q())
+    assert out == [good]
+
+
+def test_pareto_much_earlier_departure_does_not_dominate():
+    morning = make_journey(dep=at(6), arr=at(8), price=200)
+    evening = make_journey(dep=at(18), arr=at(21), price=500)
+    assert len(FilterPipeline.from_spec(["pareto"]).apply([morning, evening], q())) == 2
+
+
+def test_pareto_earlier_train_does_not_hide_bus():
+    train = make_journey(dep=at(8, 18), arr=at(10, 2), price=200)
+    bus = make_journey(dep=at(8, 30), arr=at(10, 40), price=300, mode=Mode.BUS)
+    assert len(FilterPipeline.from_spec(["pareto"]).apply([train, bus], q())) == 2

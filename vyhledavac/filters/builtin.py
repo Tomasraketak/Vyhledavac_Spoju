@@ -297,15 +297,23 @@ def _same_coach(a: tuple[str, Leg], b: tuple[str, Leg]) -> bool:
 class ParetoOptimal(Filter):
     """Nechá jen nedominované spoje.
 
-    Spoj je dominovaný, když existuje jiný, který je zároveň stejně nebo
-    více pohodlný v čase (odjíždí nejdřív stejně a přijíždí nejpozději
-    stejně) a zároveň je levnější. Takový spoj nemá smysl nabízet.
+    Spoj je dominovaný, když existuje jiný, který
+
+    * odjíždí stejně nebo později, přijíždí stejně nebo dřív a není dražší
+      (při stejné ceně musí být v něčem lepší a nemít víc přestupů) – např.
+      ze dvou cest za 124 Kč s příjezdem 12:07 zbude ta s pozdějším odjezdem;
+    * nebo odjíždí nejvýš ``earlier_minutes`` (výchozí 30) minut dřív,
+      přesto přijede dřív, jede kratší dobu, je levnější, nemá víc přestupů
+      a nepoužívá jiný druh dopravy (vlak nevytlačí autobus a naopak).
+
+    Takový spoj nemá smysl nabízet.
     """
 
     name = "pareto"
     label = "Jen rozumné kompromisy"
 
     def apply(self, journeys: list[Journey], query: SearchQuery) -> list[Journey]:
+        window = dt.timedelta(minutes=float(self.options.get("earlier_minutes", 30)))
         priced = [j for j in journeys if j.price is not None]
         others = [j for j in journeys if j.price is None]
         keep: list[Journey] = []
@@ -314,7 +322,7 @@ class ParetoOptimal(Filter):
             for other in priced:
                 if other is candidate:
                     continue
-                if _dominates(other, candidate):
+                if _dominates(other, candidate, window):
                     dominated = True
                     break
             if not dominated:
@@ -440,8 +448,31 @@ def _matching_donor(
     return best
 
 
-def _dominates(better: Journey, worse: Journey) -> bool:
-    price_better = better.price is not None and worse.price is not None and better.price < worse.price
-    if not price_better:
+def _modes(journey: Journey) -> set[Mode]:
+    return {leg.mode for leg in journey.legs if leg.mode is not Mode.WALK}
+
+
+def _dominates(better: Journey, worse: Journey,
+               earlier_window: dt.timedelta = dt.timedelta(minutes=30)) -> bool:
+    pb, pw = better.price, worse.price
+    if pb is None or pw is None or pb > pw:
         return False
-    return better.departure >= worse.departure and better.arrival <= worse.arrival
+    cheaper = pb < pw
+    # Odjíždí stejně nebo později a přijede stejně nebo dřív.
+    if better.departure >= worse.departure and better.arrival <= worse.arrival:
+        if cheaper:
+            return True
+        # Stejná cena: musí být v něčem lepší a nesmí mít víc přestupů.
+        # Úplně shodné spoje (od dvou dopravců) se tu navzájem nevyřadí.
+        if _real_transfers(better) > _real_transfers(worse):
+            return False
+        return (better.departure > worse.departure or better.arrival < worse.arrival
+                or _real_transfers(better) < _real_transfers(worse))
+    # Odjede o chvilku dřív, ale přijede dřív, jede kratší dobu a je levnější
+    # (06:18–08:02 za 206 Kč proti 06:36–09:10 za 754 Kč).
+    return (cheaper
+            and worse.departure - earlier_window <= better.departure < worse.departure
+            and better.arrival < worse.arrival
+            and better.duration < worse.duration
+            and _real_transfers(better) <= _real_transfers(worse)
+            and _modes(better) <= _modes(worse))
